@@ -11,6 +11,7 @@ export type Database = {
           role: 'admin' | 'cashier' | 'waiter'
           restaurant_id: string
           created_at: string
+          updated_at: string
         }
         Insert: {
           id: string
@@ -19,6 +20,7 @@ export type Database = {
           role: 'admin' | 'cashier' | 'waiter'
           restaurant_id: string
           created_at?: string
+          updated_at?: string
         }
         Update: {
           id?: string
@@ -27,6 +29,7 @@ export type Database = {
           role?: 'admin' | 'cashier' | 'waiter'
           restaurant_id?: string
           created_at?: string
+          updated_at?: string
         }
         Relationships: [
           {
@@ -47,6 +50,7 @@ export type Database = {
           logo_url: string | null
           config: Json | null
           created_at: string
+          updated_at: string
         }
         Insert: {
           id?: string
@@ -56,6 +60,7 @@ export type Database = {
           logo_url?: string | null
           config?: Json | null
           created_at?: string
+          updated_at?: string
         }
         Update: {
           id?: string
@@ -65,6 +70,7 @@ export type Database = {
           logo_url?: string | null
           config?: Json | null
           created_at?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -73,28 +79,34 @@ export type Database = {
           id: string
           name: string
           description: string | null
-          color: string | null
+          color: string
           sort_order: number
           restaurant_id: string
           is_active: boolean
+          created_at: string
+          updated_at: string
         }
         Insert: {
           id?: string
           name: string
           description?: string | null
-          color?: string | null
+          color?: string
           sort_order?: number
           restaurant_id: string
           is_active?: boolean
+          created_at?: string
+          updated_at?: string
         }
         Update: {
           id?: string
           name?: string
           description?: string | null
-          color?: string | null
+          color?: string
           sort_order?: number
           restaurant_id?: string
           is_active?: boolean
+          created_at?: string
+          updated_at?: string
         }
         Relationships: [
           {
@@ -118,6 +130,8 @@ export type Database = {
           is_active: boolean
           stock_tracking: boolean
           stock_qty: number | null
+          created_at: string
+          updated_at: string
         }
         Insert: {
           id?: string
@@ -130,6 +144,8 @@ export type Database = {
           is_active?: boolean
           stock_tracking?: boolean
           stock_qty?: number | null
+          created_at?: string
+          updated_at?: string
         }
         Update: {
           id?: string
@@ -142,6 +158,8 @@ export type Database = {
           is_active?: boolean
           stock_tracking?: boolean
           stock_qty?: number | null
+          created_at?: string
+          updated_at?: string
         }
         Relationships: [
           {
@@ -168,6 +186,8 @@ export type Database = {
           zone: string | null
           status: 'free' | 'occupied' | 'reserved'
           restaurant_id: string
+          created_at: string
+          updated_at: string
         }
         Insert: {
           id?: string
@@ -176,6 +196,8 @@ export type Database = {
           zone?: string | null
           status?: 'free' | 'occupied' | 'reserved'
           restaurant_id: string
+          created_at?: string
+          updated_at?: string
         }
         Update: {
           id?: string
@@ -184,6 +206,8 @@ export type Database = {
           zone?: string | null
           status?: 'free' | 'occupied' | 'reserved'
           restaurant_id?: string
+          created_at?: string
+          updated_at?: string
         }
         Relationships: [
           {
@@ -208,6 +232,7 @@ export type Database = {
           restaurant_id: string
           created_by: string
           created_at: string
+          updated_at: string
         }
         Insert: {
           id?: string
@@ -221,6 +246,7 @@ export type Database = {
           restaurant_id: string
           created_by: string
           created_at?: string
+          updated_at?: string
         }
         Update: {
           id?: string
@@ -234,6 +260,7 @@ export type Database = {
           restaurant_id?: string
           created_by?: string
           created_at?: string
+          updated_at?: string
         }
         Relationships: [
           {
@@ -268,6 +295,8 @@ export type Database = {
           unit_price: number
           modifiers: Json | null
           notes: string | null
+          created_at: string
+          updated_at: string
         }
         Insert: {
           id?: string
@@ -277,6 +306,8 @@ export type Database = {
           unit_price: number
           modifiers?: Json | null
           notes?: string | null
+          created_at?: string
+          updated_at?: string
         }
         Update: {
           id?: string
@@ -286,6 +317,8 @@ export type Database = {
           unit_price?: number
           modifiers?: Json | null
           notes?: string | null
+          created_at?: string
+          updated_at?: string
         }
         Relationships: [
           {
@@ -356,6 +389,7 @@ export type Database = {
           closing_amount: number | null
           opened_at: string
           closed_at: string | null
+          updated_at: string
         }
         Insert: {
           id?: string
@@ -366,6 +400,7 @@ export type Database = {
           closing_amount?: number | null
           opened_at?: string
           closed_at?: string | null
+          updated_at?: string
         }
         Update: {
           id?: string
@@ -376,6 +411,7 @@ export type Database = {
           closing_amount?: number | null
           opened_at?: string
           closed_at?: string | null
+          updated_at?: string
         }
         Relationships: [
           {
