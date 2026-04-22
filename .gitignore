@@ -1,0 +1,40 @@
+# Entornos
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Node
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+.next/
+out/
+build/
+.expo/
+
+# Supabase local
+supabase/.branches/
+supabase/.temp/
+
+# Editores
+.vscode/settings.json
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Testing
+coverage/
+
+# Misc
+*.pem
+.vercel
