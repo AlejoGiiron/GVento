@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import {
   Search, X, Plus, Trash, Minus, ShoppingCart, Percent,
-  ChevronRight, Utensils, Store, Bike, StickyNote,
+  ChevronRight, Store, Bike, StickyNote,
   Banknote, CreditCard, Smartphone, Check, Building2, Printer,
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
@@ -375,8 +375,8 @@ function CartPanel({
   const clear = useCartStore((s) => s.clear)
   const setDiscount = useCartStore((s) => s.setDiscount)
 
+  // dine_in requires a table_id (DB constraint) — that's handled by TablesPage, not the POS quick-sale flow
   const orderTypes = [
-    { id: 'dine_in' as OrderType,  label: 'Mesa',       icon: <Utensils size={17} />, bg: '#ecfdf5', fg: '#065f46' },
     { id: 'takeaway' as OrderType, label: 'Para llevar', icon: <Store size={17} />,    bg: '#fef3c7', fg: '#854d0e' },
     { id: 'delivery' as OrderType, label: 'Delivery',    icon: <Bike size={17} />,     bg: '#dbeafe', fg: '#1e40af' },
   ]
@@ -678,8 +678,9 @@ function CheckoutModal({
       setOrderId(order.id)
       setStep('success')
     } catch (err) {
-      toast.error('Error al procesar el cobro')
-      console.error(err)
+      const msg = err instanceof Error ? err.message : (err as { message?: string })?.message ?? 'Error desconocido'
+      toast.error(`Error al procesar el cobro: ${msg}`)
+      console.error('[checkout]', err)
     } finally {
       setSubmitting(false)
     }
@@ -925,7 +926,7 @@ function CheckoutModal({
 export function POSPage() {
   const [activeCat, setActiveCat] = useState<string | null>(null)
   const [query, setQuery] = useState('')
-  const [orderType, setOrderType] = useState<OrderType>('dine_in')
+  const [orderType, setOrderType] = useState<OrderType>('takeaway')
   const [checkout, setCheckout] = useState(false)
   const [notingIdx, setNotingIdx] = useState<number | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
