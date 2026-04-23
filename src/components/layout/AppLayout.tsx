@@ -7,10 +7,12 @@ import {
   BarChart3,
   Settings,
   LogOut,
-  Clock,
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { useAuth } from '@/hooks/useAuth'
+import { useCashShift } from '@/hooks/useCashShift'
+import { ShiftBanner } from '@/components/shift/ShiftBanner'
+import { OpenShiftModal } from '@/components/shift/OpenShiftModal'
 import type { Enums } from '@/types/database.types'
 
 type UserRole = Enums<'user_role'>
@@ -39,6 +41,7 @@ const ROLE_LABELS: Record<UserRole, string> = {
 
 export function AppLayout() {
   const { profile, signOut } = useAuth()
+  const { isOpen, isLoadingShift } = useCashShift()
   const navigate = useNavigate()
 
   const handleSignOut = async () => {
@@ -101,11 +104,10 @@ export function AppLayout() {
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
         <header className="h-14 flex-shrink-0 flex items-center justify-between px-6 border-b border-slate-200 bg-white">
-          <div className="flex items-center gap-1.5 text-sm text-slate-500">
-            <Clock className="w-4 h-4" />
-            <span>Turno activo</span>
-          </div>
+          {/* Left: shift banner */}
+          <ShiftBanner />
 
+          {/* Right: user info */}
           <div className="flex items-center gap-3">
             <div className="text-right">
               <p className="text-sm font-medium text-slate-900 leading-tight">
@@ -126,6 +128,9 @@ export function AppLayout() {
           <Outlet />
         </main>
       </div>
+
+      {/* Blocking open-shift modal — shown when no active shift */}
+      {!isLoadingShift && !isOpen && <OpenShiftModal />}
     </div>
   )
 }

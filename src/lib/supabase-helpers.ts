@@ -160,6 +160,18 @@ export const getShiftPayments = (restaurantId: string, from: string, to: string)
     .gte('created_at', from)
     .lte('created_at', to)
 
+// --- Cash Movements ---
+
+export const getCashMovements = (shiftId: string) =>
+  supabase
+    .from('cash_movements')
+    .select('*')
+    .eq('shift_id', shiftId)
+    .order('created_at', { ascending: false })
+
+export const createCashMovement = (movement: TablesInsert<'cash_movements'>) =>
+  supabase.from('cash_movements').insert(movement).select().single()
+
 // --- Cash Shifts ---
 
 export const getOpenShift = (restaurantId: string) =>

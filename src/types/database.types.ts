@@ -437,6 +437,61 @@ export type Database = {
           },
         ]
       }
+      cash_movements: {
+        Row: {
+          id: string
+          shift_id: string
+          restaurant_id: string
+          type: 'in' | 'out'
+          amount: number
+          reason: string
+          created_by: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          shift_id: string
+          restaurant_id: string
+          type: 'in' | 'out'
+          amount: number
+          reason: string
+          created_by: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          shift_id?: string
+          restaurant_id?: string
+          type?: 'in' | 'out'
+          amount?: number
+          reason?: string
+          created_by?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'cash_movements_shift_id_fkey'
+            columns: ['shift_id']
+            isOneToOne: false
+            referencedRelation: 'cash_shifts'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'cash_movements_restaurant_id_fkey'
+            columns: ['restaurant_id']
+            isOneToOne: false
+            referencedRelation: 'restaurants'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'cash_movements_created_by_fkey'
+            columns: ['created_by']
+            isOneToOne: false
+            referencedRelation: 'profiles'
+            referencedColumns: ['id']
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -450,6 +505,7 @@ export type Database = {
       order_type: 'dine_in' | 'takeaway' | 'delivery'
       order_status: 'pending' | 'preparing' | 'ready' | 'delivered' | 'cancelled'
       payment_method: 'cash' | 'card' | 'transfer' | 'nequi'
+      movement_type: 'in' | 'out'
     }
     CompositeTypes: {
       [_ in never]: never

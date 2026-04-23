@@ -60,9 +60,19 @@ Resumen rápido:
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: 03b - POSPage V2 (mejoras UX + ticket imprimible)
+Última fase completada: 04 - Módulo turno de caja (ShiftBanner + modales)
 En progreso: —
-Siguiente: 04 - Gestión de mesas / TablesPage
+Siguiente: 05 - Gestión de mesas / TablesPage
+
+### Detalle fase 04 - Turno de caja (sesión 2026-04-23)
+- useCashShift: currentShift, isOpen, salesSummary, movements, openShift, closeShift, addMovement
+- OpenShiftModal: modal bloqueante (z-100), sin cierre, monto de apertura obligatorio
+- ShiftBanner: píldora verde en header con hora de inicio, ventas totales, botones Movimientos y Cerrar turno
+- CloseShiftModal: resumen por método de pago, cálculo efectivo esperado, monto declarado, diferencia verde/rojo
+- MovementsModal: selector Ingreso/Egreso, monto + motivo, listado del turno con colores por tipo
+- AppLayout: ShiftBanner en header + bloqueo total si no hay turno abierto
+- cash_movements tabla: SQL migration + tipos TS + helpers Supabase (getCashMovements, createCashMovement)
+- movement_type enum: 'in' | 'out' agregado a database.types.ts y Enums
 
 ### Detalle fase 03b - POSPage V2 mejoras UX (sesión 2026-04-23)
 - cartStore: DiscountType ('pct'|'fixed'), campo discountType, setDiscount acepta tipo
