@@ -47,6 +47,13 @@ Ver .env.example para la lista completa.
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: —
-En progreso: 01 - Setup y arquitectura
-Siguiente: 02 - Core POS
+Última fase completada: 02 - Autenticación y layout base
+En progreso: —
+Siguiente: 03 - Core POS
+
+### Detalle fase 02 (commit 3424412)
+- AuthProvider + useAuth hook (user, profile, isLoading, signOut)
+- ProtectedRoute con control de acceso por rol (admin / cashier / waiter)
+- AppLayout: sidebar slate-900, header con nombre y rol del usuario
+- Router completo en App.tsx con rutas públicas y protegidas
+- Páginas placeholder: Ventas, Mesas, Cocina, Productos, Reportes, Config
