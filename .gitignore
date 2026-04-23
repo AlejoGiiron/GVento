@@ -39,6 +39,9 @@ pnpm-debug.log*
 # Testing
 coverage/
 
+# Claude Design handoff — vive en Claude Design, no en el repo
+design_handoff_*/
+
 # Misc
 *.pem
 .vercel
