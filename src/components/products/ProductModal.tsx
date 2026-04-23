@@ -1,0 +1,337 @@
+import { useState, useEffect, useId } from 'react'
+import { X, ChevronRight } from 'lucide-react'
+import { ImageUpload } from './ImageUpload'
+import { useProductMutations } from '@/hooks/useProductMutations'
+import { useAuth } from '@/hooks/useAuth'
+import type { ProductWithCategory } from '@/stores/cartStore'
+import type { Tables } from '@/types/database.types'
+
+const formatCOP = (n: number) =>
+  new Intl.NumberFormat('es-CO', {
+    style: 'currency', currency: 'COP',
+    minimumFractionDigits: 0, maximumFractionDigits: 0,
+  }).format(n)
+
+interface ProductModalProps {
+  product: ProductWithCategory | null
+  categories: Tables<'categories'>[]
+  onClose: () => void
+}
+
+export function ProductModal({ product, categories, onClose }: ProductModalProps) {
+  const { profile } = useAuth()
+  const { saveProduct, uploadImage, removeImage } = useProductMutations()
+  const formId = useId()
+
+  const isEditing = !!product
+
+  const [name, setName] = useState(product?.name ?? '')
+  const [description, setDescription] = useState(product?.description ?? '')
+  const [price, setPrice] = useState(product ? String(product.price) : '')
+  const [categoryId, setCategoryId] = useState(product?.category_id ?? categories[0]?.id ?? '')
+  const [imageUrl, setImageUrl] = useState<string | null>(product?.image_url ?? null)
+  const [pendingFile, setPendingFile] = useState<File | null>(null)
+  const [stockTracking, setStockTracking] = useState(product?.stock_tracking ?? false)
+  const [stockQty, setStockQty] = useState(product?.stock_qty != null ? String(product.stock_qty) : '')
+  const [saving, setSaving] = useState(false)
+
+  const priceNum = parseInt(price.replace(/\D/g, ''), 10) || 0
+  const isValid = name.trim().length > 0 && priceNum > 0 && categoryId
+
+  // Close on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  const handleImageChange = (file: File | null) => {
+    if (!file) return
+    setPendingFile(file)
+    setImageUrl(URL.createObjectURL(file))
+  }
+
+  const handleImageRemove = async () => {
+    if (product?.image_url) await removeImage(product.image_url)
+    setImageUrl(null)
+    setPendingFile(null)
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!profile || !isValid) return
+    setSaving(true)
+
+    try {
+      // Determine final image URL
+      let finalImageUrl = imageUrl
+
+      // If there's a pending file, we need a product ID to store the image
+      // We upsert first (with existing or temp URL), then upload with the real ID
+      const productId = product?.id ?? crypto.randomUUID()
+
+      if (pendingFile) {
+        const uploaded = await uploadImage(productId, pendingFile)
+        finalImageUrl = uploaded // null if upload failed — product saves without image
+      } else if (imageUrl === null && product?.image_url) {
+        // Image was removed
+        finalImageUrl = null
+      }
+
+      await saveProduct.mutateAsync({
+        id: productId,
+        name: name.trim(),
+        description: description.trim() || null,
+        price: priceNum,
+        category_id: categoryId,
+        restaurant_id: profile.restaurant_id,
+        image_url: finalImageUrl,
+        is_active: true,
+        stock_tracking: stockTracking,
+        stock_qty: stockTracking ? (parseInt(stockQty) || 0) : null,
+      })
+
+      onClose()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const fieldLabel: React.CSSProperties = {
+    display: 'block', fontSize: 12, fontWeight: 600,
+    color: '#334155', marginBottom: 6,
+  }
+
+  const inputStyle: React.CSSProperties = {
+    width: '100%', padding: '10px 13px',
+    border: '1.5px solid #e5e7eb', borderRadius: 9,
+    fontSize: 14, color: '#0f172a', outline: 'none',
+    fontFamily: 'Inter, system-ui, sans-serif',
+    boxSizing: 'border-box', background: '#fff',
+    transition: 'border .12s',
+  }
+
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0,
+        background: 'rgba(15,23,42,.55)',
+        display: 'grid', placeItems: 'center',
+        zIndex: 50, fontFamily: 'Inter, system-ui, sans-serif',
+        padding: '20px',
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <div style={{
+        background: '#fff', borderRadius: 14,
+        width: 560, maxWidth: '100%',
+        boxShadow: '0 25px 50px -12px rgba(0,0,0,.25)',
+        overflow: 'hidden',
+        maxHeight: '90vh',
+        display: 'flex', flexDirection: 'column',
+      }}>
+        {/* Header */}
+        <div style={{
+          padding: '18px 22px', borderBottom: '1px solid #f1f5f9',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          flexShrink: 0,
+        }}>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: '#10b981', textTransform: 'uppercase', letterSpacing: 1 }}>
+              {isEditing ? 'Editar producto' : 'Nuevo producto'}
+            </div>
+            <div style={{ fontSize: 17, fontWeight: 700, color: '#0f172a', letterSpacing: -0.3, marginTop: 1 }}>
+              {isEditing ? product.name : 'Agregar al catálogo'}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              width: 32, height: 32, borderRadius: 8,
+              background: '#f1f5f9', border: 'none',
+              cursor: 'pointer', color: '#64748b',
+              display: 'grid', placeItems: 'center', flexShrink: 0,
+            }}
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Scrollable body */}
+        <form id={formId} onSubmit={handleSubmit} style={{ overflow: 'auto', flex: 1 }}>
+          <div style={{ padding: '22px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+
+            {/* Image */}
+            <div>
+              <label style={fieldLabel}>Imagen</label>
+              <ImageUpload
+                value={imageUrl}
+                onChange={handleImageChange}
+                onRemove={handleImageRemove}
+              />
+            </div>
+
+            {/* Name */}
+            <div>
+              <label style={fieldLabel}>Nombre <span style={{ color: '#dc2626' }}>*</span></label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Ej: Mojito Cubano"
+                required
+                style={inputStyle}
+                onFocus={(e) => { e.currentTarget.style.borderColor = '#10b981' }}
+                onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb' }}
+              />
+            </div>
+
+            {/* Description */}
+            <div>
+              <label style={fieldLabel}>Descripción <span style={{ color: '#94a3b8', fontWeight: 400 }}>(opcional)</span></label>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Ron, menta, limón, soda..."
+                rows={2}
+                style={{ ...inputStyle, resize: 'none', lineHeight: 1.5 }}
+                onFocus={(e) => { e.currentTarget.style.borderColor = '#10b981' }}
+                onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb' }}
+              />
+            </div>
+
+            {/* Price + Category — 2 col */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+              <div>
+                <label style={fieldLabel}>Precio (COP) <span style={{ color: '#dc2626' }}>*</span></label>
+                <div style={{ position: 'relative' }}>
+                  <span style={{
+                    position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)',
+                    fontSize: 13, color: '#94a3b8', fontFamily: 'monospace', pointerEvents: 'none',
+                  }}>$</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={price ? formatCOP(priceNum).replace('$', '').trim() : ''}
+                    onChange={(e) => setPrice(e.target.value.replace(/\D/g, ''))}
+                    placeholder="0"
+                    required
+                    style={{ ...inputStyle, paddingLeft: 24 }}
+                    onFocus={(e) => { e.currentTarget.style.borderColor = '#10b981' }}
+                    onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb' }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label style={fieldLabel}>Categoría <span style={{ color: '#dc2626' }}>*</span></label>
+                <select
+                  value={categoryId}
+                  onChange={(e) => setCategoryId(e.target.value)}
+                  required
+                  style={{ ...inputStyle, cursor: 'pointer', appearance: 'none' }}
+                  onFocus={(e) => { e.currentTarget.style.borderColor = '#10b981' }}
+                  onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb' }}
+                >
+                  <option value="" disabled>Seleccionar...</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Stock tracking */}
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#334155' }}>Control de inventario</div>
+                  <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 2 }}>
+                    Lleva la cuenta de unidades disponibles
+                  </div>
+                </div>
+                {/* Toggle */}
+                <button
+                  type="button"
+                  onClick={() => setStockTracking(!stockTracking)}
+                  style={{
+                    width: 44, height: 24, borderRadius: 12,
+                    background: stockTracking ? '#10b981' : '#e2e8f0',
+                    border: 'none', cursor: 'pointer',
+                    position: 'relative', transition: 'background .15s', flexShrink: 0,
+                  }}
+                  aria-checked={stockTracking}
+                  role="switch"
+                >
+                  <span style={{
+                    position: 'absolute', top: 2,
+                    left: stockTracking ? 22 : 2,
+                    width: 20, height: 20, borderRadius: '50%',
+                    background: '#fff',
+                    boxShadow: '0 1px 3px rgba(0,0,0,.2)',
+                    transition: 'left .15s',
+                  }} />
+                </button>
+              </div>
+
+              {stockTracking && (
+                <div style={{ marginTop: 12 }}>
+                  <label style={fieldLabel}>Unidades disponibles</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={stockQty}
+                    onChange={(e) => setStockQty(e.target.value)}
+                    placeholder="0"
+                    style={{ ...inputStyle, width: 140 }}
+                    onFocus={(e) => { e.currentTarget.style.borderColor = '#10b981' }}
+                    onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb' }}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        </form>
+
+        {/* Footer */}
+        <div style={{
+          padding: '16px 22px',
+          borderTop: '1px solid #f1f5f9',
+          display: 'flex', gap: 10, flexShrink: 0,
+          background: 'linear-gradient(180deg, #f8fafc 0%, #fff 100%)',
+        }}>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              flex: 1, padding: '11px 16px',
+              border: '1.5px solid #e5e7eb', background: '#fff',
+              borderRadius: 9, cursor: 'pointer',
+              fontSize: 13.5, fontWeight: 600, color: '#334155',
+            }}
+          >
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            form={formId}
+            disabled={!isValid || saving}
+            style={{
+              flex: 2, padding: '11px 16px',
+              border: 'none',
+              background: !isValid || saving ? '#cbd5e1' : '#10b981',
+              borderRadius: 9,
+              cursor: !isValid || saving ? 'not-allowed' : 'pointer',
+              fontSize: 13.5, fontWeight: 700, color: '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              boxShadow: !isValid || saving ? 'none' : '0 6px 16px rgba(16,185,129,.35)',
+              transition: 'all .15s',
+            }}
+          >
+            {saving ? 'Guardando...' : <><span>{isEditing ? 'Guardar cambios' : 'Crear producto'}</span><ChevronRight size={15} /></>}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}

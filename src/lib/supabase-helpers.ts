@@ -33,6 +33,13 @@ export const upsertCategory = (category: TablesInsert<'categories'>) =>
 export const deleteCategory = (categoryId: string) =>
   supabase.from('categories').update({ is_active: false }).eq('id', categoryId)
 
+export const countActiveProductsByCategory = (categoryId: string) =>
+  supabase
+    .from('products')
+    .select('*', { count: 'exact', head: true })
+    .eq('category_id', categoryId)
+    .eq('is_active', true)
+
 // --- Products ---
 
 export const getProducts = (restaurantId: string, categoryId?: string) => {
@@ -49,8 +56,39 @@ export const getProducts = (restaurantId: string, categoryId?: string) => {
 export const upsertProduct = (product: TablesInsert<'products'>) =>
   supabase.from('products').upsert(product).select().single()
 
+export const archiveProduct = (productId: string) =>
+  supabase.from('products').update({ is_active: false }).eq('id', productId)
+
 export const updateProductStock = (productId: string, stock_qty: number) =>
   supabase.from('products').update({ stock_qty }).eq('id', productId)
+
+// --- Storage: product-images ---
+
+export const uploadProductImage = async (
+  restaurantId: string,
+  productId: string,
+  file: File,
+): Promise<string | null> => {
+  const ext = file.name.split('.').pop() ?? 'jpg'
+  const path = `${restaurantId}/${productId}.${ext}`
+  const { data, error } = await supabase.storage
+    .from('product-images')
+    .upload(path, file, { upsert: true })
+  if (error || !data) return null
+  const { data: { publicUrl } } = supabase.storage
+    .from('product-images')
+    .getPublicUrl(data.path)
+  return publicUrl
+}
+
+export const deleteProductImage = async (imageUrl: string): Promise<void> => {
+  try {
+    const path = new URL(imageUrl).pathname.split('/product-images/')[1]
+    if (path) await supabase.storage.from('product-images').remove([path])
+  } catch {
+    // URL inválida — ignorar silenciosamente
+  }
+}
 
 // --- Tables ---
 
@@ -121,6 +159,18 @@ export const getShiftPayments = (restaurantId: string, from: string, to: string)
     .eq('restaurant_id', restaurantId)
     .gte('created_at', from)
     .lte('created_at', to)
+
+// --- Cash Movements ---
+
+export const getCashMovements = (shiftId: string) =>
+  supabase
+    .from('cash_movements')
+    .select('*')
+    .eq('shift_id', shiftId)
+    .order('created_at', { ascending: false })
+
+export const createCashMovement = (movement: TablesInsert<'cash_movements'>) =>
+  supabase.from('cash_movements').insert(movement).select().single()
 
 // --- Cash Shifts ---
 
