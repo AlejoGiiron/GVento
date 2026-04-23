@@ -11,20 +11,24 @@ export interface CartItem {
   note: string
 }
 
+export type DiscountType = 'pct' | 'fixed'
+
 interface CartStore {
   items: CartItem[]
   discount: number
+  discountType: DiscountType
   add: (product: ProductWithCategory) => void
   setQty: (index: number, qty: number) => void
   setNote: (index: number, note: string) => void
   remove: (index: number) => void
   clear: () => void
-  setDiscount: (discount: number) => void
+  setDiscount: (discount: number, type?: DiscountType) => void
 }
 
 export const useCartStore = create<CartStore>((set) => ({
   items: [],
   discount: 0,
+  discountType: 'pct',
 
   add: (product) =>
     set((state) => {
@@ -55,7 +59,11 @@ export const useCartStore = create<CartStore>((set) => ({
   remove: (index) =>
     set((state) => ({ items: state.items.filter((_, i) => i !== index) })),
 
-  clear: () => set({ items: [], discount: 0 }),
+  clear: () => set({ items: [], discount: 0, discountType: 'pct' }),
 
-  setDiscount: (discount) => set({ discount }),
+  setDiscount: (discount, type) =>
+    set((state) => ({
+      discount,
+      discountType: type ?? state.discountType,
+    })),
 }))
