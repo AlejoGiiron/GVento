@@ -6,7 +6,9 @@ import { useProductMutations } from '@/hooks/useProductMutations'
 import { ProductCard } from '@/components/products/ProductCard'
 import { ProductModal } from '@/components/products/ProductModal'
 import { CategoryTabs } from '@/components/products/CategoryTabs'
+import { CategoryModal } from '@/components/products/CategoryModal'
 import type { ProductWithCategory } from '@/stores/cartStore'
+import type { Tables } from '@/types/database.types'
 
 // ─── Skeleton ────────────────────────────────────────────────────
 function SkeletonCard() {
@@ -78,6 +80,7 @@ export function ProductsPage() {
   const [activeCat, setActiveCat] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [modalProduct, setModalProduct] = useState<ProductWithCategory | 'new' | null>(null)
+  const [modalCategory, setModalCategory] = useState<Tables<'categories'> | 'new' | null>(null)
 
   const { data: categories = [], isLoading: catsLoading } = useCategories()
   const { data: products = [], isLoading: prodsLoading } = useProducts()
@@ -161,6 +164,8 @@ export function ProductsPage() {
             activeId={activeCat}
             productCounts={productCounts}
             onSelect={(id) => { setActiveCat(id); setQuery('') }}
+            onEdit={(cat) => setModalCategory(cat)}
+            onNew={() => setModalCategory('new')}
           />
 
           {/* Search */}
@@ -217,12 +222,20 @@ export function ProductsPage() {
         )}
       </div>
 
-      {/* ── Modal ── */}
+      {/* ── Product modal ── */}
       {modalProduct !== null && (
         <ProductModal
           product={modalProductData}
           categories={categories}
           onClose={() => setModalProduct(null)}
+        />
+      )}
+
+      {/* ── Category modal ── */}
+      {modalCategory !== null && (
+        <CategoryModal
+          category={modalCategory === 'new' ? null : modalCategory}
+          onClose={() => setModalCategory(null)}
         />
       )}
     </div>

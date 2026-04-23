@@ -4,12 +4,12 @@ import {
   upsertProduct,
   archiveProduct,
   upsertCategory,
-  deleteCategory,
+  countActiveProductsByCategory,
   uploadProductImage,
   deleteProductImage,
 } from '@/lib/supabase-helpers'
 import { useAuth } from '@/hooks/useAuth'
-import type { TablesInsert } from '@/types/database.types'
+import type { Tables, TablesInsert } from '@/types/database.types'
 
 export function useProductMutations() {
   const queryClient = useQueryClient()
@@ -62,22 +62,45 @@ export function useCategoryMutations() {
 
   const saveCategory = useMutation({
     mutationFn: async (data: TablesInsert<'categories'>) => {
+      // Prevent deactivating a category that still has active products
+      if (data.id && data.is_active === false) {
+        const { count, error: countErr } = await countActiveProductsByCategory(data.id)
+        if (countErr) throw countErr
+        if (count && count > 0) {
+          throw new Error(
+            `Hay ${count} producto${count !== 1 ? 's' : ''} en esta categoría. Muévelos o desactívalos primero.`,
+          )
+        }
+      }
       const { data: result, error } = await upsertCategory(data)
       if (error) throw error
       return result!
     },
     onSuccess: () => { invalidate(); toast.success('Categoría guardada') },
-    onError: () => toast.error('Error al guardar categoría'),
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'Error al guardar categoría'),
   })
 
-  const deactivateCategory = useMutation({
-    mutationFn: async (categoryId: string) => {
-      const { error } = await deleteCategory(categoryId)
+  const toggleCategoryActive = useMutation({
+    mutationFn: async ({ category, active }: { category: Tables<'categories'>; active: boolean }) => {
+      if (!active) {
+        const { count, error: countErr } = await countActiveProductsByCategory(category.id)
+        if (countErr) throw countErr
+        if (count && count > 0) {
+          throw new Error(
+            `Hay ${count} producto${count !== 1 ? 's' : ''} en esta categoría. Muévelos o desactívalos primero.`,
+          )
+        }
+      }
+      const { data: result, error } = await upsertCategory({ ...category, is_active: active })
       if (error) throw error
+      return result!
     },
-    onSuccess: () => { invalidate(); toast.success('Categoría desactivada') },
-    onError: () => toast.error('Error al desactivar categoría'),
+    onSuccess: (_, { active }) => {
+      invalidate()
+      toast.success(active ? 'Categoría activada' : 'Categoría desactivada')
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'Error al cambiar estado'),
   })
 
-  return { saveCategory, deactivateCategory }
+  return { saveCategory, toggleCategoryActive }
 }

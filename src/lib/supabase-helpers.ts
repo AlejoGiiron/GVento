@@ -33,6 +33,13 @@ export const upsertCategory = (category: TablesInsert<'categories'>) =>
 export const deleteCategory = (categoryId: string) =>
   supabase.from('categories').update({ is_active: false }).eq('id', categoryId)
 
+export const countActiveProductsByCategory = (categoryId: string) =>
+  supabase
+    .from('products')
+    .select('*', { count: 'exact', head: true })
+    .eq('category_id', categoryId)
+    .eq('is_active', true)
+
 // --- Products ---
 
 export const getProducts = (restaurantId: string, categoryId?: string) => {
