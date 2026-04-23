@@ -47,9 +47,19 @@ Ver .env.example para la lista completa.
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: 02 - Autenticación y layout base
+Última fase completada: 03 - Core POS (pantalla principal)
 En progreso: —
-Siguiente: 03 - Core POS
+Siguiente: 04 - Gestión de mesas / TablesPage
+
+### Detalle fase 03 (commit dc5f144)
+- POSPage: layout split 60/40 (catálogo + carrito), diseño V2 aprobado
+- cartStore Zustand: add/setQty/setNote/remove/clear/setDiscount
+- useProducts y useCategories con React Query sobre supabase-helpers
+- CheckoutModal: flujo method → amount (efectivo) → success, graba en Supabase
+- ProductCard con placeholder coloreado por categoría + soporte image_url
+- Precios en COP con Intl.NumberFormat('es-CO')
+- QueryClientProvider en App.tsx
+- AppLayout main: overflow-hidden para layout POS full-height
 
 ### Detalle fase 02 (commit 3424412)
 - AuthProvider + useAuth hook (user, profile, isLoading, signOut)
