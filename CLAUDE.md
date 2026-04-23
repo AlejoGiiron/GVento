@@ -45,11 +45,44 @@ Ver .env.example para la lista completa.
 - Commits en formato Conventional Commits
 - Un commit por funcionalidad o fix completo
 
+## Design System
+Valores exactos de color, tipografía, espaciado y patrones de layout en:
+**`src/design-system.md`** — leer antes de construir cualquier pantalla nueva.
+
+Resumen rápido:
+- Acento: `#10b981` (emerald) / oscuro `#059669`
+- Sidebar: `#0f172a` bg, `#1e293b` bordes, `#cbd5e1` texto nav
+- Texto: primario `#0f172a`, secundario `#64748b`, muted `#94a3b8`
+- Fuentes: Inter UI · monospace para precios/números
+- Layout POS: `flex h-full overflow-hidden`, split 60/40
+- Layout Login: `flex h-full`, split 40/60 (brand oscuro / form blanco)
+- Botón CTA: `#10b981`, border-radius 10px, shadow `rgba(16,185,129,.35)`
+
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: 03 - Core POS (pantalla principal)
+Última fase completada: 03b - POSPage V2 (mejoras UX + ticket imprimible)
 En progreso: —
 Siguiente: 04 - Gestión de mesas / TablesPage
+
+### Detalle fase 03b - POSPage V2 mejoras UX (sesión 2026-04-23)
+- cartStore: DiscountType ('pct'|'fixed'), campo discountType, setDiscount acepta tipo
+- Atajo teclado `/` enfoca búsqueda; `Escape` limpia y desenfoca; indicador kbd visual
+- Descuento dual: botones rápidos % (0/5/10/15/20) o monto fijo COP con input numérico
+- Método de pago Transferencia añadido (mapea a 'transfer' en enum BD); modal 4 columnas
+- PrintTicket: componente de recibo 80mm, oculto en UI, visible con @media print
+- window.print() desde botón "Imprimir" en pantalla de éxito del modal
+- Pantalla de éxito mejorada: n.° orden abreviado, vuelto destacado, botones Imprimir + Nueva venta
+- Removido botón "Espera" no funcional; Cobrar ocupa ancho completo
+
+### Detalle fase 02b - LoginPage V1 (commit 661e666)
+- LoginPage: layout split 40/60 (panel marca + formulario), diseño handoff V1 aprobado
+- Panel izquierdo slate-900 con logo, tagline, 3 features y glows radiales verdes
+- Panel derecho: formulario con email, contraseña (toggle visibilidad), checkbox recordarme
+- Checkbox recordarme controla persistencia: si false, limpia claves sb-* de localStorage tras login
+- Banner de error inline rojo con icono X (sin toast)
+- Spinner animado durante autenticación, botón deshabilitado si campos vacíos
+- Redirección automática a /ventas si ya hay sesión activa (useEffect sobre useAuth)
+- Sin enlace de recuperación de contraseña — el admin resetea cuentas
 
 ### Detalle fase 03 (commit dc5f144)
 - POSPage: layout split 60/40 (catálogo + carrito), diseño V2 aprobado

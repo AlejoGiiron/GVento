@@ -49,8 +49,39 @@ export const getProducts = (restaurantId: string, categoryId?: string) => {
 export const upsertProduct = (product: TablesInsert<'products'>) =>
   supabase.from('products').upsert(product).select().single()
 
+export const archiveProduct = (productId: string) =>
+  supabase.from('products').update({ is_active: false }).eq('id', productId)
+
 export const updateProductStock = (productId: string, stock_qty: number) =>
   supabase.from('products').update({ stock_qty }).eq('id', productId)
+
+// --- Storage: product-images ---
+
+export const uploadProductImage = async (
+  restaurantId: string,
+  productId: string,
+  file: File,
+): Promise<string | null> => {
+  const ext = file.name.split('.').pop() ?? 'jpg'
+  const path = `${restaurantId}/${productId}.${ext}`
+  const { data, error } = await supabase.storage
+    .from('product-images')
+    .upload(path, file, { upsert: true })
+  if (error || !data) return null
+  const { data: { publicUrl } } = supabase.storage
+    .from('product-images')
+    .getPublicUrl(data.path)
+  return publicUrl
+}
+
+export const deleteProductImage = async (imageUrl: string): Promise<void> => {
+  try {
+    const path = new URL(imageUrl).pathname.split('/product-images/')[1]
+    if (path) await supabase.storage.from('product-images').remove([path])
+  } catch {
+    // URL inválida — ignorar silenciosamente
+  }
+}
 
 // --- Tables ---
 
