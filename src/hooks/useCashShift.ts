@@ -130,6 +130,8 @@ export function useCashShift() {
 
   // Realtime: invalida salesSummary cuando se inserta un pago en este restaurante.
   // Cubre actualizaciones desde otros dispositivos sin esperar el refetchInterval.
+  // queryClient es un singleton estable — se omite de las deps intencionalmente para
+  // evitar re-suscripciones innecesarias que causan "cannot add callbacks after subscribe".
   useEffect(() => {
     if (!restaurantId) return
 
@@ -138,14 +140,16 @@ export function useCashShift() {
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'payments', filter: `restaurant_id=eq.${restaurantId}` },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ['shift_payments'] })
-        },
+        () => queryClient.invalidateQueries({ queryKey: ['shift_payments'] }),
       )
       .subscribe()
 
-    return () => { supabase.removeChannel(channel) }
-  }, [restaurantId, queryClient])
+    return () => {
+      channel.unsubscribe()
+      supabase.removeChannel(channel)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restaurantId])
 
   return {
     currentShift,
