@@ -1,5 +1,7 @@
+import { useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-hot-toast'
+import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 import {
   getOpenShift,
@@ -125,6 +127,25 @@ export function useCashShift() {
     },
     onError: () => toast.error('Error al registrar movimiento'),
   })
+
+  // Realtime: invalida salesSummary cuando se inserta un pago en este restaurante.
+  // Cubre actualizaciones desde otros dispositivos sin esperar el refetchInterval.
+  useEffect(() => {
+    if (!restaurantId) return
+
+    const channel = supabase
+      .channel(`shift-payments:${restaurantId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'payments', filter: `restaurant_id=eq.${restaurantId}` },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['shift_payments'] })
+        },
+      )
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [restaurantId, queryClient])
 
   return {
     currentShift,

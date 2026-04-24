@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   UtensilsCrossed, Plus, Users, X, Check, Search,
   ChevronRight, Banknote, CreditCard, Building2, Smartphone,
@@ -567,6 +568,7 @@ function TableCheckoutModal({
   onComplete: () => void
 }) {
   const { profile } = useAuth()
+  const queryClient = useQueryClient()
   const [step, setStep] = useState<'method' | 'amount' | 'success'>('method')
   const [method, setMethod] = useState<PaymentMethodUI>('efectivo')
   const [received, setReceived] = useState('')
@@ -600,6 +602,8 @@ function TableCheckoutModal({
         restaurant_id: profile.restaurant_id,
       })
       if (payErr) throw payErr
+
+      queryClient.invalidateQueries({ queryKey: ['shift_payments'] })
 
       const { error: orderErr } = await updateOrderStatus(order.id, 'delivered')
       if (orderErr) throw orderErr
