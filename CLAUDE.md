@@ -60,19 +60,27 @@ Resumen rápido:
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: 05 - Gestión de mesas / TablesPage
+Última fase completada: 06 - Cocina / KDS + sent_to_kitchen
 En progreso: —
-Siguiente: 06 - Cocina (KitchenPage) / Reportes
+Siguiente: 07 - Reportes
+
+### Detalle fase 06 - Cocina / KDS (sesión 2026-04-24)
+- sent_to_kitchen: columna boolean en order_items (SQL en supabase/sent-to-kitchen.sql)
+- database.types.ts: sent_to_kitchen en Row/Insert/Update de order_items
+- supabase-helpers: markItemsSentToKitchen(itemIds), sent_to_kitchen en getActiveOrdersForTables + getActiveOrderByTable
+- useTables: sent_to_kitchen añadido a OrderItemRow
+- printer.ts (src/lib/): printComanda(ComandaData) — inyecta CSS 80mm en head, crea nodo DOM, window.print(); printToThermal() alias
+- TablesPage: botón "Cocina (N)" reemplaza botón Comanda; marca ítems como sent, actualiza orden a 'preparing', imprime solo ítems no enviados; badge "En cocina" + dim en ítems ya enviados; delete deshabilitado en ítems enviados
+- KitchenPage: KDS completo — tarjetas por orden con ítems enviados, flujo pending→preparing→ready, Realtime con canal único Math.random()
 
 ### Detalle fase 05 - Gestión de mesas (sesión 2026-04-23)
 - TablesPage: mapa visual en grid auto-fill, split layout mapa + panel lateral
 - TableCard: colores por estado (gris=libre, verde=ocupada, ámbar=pide cuenta, azul=reservada)
 - useTables: carga tablas + órdenes activas en paralelo, Realtime en postgres_changes (tables + orders + order_items), reconexión en CHANNEL_ERROR
 - OpenTableModal: crea orden dine_in con total=0, actualiza status→'occupied'
-- TableSidePanel (380px): lista ítems, eliminar ítem, total, botones Agregar/Comanda/Pide cuenta/Cobrar
+- TableSidePanel (380px): lista ítems, eliminar ítem, total, botones Agregar/Cocina/Pide cuenta/Cobrar
 - ProductPickerModal: selector de productos con búsqueda + tabs de categoría + selección con qty
 - TableCheckoutModal: mismo flujo method→amount→success que POSPage, pero para orden existente
-- KitchenComanda: componente oculto, visible @media print, imprime comanda de cocina 80mm
 - TableConfigModal (admin): crear/editar/eliminar mesas, no permite borrar si tiene orden activa
 - waiting_bill añadido a table_status enum (SQL en supabase/tables-waiting-bill.sql + database.types.ts)
 - Nuevos helpers: createTable, updateTable, deleteTable, getTableActiveOrderCount, getActiveOrdersByTable, getActiveOrdersForTables
