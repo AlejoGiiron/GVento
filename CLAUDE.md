@@ -60,9 +60,22 @@ Resumen rápido:
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: 04 - Módulo turno de caja (ShiftBanner + modales)
+Última fase completada: 05 - Gestión de mesas / TablesPage
 En progreso: —
-Siguiente: 05 - Gestión de mesas / TablesPage
+Siguiente: 06 - Cocina (KitchenPage) / Reportes
+
+### Detalle fase 05 - Gestión de mesas (sesión 2026-04-23)
+- TablesPage: mapa visual en grid auto-fill, split layout mapa + panel lateral
+- TableCard: colores por estado (gris=libre, verde=ocupada, ámbar=pide cuenta, azul=reservada)
+- useTables: carga tablas + órdenes activas en paralelo, Realtime en postgres_changes (tables + orders + order_items), reconexión en CHANNEL_ERROR
+- OpenTableModal: crea orden dine_in con total=0, actualiza status→'occupied'
+- TableSidePanel (380px): lista ítems, eliminar ítem, total, botones Agregar/Comanda/Pide cuenta/Cobrar
+- ProductPickerModal: selector de productos con búsqueda + tabs de categoría + selección con qty
+- TableCheckoutModal: mismo flujo method→amount→success que POSPage, pero para orden existente
+- KitchenComanda: componente oculto, visible @media print, imprime comanda de cocina 80mm
+- TableConfigModal (admin): crear/editar/eliminar mesas, no permite borrar si tiene orden activa
+- waiting_bill añadido a table_status enum (SQL en supabase/tables-waiting-bill.sql + database.types.ts)
+- Nuevos helpers: createTable, updateTable, deleteTable, getTableActiveOrderCount, getActiveOrdersByTable, getActiveOrdersForTables
 
 ### Detalle fase 04 - Turno de caja (sesión 2026-04-23)
 - useCashShift: currentShift, isOpen, salesSummary, movements, openShift, closeShift, addMovement
@@ -110,3 +123,8 @@ Siguiente: 05 - Gestión de mesas / TablesPage
 - AppLayout: sidebar slate-900, header con nombre y rol del usuario
 - Router completo en App.tsx con rutas públicas y protegidas
 - Páginas placeholder: Ventas, Mesas, Cocina, Productos, Reportes, Config
+
+## Estado actual del proyecto
+Última fase completada: 02 - Core POS
+En progreso: 03 - Gestión de mesas
+Siguiente: 04 - Delivery y tienda online
