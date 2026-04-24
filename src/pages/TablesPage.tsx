@@ -1138,6 +1138,10 @@ export function TablesPage() {
   const [showProductPicker, setShowProductPicker] = useState(false)
   const [showCheckout, setShowCheckout] = useState(false)
   const [showConfig, setShowConfig] = useState(false)
+  // Orden capturada al abrir el checkout — aislada de actualizaciones Realtime
+  // para evitar que el modal se desmonte mientras está en progreso.
+  const [checkoutOrder, setCheckoutOrder] = useState<ActiveOrder | null>(null)
+  const queryClient = useQueryClient()
 
   const isAdmin = profile?.role === 'admin'
 
@@ -1186,7 +1190,9 @@ export function TablesPage() {
 
   const handleCheckoutComplete = () => {
     setShowCheckout(false)
+    setCheckoutOrder(null)
     setSelectedTableId(null)
+    queryClient.invalidateQueries({ queryKey: ['shift_payments'] })
     refetch()
   }
 
@@ -1311,7 +1317,7 @@ export function TablesPage() {
           onClose={() => setSelectedTableId(null)}
           onAddItems={() => setShowProductPicker(true)}
           onRequestBill={handleRequestBill}
-          onCheckout={() => setShowCheckout(true)}
+          onCheckout={() => { setCheckoutOrder(selectedOrder); setShowCheckout(true) }}
           onRefresh={refetch}
         />
       )}
@@ -1334,11 +1340,11 @@ export function TablesPage() {
         />
       )}
 
-      {showCheckout && selectedTable && selectedOrder && (
+      {showCheckout && selectedTable && checkoutOrder && (
         <TableCheckoutModal
           table={selectedTable}
-          order={selectedOrder}
-          onClose={() => setShowCheckout(false)}
+          order={checkoutOrder}
+          onClose={() => { setShowCheckout(false); setCheckoutOrder(null) }}
           onComplete={handleCheckoutComplete}
         />
       )}
