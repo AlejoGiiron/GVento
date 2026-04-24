@@ -76,9 +76,18 @@ Resumen rápido:
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: 06 - Cocina / KDS + fix ShiftBanner sync
+Última fase completada: 07 - Delivery / Kanban Realtime
 En progreso: —
-Siguiente: 07 - Reportes
+Siguiente: 08 - Reportes
+
+### Detalle fase 07 - Delivery / Kanban Realtime (sesión 2026-04-24)
+- supabase/delivery-couriers.sql: tabla `couriers` (name, phone, is_active) + ALTER TABLE orders (delivery_address, courier_id FK, estimated_delivery_minutes) + RLS
+- database.types.ts: tipos completos para couriers + campos delivery en orders Row/Insert/Update/Relationships
+- supabase-helpers: getCouriers, upsertCourier, deleteCourier (soft), getDeliveryOrders (activos + entregados hoy), assignOrderCourier
+- useDelivery: órdenes agrupadas por columna kanban (new/accepted/preparing/in_transit/delivered), canal Realtime con nombre único Math.random(), alerta Web Audio API al llegar pedido nuevo, patrón checkoutOrder en AssignCourierModal
+- useDeliveryCount: hook ligero usado en AppLayout para el badge del sidebar
+- DeliveryPage: Kanban 5 columnas horizontal scroll; columna lógica = status + courier_id (pending sin courier = Nuevos, pending con courier = Aceptados); AssignCourierModal (select courier + tiempo estimado); CourierConfigModal (admin, CRUD repartidores); botones de avance de estado por columna
+- AppLayout: Delivery añadido al sidebar (ícono Truck), badge amber con conteo de órdenes activas
 
 ### Fix (sesión 2026-04-24) - ShiftBanner no actualizaba al cobrar desde TablesPage
 - Causa raíz: TableCheckoutModal se desmontaba antes de step='success' porque
