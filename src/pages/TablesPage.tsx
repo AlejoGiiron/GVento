@@ -252,14 +252,14 @@ function OpenTableModal({
   }
 
   return (
-    <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(15,23,42,.55)',
-      display: 'grid', placeItems: 'center', zIndex: 50,
-    }}>
-      <div style={{
-        background: '#fff', borderRadius: 14, width: 380, maxWidth: '92%',
-        boxShadow: '0 25px 50px -12px rgba(0,0,0,.25)', overflow: 'hidden',
-      }}>
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.55)', display: 'grid', placeItems: 'center', zIndex: 50 }}
+      onClick={onClose}
+    >
+      <div
+        style={{ background: '#fff', borderRadius: 14, width: 380, maxWidth: '92%', boxShadow: '0 25px 50px -12px rgba(0,0,0,.25)', overflow: 'hidden' }}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div style={{ padding: '18px 22px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
             <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5 }}>
@@ -409,16 +409,14 @@ function ProductPickerModal({
   }
 
   return (
-    <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(15,23,42,.55)',
-      display: 'grid', placeItems: 'center', zIndex: 50,
-    }}>
-      <div style={{
-        background: '#fff', borderRadius: 14,
-        width: 680, maxWidth: '96%', height: '85vh',
-        boxShadow: '0 25px 50px -12px rgba(0,0,0,.25)',
-        overflow: 'hidden', display: 'flex', flexDirection: 'column',
-      }}>
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.55)', display: 'grid', placeItems: 'center', zIndex: 50 }}
+      onClick={onClose}
+    >
+      <div
+        style={{ background: '#fff', borderRadius: 14, width: 680, maxWidth: '96%', height: '85vh', boxShadow: '0 25px 50px -12px rgba(0,0,0,.25)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
         <div style={{ padding: '16px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{ flex: 1 }}>
@@ -620,16 +618,18 @@ function TableCheckoutModal({
 
   const methodLabel = ({ efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Transferencia', nequi: 'Nequi / QR' } as Record<PaymentMethodUI, string>)[method]
 
+  // En paso success la mesa ya está cobrada: overlay click = onComplete (limpia estado)
+  const overlayClick = step === 'success' ? onComplete : onClose
+
   return (
-    <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(15,23,42,.55)',
-      display: 'grid', placeItems: 'center', zIndex: 50,
-    }}>
-      <div style={{
-        background: '#fff', borderRadius: 14,
-        width: step === 'method' ? 540 : 440, maxWidth: '92%',
-        boxShadow: '0 25px 50px -12px rgba(0,0,0,.25)', overflow: 'hidden',
-      }}>
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.55)', display: 'grid', placeItems: 'center', zIndex: 50 }}
+      onClick={overlayClick}
+    >
+      <div
+        style={{ background: '#fff', borderRadius: 14, width: step === 'method' ? 540 : 440, maxWidth: '92%', boxShadow: '0 25px 50px -12px rgba(0,0,0,.25)', overflow: 'hidden' }}
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* method */}
         {step === 'method' && (
           <>
@@ -832,8 +832,14 @@ function TableConfigModal({
   }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.55)', display: 'grid', placeItems: 'center', zIndex: 50 }}>
-      <div style={{ background: '#fff', borderRadius: 14, width: 540, maxWidth: '94%', maxHeight: '85vh', boxShadow: '0 25px 50px -12px rgba(0,0,0,.25)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.55)', display: 'grid', placeItems: 'center', zIndex: 50 }}
+      onClick={onClose}
+    >
+      <div
+        style={{ background: '#fff', borderRadius: 14, width: 540, maxWidth: '94%', maxHeight: '85vh', boxShadow: '0 25px 50px -12px rgba(0,0,0,.25)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div style={{ padding: '16px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
           <div style={{ fontSize: 16, fontWeight: 700, color: '#0f172a' }}>Configuración de mesas</div>
           <button onClick={onClose} style={{ background: '#f1f5f9', border: 'none', width: 30, height: 30, borderRadius: 7, cursor: 'pointer', color: '#64748b', display: 'grid', placeItems: 'center' }}>
@@ -1166,12 +1172,13 @@ export function TablesPage() {
   const selectedTable = tables.find((t) => t.id === selectedTableId) ?? null
   const selectedOrder = selectedTableId ? (activeOrders[selectedTableId] ?? null) : null
 
-  // Close panel if selected table goes free
+  // Cierra el panel cuando la mesa queda libre por Realtime (otro dispositivo),
+  // pero no mientras el modal de apertura está visible (click intencional sobre mesa libre).
   useEffect(() => {
-    if (selectedTable?.status === 'free') {
+    if (selectedTable?.status === 'free' && !showOpenModal) {
       setSelectedTableId(null)
     }
-  }, [selectedTable?.status])
+  }, [selectedTable?.status, showOpenModal])
 
   const handleTableClick = (table: TableRow) => {
     if (table.status === 'free') {
