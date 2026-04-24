@@ -1,6 +1,7 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-hot-toast'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 import {
@@ -128,15 +129,18 @@ export function useCashShift() {
     onError: () => toast.error('Error al registrar movimiento'),
   })
 
+  const channelRef = useRef<RealtimeChannel | null>(null)
+
   // Realtime: invalida salesSummary cuando se inserta un pago en este restaurante.
-  // Cubre actualizaciones desde otros dispositivos sin esperar el refetchInterval.
-  // queryClient es un singleton estable — se omite de las deps intencionalmente para
-  // evitar re-suscripciones innecesarias que causan "cannot add callbacks after subscribe".
+  // Nombre único por instancia para evitar que Supabase reutilice un canal ya
+  // suscrito y lance "cannot add postgres_changes callbacks after subscribe".
   useEffect(() => {
     if (!restaurantId) return
 
+    const channelName = `shift-payments-${Math.random().toString(36).slice(2)}`
+
     const channel = supabase
-      .channel(`shift-payments:${restaurantId}`)
+      .channel(channelName)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'payments', filter: `restaurant_id=eq.${restaurantId}` },
@@ -144,9 +148,12 @@ export function useCashShift() {
       )
       .subscribe()
 
+    channelRef.current = channel
+
     return () => {
       channel.unsubscribe()
       supabase.removeChannel(channel)
+      channelRef.current = null
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [restaurantId])

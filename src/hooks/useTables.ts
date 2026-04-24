@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { toast } from 'react-hot-toast'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import { getTables, getActiveOrdersForTables } from '@/lib/supabase-helpers'
 import { useAuth } from '@/hooks/useAuth'
@@ -26,6 +27,7 @@ export function useTables() {
   const [tables, setTables] = useState<TableRow[]>([])
   const [activeOrders, setActiveOrders] = useState<Record<string, ActiveOrder>>({})
   const [loading, setLoading] = useState(true)
+  const channelRef = useRef<RealtimeChannel | null>(null)
 
   const fetchAll = useCallback(async () => {
     if (!profile?.restaurant_id) return
@@ -63,8 +65,11 @@ export function useTables() {
   useEffect(() => {
     if (!profile?.restaurant_id) return
 
+    // Nombre único por instancia para evitar reutilización de canal ya suscrito.
+    const channelName = `tables-map-${Math.random().toString(36).slice(2)}`
+
     const channel = supabase
-      .channel(`tables-map:${profile.restaurant_id}`)
+      .channel(channelName)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'tables', filter: `restaurant_id=eq.${profile.restaurant_id}` },
@@ -86,8 +91,12 @@ export function useTables() {
         }
       })
 
+    channelRef.current = channel
+
     return () => {
+      channel.unsubscribe()
       supabase.removeChannel(channel)
+      channelRef.current = null
     }
   }, [profile?.restaurant_id, fetchAll])
 
