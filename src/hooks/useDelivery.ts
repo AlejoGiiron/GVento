@@ -173,6 +173,7 @@ export function useDelivery() {
       toast.error('Error al actualizar estado')
       return false
     }
+    await fetchOrders()
     return true
   }
 
@@ -186,6 +187,7 @@ export function useDelivery() {
       toast.error('Error al asignar repartidor')
       return false
     }
+    await fetchOrders()
     return true
   }
 
