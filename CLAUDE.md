@@ -60,9 +60,16 @@ Resumen rápido:
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: 06 - Cocina / KDS + sent_to_kitchen
+Última fase completada: 06 - Cocina / KDS + fix ShiftBanner sync
 En progreso: —
 Siguiente: 07 - Reportes
+
+### Fix (sesión 2026-04-24) - ShiftBanner no actualizaba al cobrar desde TablesPage
+- Causa raíz: TableCheckoutModal se desmontaba antes de step='success' porque
+  updateOrderStatus('delivered') disparaba Realtime → fetchAll → selectedOrder=null
+- Fix: checkoutOrder (estado capturado al abrir cobro, aislado del Realtime);
+  condición del modal usa checkoutOrder en vez de selectedOrder;
+  handleCheckoutComplete también invalida ['shift_payments'] como respaldo
 
 ### Detalle fase 06 - Cocina / KDS (sesión 2026-04-24)
 - sent_to_kitchen: columna boolean en order_items (SQL en supabase/sent-to-kitchen.sql)
