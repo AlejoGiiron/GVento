@@ -34,6 +34,22 @@ G-Vento es un sistema POS completo para restaurantes. Monorepo que incluye:
 - Mutaciones de BD siempre en hooks custom (useXMutations)
 - Las queries de Supabase van en src/hooks/, no en componentes
 
+## Patrones aprendidos en desarrollo
+
+### Modales con flujo de cobro y Realtime activo
+Nunca usar directamente el estado reactivo de Supabase Realtime como condición
+para mostrar un modal de cobro. El Realtime puede actualizar ese estado durante
+el flujo y desmontar el modal antes de llegar al step de éxito.
+
+Patrón correcto:
+- Capturar el objeto necesario en un estado propio al abrir el modal (ej: checkoutOrder)
+- Usar ese estado capturado como condición del modal
+- El estado Realtime puede cambiar libremente sin afectar el flujo de cobro en progreso
+
+Ejemplo: TablesPage usa `checkoutOrder` en lugar de `selectedOrder` para controlar
+`TableCheckoutModal`. Si `selectedOrder` se vuelve null por Realtime durante el cobro,
+el modal no se desmonta.
+
 ## Variables de entorno requeridas
 VITE_GVENTO_SUPABASE_URL=
 VITE_GVENTO_SUPABASE_ANON_KEY=
