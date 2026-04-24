@@ -184,7 +184,7 @@ export type Database = {
           name: string
           capacity: number | null
           zone: string | null
-          status: 'free' | 'occupied' | 'reserved'
+          status: 'free' | 'occupied' | 'reserved' | 'waiting_bill'
           restaurant_id: string
           created_at: string
           updated_at: string
@@ -194,7 +194,7 @@ export type Database = {
           name: string
           capacity?: number | null
           zone?: string | null
-          status?: 'free' | 'occupied' | 'reserved'
+          status?: 'free' | 'occupied' | 'reserved' | 'waiting_bill'
           restaurant_id: string
           created_at?: string
           updated_at?: string
@@ -204,7 +204,7 @@ export type Database = {
           name?: string
           capacity?: number | null
           zone?: string | null
-          status?: 'free' | 'occupied' | 'reserved'
+          status?: 'free' | 'occupied' | 'reserved' | 'waiting_bill'
           restaurant_id?: string
           created_at?: string
           updated_at?: string
@@ -295,6 +295,7 @@ export type Database = {
           unit_price: number
           modifiers: Json | null
           notes: string | null
+          sent_to_kitchen: boolean
           created_at: string
           updated_at: string
         }
@@ -306,6 +307,7 @@ export type Database = {
           unit_price: number
           modifiers?: Json | null
           notes?: string | null
+          sent_to_kitchen?: boolean
           created_at?: string
           updated_at?: string
         }
@@ -317,6 +319,7 @@ export type Database = {
           unit_price?: number
           modifiers?: Json | null
           notes?: string | null
+          sent_to_kitchen?: boolean
           created_at?: string
           updated_at?: string
         }
@@ -501,7 +504,7 @@ export type Database = {
     }
     Enums: {
       user_role: 'admin' | 'cashier' | 'waiter'
-      table_status: 'free' | 'occupied' | 'reserved'
+      table_status: 'free' | 'occupied' | 'reserved' | 'waiting_bill'
       order_type: 'dine_in' | 'takeaway' | 'delivery'
       order_status: 'pending' | 'preparing' | 'ready' | 'delivered' | 'cancelled'
       payment_method: 'cash' | 'card' | 'transfer' | 'nequi'

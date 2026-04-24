@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   Search, X, Plus, Trash, Minus, ShoppingCart, Percent,
   ChevronRight, Store, Bike, StickyNote,
@@ -618,6 +619,7 @@ function CheckoutModal({
   onComplete: () => void
 }) {
   const { profile } = useAuth()
+  const queryClient = useQueryClient()
   const [step, setStep] = useState<'method' | 'amount' | 'success'>('method')
   const [method, setMethod] = useState<PaymentMethodUI>('efectivo')
   const [received, setReceived] = useState('')
@@ -675,6 +677,7 @@ function CheckoutModal({
       })
       if (payErr) throw payErr
 
+      queryClient.invalidateQueries({ queryKey: ['shift_payments'] })
       setOrderId(order.id)
       setStep('success')
     } catch (err) {

@@ -1,5 +1,8 @@
+import { useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-hot-toast'
+import type { RealtimeChannel } from '@supabase/supabase-js'
+import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 import {
   getOpenShift,
@@ -125,6 +128,35 @@ export function useCashShift() {
     },
     onError: () => toast.error('Error al registrar movimiento'),
   })
+
+  const channelRef = useRef<RealtimeChannel | null>(null)
+
+  // Realtime: invalida salesSummary cuando se inserta un pago en este restaurante.
+  // Nombre único por instancia para evitar que Supabase reutilice un canal ya
+  // suscrito y lance "cannot add postgres_changes callbacks after subscribe".
+  useEffect(() => {
+    if (!restaurantId) return
+
+    const channelName = `shift-payments-${Math.random().toString(36).slice(2)}`
+
+    const channel = supabase
+      .channel(channelName)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'payments', filter: `restaurant_id=eq.${restaurantId}` },
+        () => queryClient.invalidateQueries({ queryKey: ['shift_payments'] }),
+      )
+      .subscribe()
+
+    channelRef.current = channel
+
+    return () => {
+      channel.unsubscribe()
+      supabase.removeChannel(channel)
+      channelRef.current = null
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restaurantId])
 
   return {
     currentShift,

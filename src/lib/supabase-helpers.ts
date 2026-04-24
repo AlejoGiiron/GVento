@@ -95,10 +95,61 @@ export const deleteProductImage = async (imageUrl: string): Promise<void> => {
 export const getTables = (restaurantId: string) =>
   supabase.from('tables').select('*').eq('restaurant_id', restaurantId).order('name')
 
+export const createTable = (table: TablesInsert<'tables'>) =>
+  supabase.from('tables').insert(table).select().single()
+
+export const updateTable = (tableId: string, data: TablesUpdate<'tables'>) =>
+  supabase.from('tables').update(data).eq('id', tableId).select().single()
+
+export const deleteTable = (tableId: string) =>
+  supabase.from('tables').delete().eq('id', tableId)
+
 export const updateTableStatus = (
   tableId: string,
   status: Tables<'tables'>['status'],
 ) => supabase.from('tables').update({ status }).eq('id', tableId).select().single()
+
+export const getTableActiveOrderCount = (tableId: string) =>
+  supabase
+    .from('orders')
+    .select('*', { count: 'exact', head: true })
+    .eq('table_id', tableId)
+    .in('status', ['pending', 'preparing', 'ready'])
+
+export const getActiveOrderByTable = (tableId: string) =>
+  supabase
+    .from('orders')
+    .select(`
+      *,
+      order_items(
+        id, qty, unit_price, notes, sent_to_kitchen,
+        products(id, name, price)
+      )
+    `)
+    .eq('table_id', tableId)
+    .in('status', ['pending', 'preparing', 'ready'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+export const getActiveOrdersForTables = (tableIds: string[]) =>
+  supabase
+    .from('orders')
+    .select(`
+      *,
+      order_items(
+        id, qty, unit_price, notes, sent_to_kitchen,
+        products(id, name, price)
+      )
+    `)
+    .in('table_id', tableIds)
+    .in('status', ['pending', 'preparing', 'ready'])
+
+export const markItemsSentToKitchen = (itemIds: string[]) =>
+  supabase
+    .from('order_items')
+    .update({ sent_to_kitchen: true })
+    .in('id', itemIds)
 
 // --- Orders ---
 
