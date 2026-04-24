@@ -3,8 +3,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import {
   UtensilsCrossed, Plus, Users, X, Check, Search,
   ChevronRight, Banknote, CreditCard, Building2, Smartphone,
-  Printer, Trash, Minus, Settings, Pencil,
-  ReceiptText, RefreshCw,
+  Trash, Minus, Settings, Pencil,
+  ReceiptText, RefreshCw, ChefHat,
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { useAuth } from '@/hooks/useAuth'
@@ -15,9 +15,10 @@ import {
   createTable, updateTable, deleteTable,
   updateTableStatus, createOrder, addOrderItems,
   updateOrderTotal, updateOrderStatus, createPayment,
-  getTableActiveOrderCount, removeOrderItem,
+  getTableActiveOrderCount, removeOrderItem, markItemsSentToKitchen,
 } from '@/lib/supabase-helpers'
-import type { Tables, TablesInsert, Enums } from '@/types/database.types'
+import { printComanda } from '@/lib/printer'
+import type { Enums } from '@/types/database.types'
 import type { ProductWithCategory } from '@/stores/cartStore'
 import type { TableRow, ActiveOrder, OrderItemRow } from '@/hooks/useTables'
 
@@ -50,27 +51,6 @@ const STATUS_CONFIG: Record<TableStatus, { bg: string; border: string; fg: strin
   waiting_bill: { bg: '#fef3c7', border: '#fde68a', fg: '#854d0e', dot: '#f59e0b',  label: 'Pide cuenta'     },
   reserved:     { bg: '#dbeafe', border: '#bfdbfe', fg: '#1e40af', dot: '#3b82f6',  label: 'Reservada'       },
 }
-
-const COMANDA_CSS = `
-@media print {
-  body * { visibility: hidden !important; }
-  .comanda-print, .comanda-print * { visibility: visible !important; }
-  .comanda-print {
-    display: block !important;
-    position: fixed !important;
-    top: 0 !important; left: 0 !important;
-    width: 80mm !important;
-    background: white !important;
-    padding: 6mm !important;
-    box-sizing: border-box !important;
-    font-family: 'Courier New', monospace !important;
-    font-size: 13px !important;
-    line-height: 1.5 !important;
-    color: black !important;
-  }
-}
-.comanda-print { display: none; }
-`
 
 // ─── Table card ───────────────────────────────────────────────────
 
@@ -179,37 +159,6 @@ function TableCard({
 }
 
 // ─── Kitchen comanda (hidden, print only) ─────────────────────────
-
-function KitchenComanda({ table, order }: { table: TableRow; order: ActiveOrder }) {
-  const now = new Date()
-  const timeStr = now.toLocaleTimeString('es-CO', {
-    hour: '2-digit', minute: '2-digit', timeZone: 'America/Bogota',
-  })
-
-  return (
-    <div className="comanda-print">
-      <div style={{ textAlign: 'center', marginBottom: 8 }}>
-        <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: 2 }}>COMANDA</div>
-        <div style={{ fontSize: 14, fontWeight: 700 }}>Mesa: {table.name}</div>
-        {table.zone && <div style={{ fontSize: 11 }}>{table.zone}</div>}
-        <div style={{ fontSize: 10, marginTop: 2 }}>{timeStr} · #{order.id.slice(-6).toUpperCase()}</div>
-      </div>
-      <div style={{ borderTop: '1px dashed #000', margin: '6px 0' }} />
-      {order.order_items.map((item) => (
-        <div key={item.id} style={{ marginBottom: 4 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: 14 }}>
-            <span>{item.qty}x {item.products?.name ?? '—'}</span>
-          </div>
-          {item.notes && (
-            <div style={{ paddingLeft: 16, fontSize: 11 }}>* {item.notes}</div>
-          )}
-        </div>
-      ))}
-      <div style={{ borderTop: '1px dashed #000', margin: '8px 0' }} />
-      <div style={{ textAlign: 'center', fontSize: 11 }}>— Cocina G-Vento —</div>
-    </div>
-  )
-}
 
 // ─── Open table modal ─────────────────────────────────────────────
 
@@ -969,7 +918,10 @@ function TableSidePanel({
   onRefresh: () => void
 }) {
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null)
+  const [sendingToKitchen, setSendingToKitchen] = useState(false)
   const cfg = STATUS_CONFIG[table.status]
+
+  const unsentItems = order?.order_items.filter((i) => !i.sent_to_kitchen) ?? []
 
   const handleRemoveItem = async (item: OrderItemRow) => {
     if (!order) return
@@ -986,6 +938,31 @@ function TableSidePanel({
       toast.error(`Error: ${msg}`)
     } finally {
       setDeletingItemId(null)
+    }
+  }
+
+  const handleSendToKitchen = async () => {
+    if (!order || unsentItems.length === 0) return
+    setSendingToKitchen(true)
+    try {
+      const { error } = await markItemsSentToKitchen(unsentItems.map((i) => i.id))
+      if (error) throw error
+      if (order.status === 'pending') {
+        await updateOrderStatus(order.id, 'preparing')
+      }
+      printComanda({
+        tableName: table.name,
+        zone: table.zone,
+        orderId: order.id,
+        items: unsentItems.map((i) => ({ qty: i.qty, name: i.products?.name ?? '—', notes: i.notes })),
+      })
+      toast.success('Comanda enviada a cocina')
+      onRefresh()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Error desconocido'
+      toast.error(`Error: ${msg}`)
+    } finally {
+      setSendingToKitchen(false)
     }
   }
 
@@ -1034,12 +1011,18 @@ function TableSidePanel({
           </div>
         ) : (
           order.order_items.map((item) => (
-            <div key={item.id} style={{ padding: '12px 18px', borderBottom: '1px solid #f8fafc', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div key={item.id} style={{
+              padding: '12px 18px', borderBottom: '1px solid #f8fafc',
+              display: 'flex', alignItems: 'center', gap: 10,
+              opacity: item.sent_to_kitchen ? 0.6 : 1,
+            }}>
               <div style={{
-                width: 28, height: 28, borderRadius: 7, background: '#f1f5f9',
+                width: 28, height: 28, borderRadius: 7,
+                background: item.sent_to_kitchen ? '#f0fdf4' : '#f1f5f9',
                 display: 'grid', placeItems: 'center',
-                fontSize: 12, fontWeight: 700, color: '#334155', flexShrink: 0,
-                fontFamily: 'monospace',
+                fontSize: 12, fontWeight: 700,
+                color: item.sent_to_kitchen ? '#16a34a' : '#334155',
+                flexShrink: 0, fontFamily: 'monospace',
               }}>
                 {item.qty}
               </div>
@@ -1050,14 +1033,19 @@ function TableSidePanel({
                 {item.notes && (
                   <div style={{ fontSize: 11, color: '#854d0e', marginTop: 2 }}>* {item.notes}</div>
                 )}
+                {item.sent_to_kitchen && (
+                  <div style={{ fontSize: 10.5, color: '#16a34a', fontWeight: 600, marginTop: 2, display: 'flex', alignItems: 'center', gap: 3 }}>
+                    <Check size={10} strokeWidth={3} /> En cocina
+                  </div>
+                )}
               </div>
               <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', fontFamily: 'monospace', flexShrink: 0 }}>
                 {formatCOP(item.unit_price * item.qty)}
               </div>
               <button
                 onClick={() => handleRemoveItem(item)}
-                disabled={deletingItemId === item.id}
-                style={{ width: 24, height: 24, border: 'none', background: 'transparent', cursor: 'pointer', color: '#dc2626', display: 'grid', placeItems: 'center', opacity: deletingItemId === item.id ? 0.4 : 1 }}
+                disabled={deletingItemId === item.id || item.sent_to_kitchen}
+                style={{ width: 24, height: 24, border: 'none', background: 'transparent', cursor: item.sent_to_kitchen ? 'not-allowed' : 'pointer', color: '#dc2626', display: 'grid', placeItems: 'center', opacity: deletingItemId === item.id || item.sent_to_kitchen ? 0.2 : 1 }}
               >
                 <X size={13} />
               </button>
@@ -1091,18 +1079,22 @@ function TableSidePanel({
 
         <div style={{ display: 'flex', gap: 8 }}>
           <button
-            onClick={() => {
-              if (order) {
-                const s = document.createElement('style')
-                s.textContent = COMANDA_CSS
-                document.head.appendChild(s)
-                window.print()
-                setTimeout(() => s.remove(), 1000)
-              }
+            disabled={sendingToKitchen || unsentItems.length === 0}
+            onClick={handleSendToKitchen}
+            style={{
+              flex: 1, padding: '10px',
+              border: unsentItems.length === 0 ? '1.5px solid #e5e7eb' : '1.5px solid #7c3aed',
+              background: unsentItems.length === 0 ? '#f8fafc' : '#f5f3ff',
+              borderRadius: 9,
+              cursor: sendingToKitchen || unsentItems.length === 0 ? 'not-allowed' : 'pointer',
+              fontSize: 12.5, fontWeight: 600,
+              color: unsentItems.length === 0 ? '#94a3b8' : '#7c3aed',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              opacity: sendingToKitchen ? 0.6 : 1,
             }}
-            style={{ flex: 1, padding: '10px', border: '1.5px solid #e5e7eb', background: '#fff', borderRadius: 9, cursor: 'pointer', fontSize: 12.5, fontWeight: 600, color: '#334155', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
           >
-            <Printer size={14} /> Comanda
+            <ChefHat size={14} />
+            {unsentItems.length > 0 ? `Cocina (${unsentItems.length})` : 'Cocina'}
           </button>
           {table.status === 'occupied' && (
             <button
@@ -1130,9 +1122,6 @@ function TableSidePanel({
           Cobrar <ChevronRight size={17} strokeWidth={2.5} />
         </button>
       </div>
-
-      {/* Hidden comanda for print */}
-      {order && <KitchenComanda table={table} order={order} />}
     </div>
   )
 }
@@ -1151,17 +1140,6 @@ export function TablesPage() {
   const [showConfig, setShowConfig] = useState(false)
 
   const isAdmin = profile?.role === 'admin'
-
-  // Inject print CSS
-  useEffect(() => {
-    const existing = document.getElementById('gvento-comanda-print')
-    if (existing) return
-    const style = document.createElement('style')
-    style.id = 'gvento-comanda-print'
-    style.textContent = COMANDA_CSS
-    document.head.appendChild(style)
-    return () => style.remove()
-  }, [])
 
   const zones = useMemo(
     () => [...new Set(tables.map((t) => t.zone).filter(Boolean))] as string[],

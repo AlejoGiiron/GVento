@@ -295,6 +295,7 @@ export type Database = {
           unit_price: number
           modifiers: Json | null
           notes: string | null
+          sent_to_kitchen: boolean
           created_at: string
           updated_at: string
         }
@@ -306,6 +307,7 @@ export type Database = {
           unit_price: number
           modifiers?: Json | null
           notes?: string | null
+          sent_to_kitchen?: boolean
           created_at?: string
           updated_at?: string
         }
@@ -317,6 +319,7 @@ export type Database = {
           unit_price?: number
           modifiers?: Json | null
           notes?: string | null
+          sent_to_kitchen?: boolean
           created_at?: string
           updated_at?: string
         }

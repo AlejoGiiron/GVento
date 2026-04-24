@@ -122,7 +122,7 @@ export const getActiveOrderByTable = (tableId: string) =>
     .select(`
       *,
       order_items(
-        id, qty, unit_price, notes,
+        id, qty, unit_price, notes, sent_to_kitchen,
         products(id, name, price)
       )
     `)
@@ -138,12 +138,18 @@ export const getActiveOrdersForTables = (tableIds: string[]) =>
     .select(`
       *,
       order_items(
-        id, qty, unit_price, notes,
+        id, qty, unit_price, notes, sent_to_kitchen,
         products(id, name, price)
       )
     `)
     .in('table_id', tableIds)
     .in('status', ['pending', 'preparing', 'ready'])
+
+export const markItemsSentToKitchen = (itemIds: string[]) =>
+  supabase
+    .from('order_items')
+    .update({ sent_to_kitchen: true })
+    .in('id', itemIds)
 
 // --- Orders ---
 

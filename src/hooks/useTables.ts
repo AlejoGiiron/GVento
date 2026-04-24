@@ -14,6 +14,7 @@ export type OrderItemRow = {
   qty: number
   unit_price: number
   notes: string | null
+  sent_to_kitchen: boolean
   products: { id: string; name: string; price: number } | null
 }
 
