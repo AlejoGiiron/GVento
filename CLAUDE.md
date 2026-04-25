@@ -76,9 +76,23 @@ Resumen rápido:
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: 07 - Delivery / Kanban Realtime
+Última fase completada: 05b - KDS Cocina standalone (sesión 2026-04-25)
 En progreso: —
 Siguiente: 08 - Reportes
+
+### Detalle fase 05b - KDS Cocina standalone (sesión 2026-04-25)
+- KitchenPage.tsx reescrito como pantalla independiente (sin AppLayout, sin Supabase Auth)
+- /cocina movida fuera de ProtectedRoute en App.tsx
+- Login por PIN de 4 dígitos leído de `restaurants.config.kitchen_pin`; sin PIN → acceso directo
+- Setup inicial: restaurant_id en localStorage; autenticación en sessionStorage
+- Cards dark (slate-900/800) con franja semáforo: verde <10min / ámbar 10-20min / rojo >20min
+- Elapsed time actualizado cada 30 s; clock en header zona horaria Bogotá
+- Filtros por estado: Todos / Nuevos / Preparando / Listos
+- Alerta sonora Web Audio API (triple beep) al llegar orden nueva en Realtime
+- Canal Realtime con nombre único Math.random() (patrón del proyecto)
+- Patrón checkoutOrder en handleAdvance: captura id/status antes del avance, aislado de Realtime
+- Screen Wake Lock API para mantener la tablet encendida en cocina
+- PWA: public/manifest.json (landscape, start_url /cocina) + public/sw.js (network-first) + meta tags en index.html
 
 ### Fix (sesión 2026-04-24) - ShiftBanner total ventas no actualizaba tras cobros en Ventas y Mesas
 - Causa raíz: `queryClient.invalidateQueries` desde componentes externos (CheckoutModal, TableCheckoutModal) no disparaba refetch confiable del useQuery en useCashShift, por diferencias en el ciclo React Query v5

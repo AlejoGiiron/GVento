@@ -24,13 +24,15 @@ function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
 
+          {/* Cocina KDS — acceso independiente por PIN, sin Supabase Auth */}
+          <Route path="cocina" element={<KitchenPage />} />
+
           {/* Rutas protegidas — cualquier usuario autenticado */}
           <Route element={<ProtectedRoute />}>
             <Route element={<AppLayout />}>
               <Route index element={<Navigate to="/ventas" replace />} />
               <Route path="ventas" element={<POSPage />} />
               <Route path="mesas" element={<TablesPage />} />
-              <Route path="cocina" element={<KitchenPage />} />
               <Route path="delivery" element={<DeliveryPage />} />
 
               {/* Rutas solo para admin */}
