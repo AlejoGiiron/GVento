@@ -80,6 +80,11 @@ Resumen rápido:
 En progreso: —
 Siguiente: 08 - Reportes
 
+### Fix (sesión 2026-04-24) - ShiftBanner total ventas no actualizaba tras cobros en Ventas y Mesas
+- Causa raíz: `queryClient.invalidateQueries` desde componentes externos (CheckoutModal, TableCheckoutModal) no disparaba refetch confiable del useQuery en useCashShift, por diferencias en el ciclo React Query v5
+- Fix: useCashShift expone `refetchSales` (refetch directo del useQuery de pagos); CheckoutModal y TableCheckoutModal llaman `refetchSales()` directamente tras createPayment, eliminando la dependencia de invalidateQueries externo
+- Adicional: refetchInterval reducido de 30 s a 5 s como fallback; getShiftPayments eliminó filtro .lte (innecesario y fuente de race condition por clock skew)
+
 ### Detalle fase 07 - Delivery / Kanban Realtime (sesión 2026-04-24)
 - supabase/delivery-couriers.sql: tabla `couriers` (name, phone, is_active) + ALTER TABLE orders (delivery_address, courier_id FK, estimated_delivery_minutes) + RLS
 - database.types.ts: tipos completos para couriers + campos delivery en orders Row/Insert/Update/Relationships
