@@ -16,11 +16,13 @@
     "@supabase/supabase-js": "^2.104.0",
     "@tanstack/react-query": "^5.56.2",
     "date-fns": "^3.6.0",
+    "exceljs": "^4.4.0",
     "lucide-react": "^0.462.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-hot-toast": "^2.4.1",
     "react-router-dom": "^6.26.2",
+    "recharts": "^3.8.1",
     "zod": "^3.23.8",
     "zustand": "^4.5.5"
   },

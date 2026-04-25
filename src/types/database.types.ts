@@ -551,7 +551,52 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      daily_sales_summary: {
+        Row: {
+          day: string
+          order_type: 'dine_in' | 'takeaway' | 'delivery'
+          restaurant_id: string
+          order_count: number
+          total_revenue: number
+          avg_ticket: number
+          cash_total: number
+          card_total: number
+          transfer_total: number
+          nequi_total: number
+        }
+      }
+      product_performance: {
+        Row: {
+          day: string
+          product_id: string
+          product_name: string
+          category_id: string
+          category_name: string
+          restaurant_id: string
+          total_qty: number
+          total_revenue: number
+        }
+      }
+      hourly_sales: {
+        Row: {
+          day: string
+          hour: number
+          restaurant_id: string
+          order_count: number
+          total_revenue: number
+        }
+      }
+      waiter_performance: {
+        Row: {
+          day: string
+          waiter_id: string
+          waiter_name: string
+          restaurant_id: string
+          order_count: number
+          total_revenue: number
+          avg_ticket: number
+        }
+      }
     }
     Functions: {
       [_ in never]: never
@@ -582,3 +627,6 @@ export type TablesUpdate<T extends keyof Database['public']['Tables']> =
 
 export type Enums<T extends keyof Database['public']['Enums']> =
   Database['public']['Enums'][T]
+
+export type Views<T extends keyof Database['public']['Views']> =
+  Database['public']['Views'][T]['Row']
