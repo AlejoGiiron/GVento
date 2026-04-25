@@ -219,6 +219,44 @@ export type Database = {
           },
         ]
       }
+      couriers: {
+        Row: {
+          id: string
+          restaurant_id: string
+          name: string
+          phone: string | null
+          is_active: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          restaurant_id: string
+          name: string
+          phone?: string | null
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          restaurant_id?: string
+          name?: string
+          phone?: string | null
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'couriers_restaurant_id_fkey'
+            columns: ['restaurant_id']
+            isOneToOne: false
+            referencedRelation: 'restaurants'
+            referencedColumns: ['id']
+          },
+        ]
+      }
       orders: {
         Row: {
           id: string
@@ -227,6 +265,9 @@ export type Database = {
           table_id: string | null
           customer_name: string | null
           customer_phone: string | null
+          delivery_address: string | null
+          courier_id: string | null
+          estimated_delivery_minutes: number | null
           notes: string | null
           total: number
           restaurant_id: string
@@ -241,6 +282,9 @@ export type Database = {
           table_id?: string | null
           customer_name?: string | null
           customer_phone?: string | null
+          delivery_address?: string | null
+          courier_id?: string | null
+          estimated_delivery_minutes?: number | null
           notes?: string | null
           total: number
           restaurant_id: string
@@ -255,6 +299,9 @@ export type Database = {
           table_id?: string | null
           customer_name?: string | null
           customer_phone?: string | null
+          delivery_address?: string | null
+          courier_id?: string | null
+          estimated_delivery_minutes?: number | null
           notes?: string | null
           total?: number
           restaurant_id?: string
@@ -282,6 +329,13 @@ export type Database = {
             columns: ['created_by']
             isOneToOne: false
             referencedRelation: 'profiles'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'orders_courier_id_fkey'
+            columns: ['courier_id']
+            isOneToOne: false
+            referencedRelation: 'couriers'
             referencedColumns: ['id']
           },
         ]

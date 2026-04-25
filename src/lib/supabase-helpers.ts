@@ -203,13 +203,12 @@ export const createPayment = (payment: TablesInsert<'payments'>) =>
 export const getOrderPayments = (orderId: string) =>
   supabase.from('payments').select('*').eq('order_id', orderId)
 
-export const getShiftPayments = (restaurantId: string, from: string, to: string) =>
+export const getShiftPayments = (restaurantId: string, from: string) =>
   supabase
     .from('payments')
     .select('*')
     .eq('restaurant_id', restaurantId)
     .gte('created_at', from)
-    .lte('created_at', to)
 
 // --- Cash Movements ---
 
@@ -240,3 +239,52 @@ export const closeShift = (
   shiftId: string,
   data: Pick<TablesUpdate<'cash_shifts'>, 'closing_amount' | 'closed_by' | 'closed_at'>,
 ) => supabase.from('cash_shifts').update(data).eq('id', shiftId).select().single()
+
+// --- Couriers ---
+
+export const getCouriers = (restaurantId: string) =>
+  supabase
+    .from('couriers')
+    .select('*')
+    .eq('restaurant_id', restaurantId)
+    .eq('is_active', true)
+    .order('name')
+
+export const upsertCourier = (data: TablesInsert<'couriers'>) =>
+  supabase.from('couriers').upsert(data).select().single()
+
+export const deleteCourier = (courierId: string) =>
+  supabase.from('couriers').update({ is_active: false }).eq('id', courierId)
+
+// --- Delivery orders ---
+
+export const getDeliveryOrders = (restaurantId: string) => {
+  const todayStart = new Date()
+  todayStart.setHours(0, 0, 0, 0)
+  const todayISO = todayStart.toISOString()
+
+  return supabase
+    .from('orders')
+    .select(`
+      *,
+      order_items(id, qty, unit_price, notes, products(id, name, price)),
+      couriers(id, name, phone)
+    `)
+    .eq('restaurant_id', restaurantId)
+    .eq('type', 'delivery')
+    .neq('status', 'cancelled')
+    .or(`status.in.(pending,preparing,ready),created_at.gte.${todayISO}`)
+    .order('created_at', { ascending: false })
+}
+
+export const assignOrderCourier = (
+  orderId: string,
+  courierId: string | null,
+  estimatedMinutes: number | null,
+) =>
+  supabase
+    .from('orders')
+    .update({ courier_id: courierId, estimated_delivery_minutes: estimatedMinutes })
+    .eq('id', orderId)
+    .select()
+    .single()

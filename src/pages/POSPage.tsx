@@ -1,5 +1,4 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
 import {
   Search, X, Plus, Trash, Minus, ShoppingCart, Percent,
   ChevronRight, Store, Bike, StickyNote,
@@ -10,6 +9,7 @@ import { useCartStore } from '@/stores/cartStore'
 import { useProducts } from '@/hooks/useProducts'
 import { useCategories } from '@/hooks/useCategories'
 import { useAuth } from '@/hooks/useAuth'
+import { useCashShift } from '@/hooks/useCashShift'
 import { createOrder, addOrderItems, createPayment } from '@/lib/supabase-helpers'
 import type { ProductWithCategory, CartItem, DiscountType } from '@/stores/cartStore'
 import type { Enums } from '@/types/database.types'
@@ -619,7 +619,7 @@ function CheckoutModal({
   onComplete: () => void
 }) {
   const { profile } = useAuth()
-  const queryClient = useQueryClient()
+  const { refetchSales } = useCashShift()
   const [step, setStep] = useState<'method' | 'amount' | 'success'>('method')
   const [method, setMethod] = useState<PaymentMethodUI>('efectivo')
   const [received, setReceived] = useState('')
@@ -677,7 +677,7 @@ function CheckoutModal({
       })
       if (payErr) throw payErr
 
-      queryClient.invalidateQueries({ queryKey: ['shift_payments'] })
+      refetchSales()
       setOrderId(order.id)
       setStep('success')
     } catch (err) {

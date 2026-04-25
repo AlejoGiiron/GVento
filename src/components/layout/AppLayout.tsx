@@ -7,10 +7,12 @@ import {
   BarChart3,
   Settings,
   LogOut,
+  Truck,
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { useAuth } from '@/hooks/useAuth'
 import { useCashShift } from '@/hooks/useCashShift'
+import { useDeliveryCount } from '@/hooks/useDeliveryCount'
 import { ShiftBanner } from '@/components/shift/ShiftBanner'
 import { OpenShiftModal } from '@/components/shift/OpenShiftModal'
 import type { Enums } from '@/types/database.types'
@@ -28,6 +30,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/ventas', label: 'Ventas', icon: ShoppingCart },
   { to: '/mesas', label: 'Mesas', icon: LayoutGrid },
   { to: '/cocina', label: 'Cocina', icon: ChefHat },
+  { to: '/delivery', label: 'Delivery', icon: Truck },
   { to: '/productos', label: 'Productos', icon: Package, roles: ['admin'] },
   { to: '/reportes', label: 'Reportes', icon: BarChart3, roles: ['admin'] },
   { to: '/config', label: 'Configuración', icon: Settings, roles: ['admin'] },
@@ -42,6 +45,7 @@ const ROLE_LABELS: Record<UserRole, string> = {
 export function AppLayout() {
   const { profile, signOut } = useAuth()
   const { isOpen, isLoadingShift } = useCashShift()
+  const deliveryCount = useDeliveryCount()
   const navigate = useNavigate()
 
   const handleSignOut = async () => {
@@ -84,7 +88,15 @@ export function AppLayout() {
               }
             >
               <Icon className="w-4 h-4 flex-shrink-0" />
-              {label}
+              <span className="flex-1">{label}</span>
+              {to === '/delivery' && deliveryCount > 0 && (
+                <span
+                  className="ml-auto text-xs font-bold rounded-full px-1.5 py-0.5 min-w-[18px] text-center leading-none"
+                  style={{ background: '#f59e0b', color: '#fff' }}
+                >
+                  {deliveryCount}
+                </span>
+              )}
             </NavLink>
           ))}
         </nav>

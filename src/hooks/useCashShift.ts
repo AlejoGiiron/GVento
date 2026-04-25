@@ -40,13 +40,12 @@ export function useCashShift() {
     staleTime: 10_000,
   })
 
-  const { data: salesSummary = null } = useQuery({
+  const { data: salesSummary = null, refetch: refetchSales } = useQuery({
     queryKey: ['shift_payments', currentShift?.id],
     queryFn: async () => {
       const { data, error } = await getShiftPayments(
         restaurantId!,
         currentShift!.opened_at,
-        new Date().toISOString(),
       )
       if (error) throw error
       const p = data ?? []
@@ -59,7 +58,7 @@ export function useCashShift() {
       } as ShiftSalesSummary
     },
     enabled: !!currentShift?.id,
-    refetchInterval: 30_000,
+    refetchInterval: 5_000,
   })
 
   const { data: movements = [] } = useQuery({
@@ -164,6 +163,7 @@ export function useCashShift() {
     isLoadingShift,
     salesSummary,
     movements,
+    refetchSales,
     openShift: openShiftMutation.mutateAsync,
     closeShift: closeShiftMutation.mutateAsync,
     addMovement: addMovementMutation.mutateAsync,

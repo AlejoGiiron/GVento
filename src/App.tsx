@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -8,12 +9,13 @@ import { LoginPage } from '@/pages/LoginPage'
 import { POSPage } from '@/pages/POSPage'
 import { TablesPage } from '@/pages/TablesPage'
 import { KitchenPage } from '@/pages/KitchenPage'
+import { DeliveryPage } from '@/pages/DeliveryPage'
 import { ProductsPage } from '@/pages/ProductsPage'
 import { ReportsPage } from '@/pages/ReportsPage'
 
-const queryClient = new QueryClient()
-
 function App() {
+  const [queryClient] = useState(() => new QueryClient())
+
   return (
     <QueryClientProvider client={queryClient}>
     <AuthProvider>
@@ -29,6 +31,7 @@ function App() {
               <Route path="ventas" element={<POSPage />} />
               <Route path="mesas" element={<TablesPage />} />
               <Route path="cocina" element={<KitchenPage />} />
+              <Route path="delivery" element={<DeliveryPage />} />
 
               {/* Rutas solo para admin */}
               <Route element={<ProtectedRoute roles={['admin']} />}>
