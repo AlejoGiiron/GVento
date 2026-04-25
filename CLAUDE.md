@@ -76,9 +76,33 @@ Resumen rápido:
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: 05b - KDS Cocina standalone (sesión 2026-04-25)
+Última fase completada: 08b - ReportsPage UI (sesión 2026-04-25)
 En progreso: —
-Siguiente: 08 - Reportes
+Siguiente: —
+
+### Detalle fase 08b - ReportsPage UI (sesión 2026-04-25)
+- ReportsPage.tsx: barra de controles fija + contenido scrollable (patrón flex h-full)
+- KPI cards con comparación % vs período anterior (período igual longitud, inmediatamente anterior)
+- BarChart apilado (recharts): ventas diarias por canal — dine_in/takeaway/delivery
+- LineChart: ventas por hora del día (0-23) agregadas en el período
+- PieChart con leyenda manual: distribución por método de pago (efectivo/tarjeta/transferencia/nequi)
+- Top 10 productos: tabla con unidades, revenue COP y % del revenue total
+- Atajos: Hoy / Esta semana / Este mes / Mes anterior con date-fns
+- Inputs manuales from/to + shortcut activo resaltado en emerald
+- Exportación Excel lazy-loaded (ExcelJS): 3 hojas, montos como números puros
+- Skeleton durante carga; estado vacío si totalOrd === 0
+- Deps nuevas: recharts 3.8.1 + exceljs 4.4.0
+
+### Detalle fase 08a - Reportes capa de datos (sesión 2026-04-25)
+- 4 vistas PostgreSQL con `security_invoker = true` en `supabase/reports-views.sql`
+  - `daily_sales_summary`: ventas por día × canal × método de pago; avg_ticket; order_count
+  - `product_performance`: unidades y revenue por producto/categoría por día
+  - `hourly_sales`: órdenes y revenue por hora del día (zona Bogotá)
+  - `waiter_performance`: ventas, órdenes y ticket promedio por mozo por día
+- RLS heredado de tablas subyacentes vía `security_invoker`; sin políticas extra en vistas
+- `Views<T>` alias + tipos completos de las 4 vistas en `database.types.ts`
+- `useReports({ from, to })` — carga las 4 vistas filtradas por rango de fechas; staleTime 5 min
+- `useDailySummary(date)` — resumen del día con agregación por canal y método de pago
 
 ### Detalle fase 05b - KDS Cocina standalone (sesión 2026-04-25)
 - KitchenPage.tsx reescrito como pantalla independiente (sin AppLayout, sin Supabase Auth)
