@@ -203,13 +203,12 @@ export const createPayment = (payment: TablesInsert<'payments'>) =>
 export const getOrderPayments = (orderId: string) =>
   supabase.from('payments').select('*').eq('order_id', orderId)
 
-export const getShiftPayments = (restaurantId: string, from: string, to: string) =>
+export const getShiftPayments = (restaurantId: string, from: string) =>
   supabase
     .from('payments')
     .select('*')
     .eq('restaurant_id', restaurantId)
     .gte('created_at', from)
-    .lte('created_at', to)
 
 // --- Cash Movements ---
 

@@ -1,5 +1,4 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
 import {
   UtensilsCrossed, Plus, Users, X, Check, Search,
   ChevronRight, Banknote, CreditCard, Building2, Smartphone,
@@ -8,6 +7,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { useAuth } from '@/hooks/useAuth'
+import { useCashShift } from '@/hooks/useCashShift'
 import { useTables } from '@/hooks/useTables'
 import { useProducts } from '@/hooks/useProducts'
 import { useCategories } from '@/hooks/useCategories'
@@ -517,7 +517,7 @@ function TableCheckoutModal({
   onComplete: () => void
 }) {
   const { profile } = useAuth()
-  const queryClient = useQueryClient()
+  const { refetchSales } = useCashShift()
   const [step, setStep] = useState<'method' | 'amount' | 'success'>('method')
   const [method, setMethod] = useState<PaymentMethodUI>('efectivo')
   const [received, setReceived] = useState('')
@@ -552,7 +552,7 @@ function TableCheckoutModal({
       })
       if (payErr) throw payErr
 
-      queryClient.invalidateQueries({ queryKey: ['shift_payments'] })
+      refetchSales()
 
       const { error: orderErr } = await updateOrderStatus(order.id, 'delivered')
       if (orderErr) throw orderErr
@@ -1141,7 +1141,7 @@ export function TablesPage() {
   // Orden capturada al abrir el checkout — aislada de actualizaciones Realtime
   // para evitar que el modal se desmonte mientras está en progreso.
   const [checkoutOrder, setCheckoutOrder] = useState<ActiveOrder | null>(null)
-  const queryClient = useQueryClient()
+  const { refetchSales } = useCashShift()
 
   const isAdmin = profile?.role === 'admin'
 
@@ -1192,7 +1192,7 @@ export function TablesPage() {
     setShowCheckout(false)
     setCheckoutOrder(null)
     setSelectedTableId(null)
-    queryClient.invalidateQueries({ queryKey: ['shift_payments'] })
+    refetchSales()
     refetch()
   }
 
