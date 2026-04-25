@@ -710,46 +710,78 @@ function KDSBoard({ restaurantId, onLogout }: { restaurantId: string; onLogout: 
 // ─── Main export ─────────────────────────────────────────────────────────────
 
 export function KitchenPage() {
-  const [pageState, setPageState] = useState<KDSPageState>(() => {
-    const rid = localStorage.getItem('kds_restaurant_id')
-    if (!rid) return 'setup'
-    if (sessionStorage.getItem('kds_auth') === '1') return 'board'
-    return 'loading'
-  })
-  const [restaurantId, setRestaurantId] = useState<string | null>(
-    () => localStorage.getItem('kds_restaurant_id'),
-  )
+  // Always start in 'loading' — initialization resolves the correct state
+  const [pageState, setPageState] = useState<KDSPageState>('loading')
+  const [restaurantId, setRestaurantId] = useState<string | null>(null)
   const [kitchenPin, setKitchenPin] = useState<string | null>(null)
 
-  // Load restaurant config to check for kitchen_pin
-  useEffect(() => {
-    if (pageState !== 'loading' || !restaurantId) return
-    ;(async () => {
-      const { data } = await supabase
-        .from('restaurants')
-        .select('config')
-        .eq('id', restaurantId)
-        .single()
-      const pin = (data?.config as Record<string, unknown> | null)?.kitchen_pin
-      if (pin && typeof pin === 'string' && /^\d{4}$/.test(pin)) {
-        setKitchenPin(pin)
-        setPageState('pin')
-      } else {
-        setPageState('board')
-      }
-    })()
-  }, [pageState, restaurantId])
+  // Fetch restaurant config and decide: pin screen or board
+  const checkPinAndProceed = useCallback(async (rid: string) => {
+    const { data } = await supabase
+      .from('restaurants')
+      .select('config')
+      .eq('id', rid)
+      .single()
+    const pin = (data?.config as Record<string, unknown> | null)?.kitchen_pin
+    if (pin && typeof pin === 'string' && /^\d{4}$/.test(pin)) {
+      setKitchenPin(pin)
+      setPageState('pin')
+    } else {
+      setPageState('board')
+    }
+  }, [])
 
+  // Initialization: localStorage → sesión Supabase activa → pantalla de setup
+  useEffect(() => {
+    ;(async () => {
+      // 1. Restaurant ID ya guardado localmente
+      let rid = localStorage.getItem('kds_restaurant_id')
+
+      // 2. Sesión de esta pestaña ya autenticada → ir directo al board
+      if (rid && sessionStorage.getItem('kds_auth') === '1') {
+        setRestaurantId(rid)
+        setPageState('board')
+        return
+      }
+
+      // 3. Sin restaurant ID local → detectar sesión Supabase activa (admin logueado)
+      if (!rid) {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (session?.user) {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('restaurant_id')
+            .eq('id', session.user.id)
+            .single()
+          if (profile?.restaurant_id) {
+            rid = profile.restaurant_id
+            localStorage.setItem('kds_restaurant_id', rid)
+          }
+        }
+      }
+
+      // 4. Sin ningún restaurant ID → mostrar setup manual
+      if (!rid) {
+        setPageState('setup')
+        return
+      }
+
+      setRestaurantId(rid)
+      await checkPinAndProceed(rid)
+    })()
+  }, [checkPinAndProceed])
+
+  // Llamado desde SetupScreen cuando el admin ingresa el UUID manualmente
   const handleSetup = (rid: string) => {
     setRestaurantId(rid)
-    setPageState('loading')
+    checkPinAndProceed(rid)
   }
 
   const handleAuthenticated = () => setPageState('board')
 
   const handleLogout = () => {
     sessionStorage.removeItem('kds_auth')
-    setPageState(kitchenPin ? 'pin' : 'loading')
+    setPageState(kitchenPin ? 'pin' : 'board')
   }
 
   if (pageState === 'setup') {
