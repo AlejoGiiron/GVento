@@ -1,0 +1,1333 @@
+import { useState, useRef } from 'react'
+import { toast } from 'react-hot-toast'
+import {
+  Building2,
+  Users,
+  Wallet,
+  ChefHat,
+  Truck,
+  Bell,
+  Plus,
+  Trash2,
+  Upload,
+  X,
+  Loader2,
+  UserPlus,
+  ToggleLeft,
+  ToggleRight,
+  Copy,
+  RefreshCw,
+  Check,
+} from 'lucide-react'
+import { useRestaurantConfig } from '@/hooks/useRestaurantConfig'
+import { useUsers } from '@/hooks/useUsers'
+import { useAuth } from '@/hooks/useAuth'
+import {
+  uploadRestaurantLogo,
+  uploadNequiQR,
+  upsertCourier,
+  getAllCouriers,
+  deleteCourier,
+} from '@/lib/supabase-helpers'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import type { PaymentMethod, RestaurantConfig } from '@/hooks/useRestaurantConfig'
+import type { Tables } from '@/types/database.types'
+
+// ─── Constants ────────────────────────────────────────────────────
+
+type SectionId = 'restaurante' | 'usuarios' | 'caja' | 'cocina' | 'delivery' | 'notificaciones'
+
+const SECTIONS: { id: SectionId; label: string; icon: React.ComponentType<{ size?: number; className?: string }> }[] = [
+  { id: 'restaurante', label: 'Restaurante', icon: Building2 },
+  { id: 'usuarios', label: 'Usuarios', icon: Users },
+  { id: 'caja', label: 'Caja', icon: Wallet },
+  { id: 'cocina', label: 'Cocina', icon: ChefHat },
+  { id: 'delivery', label: 'Delivery', icon: Truck },
+  { id: 'notificaciones', label: 'Notificaciones', icon: Bell },
+]
+
+const ROLE_LABELS: Record<'admin' | 'cashier' | 'waiter', string> = {
+  admin: 'Administrador',
+  cashier: 'Cajero',
+  waiter: 'Mesero',
+}
+
+const DEFAULT_CASH_OUT_REASONS = ['Mercado', 'Domicilio', 'Servicios', 'Otro']
+const DEFAULT_STATIONS = ['Cocina fría', 'Cocina caliente', 'Barra']
+
+// ─── Shared UI helpers ────────────────────────────────────────────
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', marginBottom: 24 }}>
+      {children}
+    </h2>
+  )
+}
+
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
+      {children}
+    </label>
+  )
+}
+
+function TextInput({
+  value,
+  onChange,
+  placeholder,
+  type = 'text',
+  maxLength,
+}: {
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+  type?: string
+  maxLength?: number
+}) {
+  return (
+    <input
+      type={type}
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      placeholder={placeholder}
+      maxLength={maxLength}
+      style={{
+        width: '100%',
+        border: '1.5px solid #e2e8f0',
+        borderRadius: 8,
+        padding: '10px 12px',
+        fontSize: 14,
+        color: '#0f172a',
+        outline: 'none',
+        background: '#fff',
+        boxSizing: 'border-box',
+      }}
+      onFocus={e => (e.currentTarget.style.borderColor = '#10b981')}
+      onBlur={e => (e.currentTarget.style.borderColor = '#e2e8f0')}
+    />
+  )
+}
+
+function SaveButton({ onClick, loading }: { onClick: () => void; loading: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={loading}
+      style={{
+        background: loading ? '#cbd5e1' : '#10b981',
+        color: '#fff',
+        border: 'none',
+        borderRadius: 10,
+        padding: '11px 28px',
+        fontSize: 14,
+        fontWeight: 700,
+        cursor: loading ? 'not-allowed' : 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        boxShadow: loading ? 'none' : '0 6px 16px rgba(16,185,129,.35)',
+        marginTop: 28,
+      }}
+    >
+      {loading && <Loader2 size={15} className="animate-spin" />}
+      Guardar
+    </button>
+  )
+}
+
+function Skeleton() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {[1, 2, 3].map(i => (
+        <div
+          key={i}
+          style={{ height: 48, borderRadius: 8, background: '#f1f5f9', animation: 'pulse 1.5s infinite' }}
+        />
+      ))}
+    </div>
+  )
+}
+
+function EditableList({
+  items,
+  onChange,
+  placeholder,
+}: {
+  items: string[]
+  onChange: (items: string[]) => void
+  placeholder?: string
+}) {
+  const [draft, setDraft] = useState('')
+
+  const add = () => {
+    const v = draft.trim()
+    if (!v || items.includes(v)) return
+    onChange([...items, v])
+    setDraft('')
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
+        {items.map(item => (
+          <div
+            key={item}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '8px 12px',
+              border: '1px solid #e2e8f0',
+              borderRadius: 8,
+              background: '#f8fafc',
+              fontSize: 14,
+              color: '#0f172a',
+            }}
+          >
+            {item}
+            <button
+              onClick={() => onChange(items.filter(i => i !== item))}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', padding: 2 }}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && add()}
+          placeholder={placeholder ?? 'Nuevo elemento...'}
+          style={{
+            flex: 1,
+            border: '1.5px solid #e2e8f0',
+            borderRadius: 8,
+            padding: '9px 12px',
+            fontSize: 14,
+            color: '#0f172a',
+            outline: 'none',
+          }}
+          onFocus={e => (e.currentTarget.style.borderColor = '#10b981')}
+          onBlur={e => (e.currentTarget.style.borderColor = '#e2e8f0')}
+        />
+        <button
+          onClick={add}
+          style={{
+            background: '#f1f5f9',
+            border: '1.5px solid #e2e8f0',
+            borderRadius: 8,
+            padding: '9px 14px',
+            cursor: 'pointer',
+            color: '#334155',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            fontSize: 13,
+            fontWeight: 600,
+          }}
+        >
+          <Plus size={14} /> Agregar
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ─── Section 1: Restaurante ───────────────────────────────────────
+
+function SectionRestaurant() {
+  const { restaurant, config, isLoading, updateRestaurant, updateConfig, isSaving } = useRestaurantConfig()
+  const { profile } = useAuth()
+  const logoInputRef = useRef<HTMLInputElement>(null)
+
+  const [name, setName] = useState('')
+  const [address, setAddress] = useState('')
+  const [phone, setPhone] = useState('')
+  const [slug, setSlug] = useState('')
+  const [uploadingLogo, setUploadingLogo] = useState(false)
+  const [initialized, setInitialized] = useState(false)
+
+  if (!initialized && restaurant) {
+    setName(restaurant.name ?? '')
+    setAddress(restaurant.address ?? '')
+    setPhone(restaurant.phone ?? '')
+    setSlug((config.slug as string) ?? '')
+    setInitialized(true)
+  }
+
+  if (isLoading) return <Skeleton />
+
+  const handleLogoUpload = async (file: File) => {
+    if (!profile?.restaurant_id) return
+    setUploadingLogo(true)
+    const url = await uploadRestaurantLogo(profile.restaurant_id, file)
+    setUploadingLogo(false)
+    if (!url) { toast.error('Error al subir el logo'); return }
+    await updateRestaurant({ logo_url: url })
+  }
+
+  const handleSave = async () => {
+    await updateRestaurant({ name, address, phone })
+    await updateConfig({ slug: slug.toLowerCase().replace(/\s+/g, '-') })
+  }
+
+  return (
+    <div>
+      <SectionTitle>Restaurante</SectionTitle>
+
+      {/* Logo */}
+      <div style={{ marginBottom: 24 }}>
+        <FieldLabel>Logo</FieldLabel>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div
+            style={{
+              width: 72,
+              height: 72,
+              borderRadius: 12,
+              border: '1.5px solid #e2e8f0',
+              background: '#f8fafc',
+              overflow: 'hidden',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            {restaurant?.logo_url ? (
+              <img src={restaurant.logo_url} alt="Logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            ) : (
+              <Building2 size={28} color="#94a3b8" />
+            )}
+          </div>
+          <input ref={logoInputRef} type="file" accept="image/*" style={{ display: 'none' }}
+            onChange={e => { const f = e.target.files?.[0]; if (f) handleLogoUpload(f) }}
+          />
+          <button
+            onClick={() => logoInputRef.current?.click()}
+            disabled={uploadingLogo}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '9px 16px',
+              border: '1.5px solid #e2e8f0',
+              borderRadius: 9,
+              background: '#fff',
+              cursor: 'pointer',
+              fontSize: 13,
+              fontWeight: 600,
+              color: '#334155',
+            }}
+          >
+            {uploadingLogo ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+            {uploadingLogo ? 'Subiendo...' : 'Cambiar logo'}
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gap: 16, gridTemplateColumns: '1fr 1fr', maxWidth: 560 }}>
+        <div style={{ gridColumn: '1 / -1' }}>
+          <FieldLabel>Nombre del restaurante</FieldLabel>
+          <TextInput value={name} onChange={setName} placeholder="G-Vento Resto" />
+        </div>
+        <div style={{ gridColumn: '1 / -1' }}>
+          <FieldLabel>Dirección</FieldLabel>
+          <TextInput value={address} onChange={setAddress} placeholder="Calle 123 #45-67, Bogotá" />
+        </div>
+        <div>
+          <FieldLabel>Teléfono</FieldLabel>
+          <TextInput value={phone} onChange={setPhone} placeholder="601 234 5678" />
+        </div>
+        <div>
+          <FieldLabel>Slug público</FieldLabel>
+          <TextInput
+            value={slug}
+            onChange={v => setSlug(v.toLowerCase().replace(/\s+/g, '-'))}
+            placeholder="mi-restaurante"
+          />
+        </div>
+      </div>
+
+      <SaveButton onClick={handleSave} loading={isSaving} />
+    </div>
+  )
+}
+
+// ─── Section 2: Usuarios ──────────────────────────────────────────
+
+function generatePassword(): string {
+  const chars = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%'
+  const arr = new Uint8Array(12)
+  crypto.getRandomValues(arr)
+  return Array.from(arr).map(b => chars[b % chars.length]).join('')
+}
+
+function CreateUserModal({ onClose }: { onClose: () => void }) {
+  const { createUser, isCreatingUser } = useUsers()
+  const [fullName, setFullName] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState(() => generatePassword())
+  const [role, setRole] = useState<'admin' | 'cashier' | 'waiter'>('cashier')
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(`Usuario: ${email}\nContraseña: ${password}`)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  const handleSubmit = async () => {
+    if (!fullName.trim() || !email.trim() || !password.trim()) {
+      toast.error('Completa todos los campos')
+      return
+    }
+    await createUser({ full_name: fullName.trim(), email: email.trim(), password, role })
+    onClose()
+  }
+
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.55)', display: 'grid', placeItems: 'center', zIndex: 50 }}
+      onClick={e => e.target === e.currentTarget && onClose()}
+    >
+      <div style={{ background: '#fff', borderRadius: 14, width: 460, maxWidth: '92%', boxShadow: '0 25px 50px -12px rgba(0,0,0,.25)', overflow: 'hidden' }}>
+        {/* Header */}
+        <div style={{ padding: '18px 22px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', margin: 0 }}>Crear usuario</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}><X size={18} /></button>
+        </div>
+
+        {/* Body */}
+        <div style={{ padding: '22px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div>
+            <FieldLabel>Nombre completo</FieldLabel>
+            <TextInput value={fullName} onChange={setFullName} placeholder="Juan Pérez" />
+          </div>
+          <div>
+            <FieldLabel>Correo electrónico</FieldLabel>
+            <TextInput value={email} onChange={setEmail} placeholder="juan@restaurante.com" type="email" />
+          </div>
+
+          {/* Contraseña + generador */}
+          <div>
+            <FieldLabel>Contraseña temporal</FieldLabel>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1, position: 'relative' }}>
+                <input
+                  type="text"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  style={{
+                    width: '100%',
+                    border: '1.5px solid #e2e8f0',
+                    borderRadius: 8,
+                    padding: '10px 12px',
+                    fontSize: 14,
+                    fontFamily: 'monospace',
+                    color: '#0f172a',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                    letterSpacing: 1,
+                  }}
+                  onFocus={e => (e.currentTarget.style.borderColor = '#10b981')}
+                  onBlur={e => (e.currentTarget.style.borderColor = '#e2e8f0')}
+                />
+              </div>
+              <button
+                onClick={() => setPassword(generatePassword())}
+                title="Generar contraseña"
+                style={{ padding: '0 12px', border: '1.5px solid #e2e8f0', borderRadius: 8, background: '#f8fafc', cursor: 'pointer', color: '#64748b', display: 'flex', alignItems: 'center' }}
+              >
+                <RefreshCw size={15} />
+              </button>
+            </div>
+            <p style={{ fontSize: 11, color: '#94a3b8', marginTop: 6, marginBottom: 0 }}>
+              El usuario deberá cambiar esta contraseña al ingresar por primera vez.
+            </p>
+          </div>
+
+          <div>
+            <FieldLabel>Rol</FieldLabel>
+            <select
+              value={role}
+              onChange={e => setRole(e.target.value as typeof role)}
+              style={{ width: '100%', border: '1.5px solid #e2e8f0', borderRadius: 8, padding: '10px 12px', fontSize: 14, color: '#0f172a', background: '#fff', outline: 'none' }}
+            >
+              <option value="admin">Administrador</option>
+              <option value="cashier">Cajero</option>
+              <option value="waiter">Mesero</option>
+            </select>
+          </div>
+
+          {/* Copiar credenciales */}
+          <button
+            onClick={handleCopy}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 7,
+              padding: '10px',
+              border: `1.5px solid ${copied ? '#a7f3d0' : '#e2e8f0'}`,
+              borderRadius: 9,
+              background: copied ? '#ecfdf5' : '#f8fafc',
+              cursor: 'pointer',
+              fontSize: 13,
+              fontWeight: 600,
+              color: copied ? '#065f46' : '#334155',
+              transition: 'all .15s',
+            }}
+          >
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+            {copied ? 'Credenciales copiadas' : 'Copiar credenciales'}
+          </button>
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: '0 22px 22px', display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button
+            onClick={onClose}
+            style={{ padding: '10px 20px', border: '1.5px solid #e2e8f0', borderRadius: 9, background: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#334155' }}
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={isCreatingUser}
+            style={{
+              padding: '10px 24px',
+              background: isCreatingUser ? '#cbd5e1' : '#10b981',
+              border: 'none',
+              borderRadius: 10,
+              cursor: isCreatingUser ? 'not-allowed' : 'pointer',
+              fontSize: 13,
+              fontWeight: 700,
+              color: '#fff',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              boxShadow: isCreatingUser ? 'none' : '0 4px 12px rgba(16,185,129,.3)',
+            }}
+          >
+            {isCreatingUser && <Loader2 size={14} className="animate-spin" />}
+            Crear usuario
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SectionUsers() {
+  const { users, isLoading, updateUser, isUpdating } = useUsers()
+  const [showCreate, setShowCreate] = useState(false)
+
+  if (isLoading) return <Skeleton />
+
+  return (
+    <div>
+      <SectionTitle>Usuarios</SectionTitle>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+        <button
+          onClick={() => setShowCreate(true)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '9px 18px',
+            background: '#10b981',
+            border: 'none',
+            borderRadius: 10,
+            cursor: 'pointer',
+            fontSize: 13,
+            fontWeight: 700,
+            color: '#fff',
+            boxShadow: '0 4px 12px rgba(16,185,129,.3)',
+          }}
+        >
+          <UserPlus size={15} /> Crear usuario
+        </button>
+      </div>
+
+      <div style={{ border: '1px solid #e2e8f0', borderRadius: 12, overflow: 'hidden' }}>
+        {/* Header */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 180px 120px 80px',
+            padding: '10px 16px',
+            background: '#f8fafc',
+            borderBottom: '1px solid #e2e8f0',
+            fontSize: 11,
+            fontWeight: 600,
+            color: '#64748b',
+            textTransform: 'uppercase',
+            letterSpacing: 0.5,
+          }}
+        >
+          <span>Usuario</span>
+          <span>Rol</span>
+          <span>Estado</span>
+          <span />
+        </div>
+
+        {users.length === 0 && (
+          <div style={{ padding: '32px 16px', textAlign: 'center', color: '#94a3b8', fontSize: 14 }}>
+            No hay usuarios en este restaurante
+          </div>
+        )}
+
+        {users.map((user, idx) => (
+          <div
+            key={user.id}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 180px 120px 80px',
+              padding: '12px 16px',
+              alignItems: 'center',
+              borderBottom: idx < users.length - 1 ? '1px solid #f1f5f9' : 'none',
+            }}
+          >
+            <div>
+              <p style={{ fontSize: 14, fontWeight: 600, color: '#0f172a', margin: 0 }}>{user.full_name}</p>
+              <p style={{ fontSize: 12, color: '#64748b', margin: 0 }}>{user.email}</p>
+            </div>
+
+            <select
+              value={user.role}
+              disabled={isUpdating}
+              onChange={e =>
+                updateUser(user.id, { role: e.target.value as 'admin' | 'cashier' | 'waiter' })
+              }
+              style={{
+                border: '1.5px solid #e2e8f0',
+                borderRadius: 7,
+                padding: '6px 10px',
+                fontSize: 13,
+                color: '#0f172a',
+                background: '#fff',
+                cursor: 'pointer',
+                outline: 'none',
+              }}
+            >
+              {(Object.keys(ROLE_LABELS) as (keyof typeof ROLE_LABELS)[]).map(r => (
+                <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+              ))}
+            </select>
+
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                fontSize: 12,
+                fontWeight: 600,
+                color: user.is_active ? '#065f46' : '#64748b',
+                background: user.is_active ? '#ecfdf5' : '#f1f5f9',
+                padding: '4px 10px',
+                borderRadius: 20,
+                width: 'fit-content',
+              }}
+            >
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  background: user.is_active ? '#10b981' : '#94a3b8',
+                }}
+              />
+              {user.is_active ? 'Activo' : 'Inactivo'}
+            </span>
+
+            <button
+              onClick={() => updateUser(user.id, { is_active: !user.is_active })}
+              disabled={isUpdating}
+              title={user.is_active ? 'Desactivar' : 'Activar'}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: user.is_active ? '#10b981' : '#94a3b8', display: 'flex', alignItems: 'center' }}
+            >
+              {user.is_active ? <ToggleRight size={24} /> : <ToggleLeft size={24} />}
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {showCreate && <CreateUserModal onClose={() => setShowCreate(false)} />}
+    </div>
+  )
+}
+
+// ─── Section 3: Caja ──────────────────────────────────────────────
+
+function SectionCaja() {
+  const { config, isLoading, updateConfig, isSaving } = useRestaurantConfig()
+  const { profile } = useAuth()
+  const nequiInputRef = useRef<HTMLInputElement>(null)
+  const [uploadingQR, setUploadingQR] = useState(false)
+
+  const reasons: string[] = config.cash_out_reasons ?? DEFAULT_CASH_OUT_REASONS
+  const methods: PaymentMethod[] = config.payment_methods ?? ['cash', 'card', 'transfer', 'nequi']
+
+  const ALL_METHODS: { value: PaymentMethod; label: string }[] = [
+    { value: 'cash', label: 'Efectivo' },
+    { value: 'card', label: 'Tarjeta' },
+    { value: 'transfer', label: 'Transferencia' },
+    { value: 'nequi', label: 'Nequi' },
+  ]
+
+  const [localReasons, setLocalReasons] = useState<string[]>(reasons)
+  const [localMethods, setLocalMethods] = useState<PaymentMethod[]>(methods)
+
+  const toggleMethod = (m: PaymentMethod) =>
+    setLocalMethods(prev => prev.includes(m) ? prev.filter(x => x !== m) : [...prev, m])
+
+  const handleNequiUpload = async (file: File) => {
+    if (!profile?.restaurant_id) return
+    setUploadingQR(true)
+    const url = await uploadNequiQR(profile.restaurant_id, file)
+    setUploadingQR(false)
+    if (!url) { toast.error('Error al subir el QR'); return }
+    await updateConfig({ nequi_qr_url: url })
+  }
+
+  if (isLoading) return <Skeleton />
+
+  return (
+    <div>
+      <SectionTitle>Caja</SectionTitle>
+
+      {/* Motivos de egreso */}
+      <div style={{ marginBottom: 32 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>Motivos de egreso</h3>
+        <p style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>
+          Aparecen como opciones rápidas al registrar egresos de caja.
+        </p>
+        <EditableList items={localReasons} onChange={setLocalReasons} placeholder="Nuevo motivo..." />
+      </div>
+
+      {/* Métodos de pago */}
+      <div style={{ marginBottom: 32 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>Métodos de pago habilitados</h3>
+        <p style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>
+          Solo los métodos activos aparecen en el flujo de cobro.
+        </p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+          {ALL_METHODS.map(({ value, label }) => {
+            const active = localMethods.includes(value)
+            return (
+              <button
+                key={value}
+                onClick={() => toggleMethod(value)}
+                style={{
+                  padding: '8px 18px',
+                  border: `1.5px solid ${active ? '#10b981' : '#e2e8f0'}`,
+                  borderRadius: 9,
+                  background: active ? '#ecfdf5' : '#fff',
+                  color: active ? '#065f46' : '#64748b',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all .12s',
+                }}
+              >
+                {label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* QR Nequi */}
+      <div style={{ marginBottom: 8 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>QR de Nequi</h3>
+        <p style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>
+          Se muestra en el modal de cobro cuando el método es Nequi.
+        </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          {config.nequi_qr_url && (
+            <div style={{ width: 88, height: 88, border: '1.5px solid #e2e8f0', borderRadius: 10, overflow: 'hidden' }}>
+              <img src={config.nequi_qr_url} alt="QR Nequi" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            </div>
+          )}
+          <input ref={nequiInputRef} type="file" accept="image/*" style={{ display: 'none' }}
+            onChange={e => { const f = e.target.files?.[0]; if (f) handleNequiUpload(f) }}
+          />
+          <button
+            onClick={() => nequiInputRef.current?.click()}
+            disabled={uploadingQR}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '9px 16px',
+              border: '1.5px solid #e2e8f0',
+              borderRadius: 9,
+              background: '#fff',
+              cursor: 'pointer',
+              fontSize: 13,
+              fontWeight: 600,
+              color: '#334155',
+            }}
+          >
+            {uploadingQR ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+            {uploadingQR ? 'Subiendo...' : config.nequi_qr_url ? 'Cambiar QR' : 'Subir QR'}
+          </button>
+        </div>
+      </div>
+
+      <SaveButton
+        onClick={() => updateConfig({ cash_out_reasons: localReasons, payment_methods: localMethods })}
+        loading={isSaving}
+      />
+    </div>
+  )
+}
+
+// ─── Section 4: Cocina ────────────────────────────────────────────
+
+function SectionCocina() {
+  const { config, isLoading, updateConfig, isSaving } = useRestaurantConfig()
+
+  const [pin, setPin] = useState('')
+  const [stations, setStations] = useState<string[]>([])
+  const [greenMin, setGreenMin] = useState(10)
+  const [amberMin, setAmberMin] = useState(20)
+  const [initialized, setInitialized] = useState(false)
+
+  if (!initialized && !isLoading) {
+    setPin(config.kitchen_pin ?? '')
+    setStations(config.kitchen_stations ?? DEFAULT_STATIONS)
+    setGreenMin(config.kds_timers?.green ?? 10)
+    setAmberMin(config.kds_timers?.amber ?? 20)
+    setInitialized(true)
+  }
+
+  if (isLoading) return <Skeleton />
+
+  return (
+    <div>
+      <SectionTitle>Cocina</SectionTitle>
+
+      {/* PIN */}
+      <div style={{ marginBottom: 28 }}>
+        <FieldLabel>PIN de acceso al KDS (4 dígitos)</FieldLabel>
+        <input
+          type="text"
+          inputMode="numeric"
+          value={pin}
+          maxLength={4}
+          onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+          placeholder="Sin PIN = acceso libre"
+          style={{
+            width: 160,
+            border: '1.5px solid #e2e8f0',
+            borderRadius: 8,
+            padding: '10px 12px',
+            fontSize: 20,
+            fontFamily: 'monospace',
+            letterSpacing: 8,
+            color: '#0f172a',
+            outline: 'none',
+          }}
+          onFocus={e => (e.currentTarget.style.borderColor = '#10b981')}
+          onBlur={e => (e.currentTarget.style.borderColor = '#e2e8f0')}
+        />
+      </div>
+
+      {/* Estaciones */}
+      <div style={{ marginBottom: 28 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>Estaciones de cocina</h3>
+        <p style={{ fontSize: 12, color: '#64748b', marginBottom: 12 }}>
+          Se usan para categorizar órdenes en el KDS.
+        </p>
+        <EditableList items={stations} onChange={setStations} placeholder="Nueva estación..." />
+      </div>
+
+      {/* Semáforo */}
+      <div style={{ marginBottom: 8 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>Tiempos del semáforo</h3>
+        <p style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>
+          Controla el color de las cards en el KDS según el tiempo transcurrido.
+        </p>
+        <div style={{ display: 'flex', gap: 24 }}>
+          <div>
+            <FieldLabel>
+              <span style={{ color: '#10b981' }}>Verde</span> hasta (min)
+            </FieldLabel>
+            <input
+              type="number"
+              min={1}
+              max={59}
+              value={greenMin}
+              onChange={e => setGreenMin(Number(e.target.value))}
+              style={{
+                width: 100,
+                border: '1.5px solid #e2e8f0',
+                borderRadius: 8,
+                padding: '9px 12px',
+                fontSize: 16,
+                fontFamily: 'monospace',
+                color: '#0f172a',
+                outline: 'none',
+              }}
+              onFocus={e => (e.currentTarget.style.borderColor = '#10b981')}
+              onBlur={e => (e.currentTarget.style.borderColor = '#e2e8f0')}
+            />
+          </div>
+          <div>
+            <FieldLabel>
+              <span style={{ color: '#f59e0b' }}>Ámbar</span> hasta (min)
+            </FieldLabel>
+            <input
+              type="number"
+              min={1}
+              max={120}
+              value={amberMin}
+              onChange={e => setAmberMin(Number(e.target.value))}
+              style={{
+                width: 100,
+                border: '1.5px solid #e2e8f0',
+                borderRadius: 8,
+                padding: '9px 12px',
+                fontSize: 16,
+                fontFamily: 'monospace',
+                color: '#0f172a',
+                outline: 'none',
+              }}
+              onFocus={e => (e.currentTarget.style.borderColor = '#10b981')}
+              onBlur={e => (e.currentTarget.style.borderColor = '#e2e8f0')}
+            />
+          </div>
+        </div>
+      </div>
+
+      <SaveButton
+        onClick={() =>
+          updateConfig({
+            kitchen_pin: pin || null,
+            kitchen_stations: stations,
+            kds_timers: { green: greenMin, amber: amberMin },
+          })
+        }
+        loading={isSaving}
+      />
+    </div>
+  )
+}
+
+// ─── Section 5: Delivery ──────────────────────────────────────────
+
+type CourierRow = Tables<'couriers'>
+
+function CourierFormModal({
+  courier,
+  restaurantId,
+  onClose,
+}: {
+  courier: CourierRow | null
+  restaurantId: string
+  onClose: () => void
+}) {
+  const qc = useQueryClient()
+  const [name, setName] = useState(courier?.name ?? '')
+  const [phone, setPhone] = useState(courier?.phone ?? '')
+  const [saving, setSaving] = useState(false)
+
+  const handleSave = async () => {
+    if (!name.trim()) { toast.error('El nombre es obligatorio'); return }
+    setSaving(true)
+    const { error } = await upsertCourier({
+      ...(courier ? { id: courier.id } : {}),
+      restaurant_id: restaurantId,
+      name: name.trim(),
+      phone: phone.trim() || null,
+      is_active: true,
+    })
+    setSaving(false)
+    if (error) { toast.error('Error al guardar repartidor'); return }
+    toast.success(courier ? 'Repartidor actualizado' : 'Repartidor creado')
+    qc.invalidateQueries({ queryKey: ['all_couriers', restaurantId] })
+    onClose()
+  }
+
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.55)', display: 'grid', placeItems: 'center', zIndex: 50 }}
+      onClick={e => e.target === e.currentTarget && onClose()}
+    >
+      <div style={{ background: '#fff', borderRadius: 14, width: 400, boxShadow: '0 25px 50px -12px rgba(0,0,0,.25)' }}>
+        <div style={{ padding: '18px 22px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', margin: 0 }}>
+            {courier ? 'Editar repartidor' : 'Nuevo repartidor'}
+          </h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}><X size={18} /></button>
+        </div>
+        <div style={{ padding: '22px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div>
+            <FieldLabel>Nombre</FieldLabel>
+            <TextInput value={name} onChange={setName} placeholder="Pedro Ramírez" />
+          </div>
+          <div>
+            <FieldLabel>Teléfono (opcional)</FieldLabel>
+            <TextInput value={phone} onChange={setPhone} placeholder="310 000 0000" />
+          </div>
+        </div>
+        <div style={{ padding: '0 22px 22px', display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={{ padding: '10px 20px', border: '1.5px solid #e2e8f0', borderRadius: 9, background: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#334155' }}>
+            Cancelar
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            style={{ padding: '10px 24px', background: saving ? '#cbd5e1' : '#10b981', border: 'none', borderRadius: 10, cursor: saving ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: 6, boxShadow: saving ? 'none' : '0 4px 12px rgba(16,185,129,.3)' }}
+          >
+            {saving && <Loader2 size={14} className="animate-spin" />}
+            Guardar
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SectionDelivery() {
+  const { profile } = useAuth()
+  const { config, isLoading: configLoading, updateConfig, isSaving } = useRestaurantConfig()
+  const restaurantId = profile?.restaurant_id ?? ''
+  const qc = useQueryClient()
+
+  const [defaultTime, setDefaultTime] = useState<number>(config.default_delivery_time ?? 30)
+  const [editCourier, setEditCourier] = useState<CourierRow | null | 'new'>()
+  const [timeInitialized, setTimeInitialized] = useState(false)
+
+  if (!timeInitialized && !configLoading) {
+    setDefaultTime(config.default_delivery_time ?? 30)
+    setTimeInitialized(true)
+  }
+
+  const { data: couriers = [], isLoading: couriersLoading } = useQuery({
+    queryKey: ['all_couriers', restaurantId],
+    queryFn: async () => {
+      const { data, error } = await getAllCouriers(restaurantId)
+      if (error) throw error
+      return data ?? []
+    },
+    enabled: !!restaurantId,
+    staleTime: 30_000,
+  })
+
+  const handleDeactivate = async (id: string) => {
+    const { error } = await deleteCourier(id)
+    if (error) { toast.error('Error al desactivar repartidor'); return }
+    toast.success('Repartidor desactivado')
+    qc.invalidateQueries({ queryKey: ['all_couriers', restaurantId] })
+  }
+
+  if (configLoading || couriersLoading) return <Skeleton />
+
+  return (
+    <div>
+      <SectionTitle>Delivery</SectionTitle>
+
+      {/* Tiempo estimado default */}
+      <div style={{ marginBottom: 32 }}>
+        <FieldLabel>Tiempo estimado de entrega por defecto (minutos)</FieldLabel>
+        <input
+          type="number"
+          min={5}
+          max={180}
+          value={defaultTime}
+          onChange={e => setDefaultTime(Number(e.target.value))}
+          style={{
+            width: 120,
+            border: '1.5px solid #e2e8f0',
+            borderRadius: 8,
+            padding: '9px 12px',
+            fontSize: 16,
+            fontFamily: 'monospace',
+            color: '#0f172a',
+            outline: 'none',
+          }}
+          onFocus={e => (e.currentTarget.style.borderColor = '#10b981')}
+          onBlur={e => (e.currentTarget.style.borderColor = '#e2e8f0')}
+        />
+        <SaveButton onClick={() => updateConfig({ default_delivery_time: defaultTime })} loading={isSaving} />
+      </div>
+
+      {/* Repartidores */}
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>Repartidores</h3>
+          <button
+            onClick={() => setEditCourier('new')}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', background: '#10b981', border: 'none', borderRadius: 9, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#fff', boxShadow: '0 4px 12px rgba(16,185,129,.3)' }}
+          >
+            <Plus size={14} /> Agregar
+          </button>
+        </div>
+
+        <div style={{ border: '1px solid #e2e8f0', borderRadius: 12, overflow: 'hidden' }}>
+          {couriers.length === 0 && (
+            <div style={{ padding: '28px 16px', textAlign: 'center', color: '#94a3b8', fontSize: 14 }}>
+              No hay repartidores registrados
+            </div>
+          )}
+          {couriers.map((c, idx) => (
+            <div
+              key={c.id}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                padding: '12px 16px',
+                borderBottom: idx < couriers.length - 1 ? '1px solid #f1f5f9' : 'none',
+                gap: 12,
+                opacity: c.is_active ? 1 : 0.5,
+              }}
+            >
+              <div style={{ flex: 1 }}>
+                <p style={{ fontSize: 14, fontWeight: 600, color: '#0f172a', margin: 0 }}>{c.name}</p>
+                {c.phone && <p style={{ fontSize: 12, color: '#64748b', margin: 0 }}>{c.phone}</p>}
+              </div>
+              <span style={{ fontSize: 11, fontWeight: 600, color: c.is_active ? '#065f46' : '#64748b', background: c.is_active ? '#ecfdf5' : '#f1f5f9', padding: '3px 10px', borderRadius: 20 }}>
+                {c.is_active ? 'Activo' : 'Inactivo'}
+              </span>
+              <button
+                onClick={() => setEditCourier(c)}
+                style={{ background: 'none', border: '1px solid #e2e8f0', borderRadius: 7, padding: '5px 10px', cursor: 'pointer', fontSize: 12, color: '#334155' }}
+              >
+                Editar
+              </button>
+              {c.is_active && (
+                <button
+                  onClick={() => handleDeactivate(c.id)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}
+                  title="Desactivar"
+                >
+                  <Trash2 size={15} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {editCourier !== undefined && (
+        <CourierFormModal
+          courier={editCourier === 'new' ? null : editCourier}
+          restaurantId={restaurantId}
+          onClose={() => setEditCourier(undefined)}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─── Section 6: Notificaciones ────────────────────────────────────
+
+function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      onClick={() => onChange(!checked)}
+      style={{
+        width: 44,
+        height: 24,
+        borderRadius: 12,
+        background: checked ? '#10b981' : '#cbd5e1',
+        border: 'none',
+        cursor: 'pointer',
+        position: 'relative',
+        transition: 'background .15s',
+        flexShrink: 0,
+      }}
+    >
+      <span
+        style={{
+          position: 'absolute',
+          top: 3,
+          left: checked ? 23 : 3,
+          width: 18,
+          height: 18,
+          borderRadius: '50%',
+          background: '#fff',
+          transition: 'left .15s',
+          boxShadow: '0 1px 4px rgba(0,0,0,.2)',
+        }}
+      />
+    </button>
+  )
+}
+
+function SectionNotificaciones() {
+  const { config, isLoading, updateConfig, isSaving } = useRestaurantConfig()
+
+  const [deliverySound, setDeliverySound] = useState(true)
+  const [kitchenSound, setKitchenSound] = useState(true)
+  const [initialized, setInitialized] = useState(false)
+
+  if (!initialized && !isLoading) {
+    setDeliverySound(config.notifications?.delivery_sound ?? true)
+    setKitchenSound(config.notifications?.kitchen_sound ?? true)
+    setInitialized(true)
+  }
+
+  if (isLoading) return <Skeleton />
+
+  const ToggleRow = ({
+    label,
+    description,
+    value,
+    onChange,
+  }: {
+    label: string
+    description: string
+    value: boolean
+    onChange: (v: boolean) => void
+  }) => (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '16px 20px',
+        border: '1px solid #e2e8f0',
+        borderRadius: 10,
+        background: '#fff',
+        gap: 16,
+      }}
+    >
+      <div>
+        <p style={{ fontSize: 14, fontWeight: 600, color: '#0f172a', margin: 0 }}>{label}</p>
+        <p style={{ fontSize: 12, color: '#64748b', margin: '2px 0 0' }}>{description}</p>
+      </div>
+      <Toggle checked={value} onChange={onChange} />
+    </div>
+  )
+
+  return (
+    <div>
+      <SectionTitle>Notificaciones</SectionTitle>
+      <p style={{ fontSize: 13, color: '#64748b', marginBottom: 20 }}>
+        Controla las alertas sonoras de cada módulo.
+      </p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 520 }}>
+        <ToggleRow
+          label="Delivery — nueva orden"
+          description="Alerta cuando llega un pedido de delivery"
+          value={deliverySound}
+          onChange={setDeliverySound}
+        />
+        <ToggleRow
+          label="Cocina — nueva comanda"
+          description="Beep triple al recibir una comanda en el KDS"
+          value={kitchenSound}
+          onChange={setKitchenSound}
+        />
+      </div>
+
+      <SaveButton
+        onClick={() =>
+          updateConfig({
+            notifications: { delivery_sound: deliverySound, kitchen_sound: kitchenSound },
+          })
+        }
+        loading={isSaving}
+      />
+    </div>
+  )
+}
+
+// ─── Main page ────────────────────────────────────────────────────
+
+export function ConfigPage() {
+  const [active, setActive] = useState<SectionId>('restaurante')
+
+  const SECTION_MAP: Record<SectionId, React.ReactNode> = {
+    restaurante: <SectionRestaurant />,
+    usuarios: <SectionUsers />,
+    caja: <SectionCaja />,
+    cocina: <SectionCocina />,
+    delivery: <SectionDelivery />,
+    notificaciones: <SectionNotificaciones />,
+  }
+
+  return (
+    <div className="flex h-full overflow-hidden">
+      {/* Left nav */}
+      <nav
+        style={{
+          width: 220,
+          flexShrink: 0,
+          borderRight: '1px solid #e2e8f0',
+          background: '#f8fafc',
+          padding: '16px 10px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 2,
+        }}
+      >
+        <p
+          style={{
+            fontSize: 10,
+            fontWeight: 600,
+            color: '#64748b',
+            textTransform: 'uppercase',
+            letterSpacing: 1,
+            padding: '4px 10px 10px',
+            margin: 0,
+          }}
+        >
+          Ajustes
+        </p>
+        {SECTIONS.map(({ id, label, icon: Icon }) => {
+          const isActive = active === id
+          return (
+            <button
+              key={id}
+              onClick={() => setActive(id)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '9px 12px',
+                borderRadius: 8,
+                border: 'none',
+                cursor: 'pointer',
+                textAlign: 'left',
+                fontSize: 13.5,
+                fontWeight: isActive ? 600 : 500,
+                color: isActive ? '#0f172a' : '#64748b',
+                background: isActive ? '#fff' : 'transparent',
+                boxShadow: isActive ? '0 1px 3px rgba(0,0,0,.07)' : 'none',
+                transition: 'all .12s',
+                width: '100%',
+              }}
+            >
+              <Icon
+                size={16}
+                style={{ color: isActive ? '#10b981' : '#94a3b8', flexShrink: 0 }}
+              />
+              {label}
+            </button>
+          )
+        })}
+      </nav>
+
+      {/* Right content */}
+      <main
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          padding: '36px 48px',
+          background: '#fff',
+        }}
+      >
+        <div style={{ maxWidth: 640 }}>
+          {SECTION_MAP[active]}
+        </div>
+      </main>
+    </div>
+  )
+}

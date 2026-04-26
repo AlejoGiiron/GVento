@@ -12,6 +12,7 @@ import { KitchenPage } from '@/pages/KitchenPage'
 import { DeliveryPage } from '@/pages/DeliveryPage'
 import { ProductsPage } from '@/pages/ProductsPage'
 import { ReportsPage } from '@/pages/ReportsPage'
+import { ConfigPage } from '@/pages/ConfigPage'
 
 function App() {
   const [queryClient] = useState(() => new QueryClient())
@@ -39,17 +40,8 @@ function App() {
               <Route element={<ProtectedRoute roles={['admin']} />}>
                 <Route path="productos" element={<ProductsPage />} />
                 <Route path="reportes" element={<ReportsPage />} />
-                <Route
-                  path="config"
-                  element={
-                    <div className="p-8">
-                      <h1 className="text-2xl font-semibold text-slate-900">Configuración</h1>
-                      <p className="text-slate-500 mt-1 text-sm">
-                        Configuración del restaurante — próximamente
-                      </p>
-                    </div>
-                  }
-                />
+                <Route path="config" element={<ConfigPage />} />
+                <Route path="configuracion" element={<ConfigPage />} />
               </Route>
             </Route>
           </Route>

@@ -33,7 +33,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/delivery', label: 'Delivery', icon: Truck },
   { to: '/productos', label: 'Productos', icon: Package, roles: ['admin'] },
   { to: '/reportes', label: 'Reportes', icon: BarChart3, roles: ['admin'] },
-  { to: '/config', label: 'Configuración', icon: Settings, roles: ['admin'] },
+  { to: '/configuracion', label: 'Configuración', icon: Settings, roles: ['admin'] },
 ]
 
 const ROLE_LABELS: Record<UserRole, string> = {

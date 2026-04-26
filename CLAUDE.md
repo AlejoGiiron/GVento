@@ -76,9 +76,23 @@ Resumen rápido:
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: 08b - ReportsPage UI (sesión 2026-04-25)
+Última fase completada: 09 - Panel de configuración (sesión 2026-04-25)
 En progreso: —
 Siguiente: —
+
+### Detalle fase 09 - Panel de configuración (sesión 2026-04-25)
+- ConfigPage.tsx: layout dos columnas (nav 220px + contenido scrollable), 6 secciones
+- Sección Restaurante: nombre, dirección, teléfono, slug (en config.slug), upload logo a bucket restaurant-logos
+- Sección Usuarios: tabla con rol select inline + toggle is_active; InviteModal con email/nombre/rol; llama a Edge Function invite-user via supabase.functions.invoke
+- Sección Caja: EditableList para motivos de egreso (config.cash_out_reasons); toggle buttons métodos de pago (config.payment_methods); upload QR Nequi a restaurant-logos (config.nequi_qr_url)
+- Sección Cocina: PIN 4 dígitos (config.kitchen_pin); EditableList estaciones (config.kitchen_stations); inputs timers semáforo verde/ámbar (config.kds_timers)
+- Sección Delivery: CourierFormModal reutiliza upsertCourier/deleteCourier; usa getAllCouriers (incluye inactivos); tiempo estimado default (config.default_delivery_time)
+- Sección Notificaciones: toggles delivery_sound y kitchen_sound (config.notifications)
+- useRestaurantConfig: carga restaurant + config tipado; updateRestaurant y updateConfig (merge parcial); staleTime 30s
+- useUsers: carga profiles del restaurante; updateUser (rol, is_active); inviteUser via Edge Function
+- Nuevos helpers: getRestaurantProfiles, updateProfile, inviteUser, uploadRestaurantLogo, uploadNequiQR, getAllCouriers
+- Migración: supabase/config-profile-active.sql agrega is_active boolean NOT NULL DEFAULT true a profiles
+- Rutas: /configuracion y /config (alias) bajo ProtectedRoute roles=['admin']; sidebar apunta a /configuracion
 
 ### Detalle fase 08b - ReportsPage UI (sesión 2026-04-25)
 - ReportsPage.tsx: barra de controles fija + contenido scrollable (patrón flex h-full)
