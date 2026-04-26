@@ -10,6 +10,7 @@ export type Database = {
           full_name: string
           role: 'admin' | 'cashier' | 'waiter'
           restaurant_id: string
+          is_active: boolean
           created_at: string
           updated_at: string
         }
@@ -19,6 +20,7 @@ export type Database = {
           full_name: string
           role: 'admin' | 'cashier' | 'waiter'
           restaurant_id: string
+          is_active?: boolean
           created_at?: string
           updated_at?: string
         }
@@ -28,6 +30,7 @@ export type Database = {
           full_name?: string
           role?: 'admin' | 'cashier' | 'waiter'
           restaurant_id?: string
+          is_active?: boolean
           created_at?: string
           updated_at?: string
         }

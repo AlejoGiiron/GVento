@@ -288,3 +288,61 @@ export const assignOrderCourier = (
     .eq('id', orderId)
     .select()
     .single()
+
+// --- All couriers (including inactive, for config panel) ---
+
+export const getAllCouriers = (restaurantId: string) =>
+  supabase
+    .from('couriers')
+    .select('*')
+    .eq('restaurant_id', restaurantId)
+    .order('name')
+
+// --- Profiles (restaurant users, for admin config) ---
+
+export const getRestaurantProfiles = (restaurantId: string) =>
+  supabase.from('profiles').select('*').eq('restaurant_id', restaurantId).order('full_name')
+
+export const updateProfile = (userId: string, data: TablesUpdate<'profiles'>) =>
+  supabase.from('profiles').update(data).eq('id', userId).select().single()
+
+export const inviteUser = (params: {
+  email: string
+  full_name: string
+  role: 'admin' | 'cashier' | 'waiter'
+  restaurant_id: string
+}) => supabase.functions.invoke('invite-user', { body: params })
+
+// --- Storage: restaurant-logos (logo + nequi QR) ---
+
+export const uploadRestaurantLogo = async (
+  restaurantId: string,
+  file: File,
+): Promise<string | null> => {
+  const ext = file.name.split('.').pop() ?? 'png'
+  const path = `${restaurantId}/logo.${ext}`
+  const { data, error } = await supabase.storage
+    .from('restaurant-logos')
+    .upload(path, file, { upsert: true })
+  if (error || !data) return null
+  const { data: { publicUrl } } = supabase.storage
+    .from('restaurant-logos')
+    .getPublicUrl(data.path)
+  return publicUrl
+}
+
+export const uploadNequiQR = async (
+  restaurantId: string,
+  file: File,
+): Promise<string | null> => {
+  const ext = file.name.split('.').pop() ?? 'png'
+  const path = `${restaurantId}/nequi-qr.${ext}`
+  const { data, error } = await supabase.storage
+    .from('restaurant-logos')
+    .upload(path, file, { upsert: true })
+  if (error || !data) return null
+  const { data: { publicUrl } } = supabase.storage
+    .from('restaurant-logos')
+    .getPublicUrl(data.path)
+  return publicUrl
+}
