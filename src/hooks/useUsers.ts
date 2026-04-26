@@ -4,7 +4,7 @@ import { useAuth } from '@/hooks/useAuth'
 import {
   getRestaurantProfiles,
   updateProfile,
-  inviteUser as inviteUserHelper,
+  createUser as createUserHelper,
 } from '@/lib/supabase-helpers'
 import type { Tables, TablesUpdate } from '@/types/database.types'
 
@@ -39,17 +39,20 @@ export function useUsers() {
     onError: () => toast.error('Error al actualizar el usuario'),
   })
 
-  const inviteMutation = useMutation({
+  const createUserMutation = useMutation({
     mutationFn: async (params: {
       email: string
+      password: string
       full_name: string
       role: 'admin' | 'cashier' | 'waiter'
     }) => {
-      const { error } = await inviteUserHelper({ ...params, restaurant_id: restaurantId! })
+      const { data, error } = await createUserHelper({ ...params, restaurant_id: restaurantId! })
       if (error) throw error
+      const body = data as { error?: string } | null
+      if (body?.error) throw new Error(body.error)
     },
-    onSuccess: () => { invalidate(); toast.success('Invitación enviada') },
-    onError: () => toast.error('Error al invitar usuario — se requiere una Edge Function configurada'),
+    onSuccess: () => { invalidate(); toast.success('Usuario creado') },
+    onError: (err: Error) => toast.error(err.message ?? 'Error al crear el usuario'),
   })
 
   return {
@@ -57,8 +60,8 @@ export function useUsers() {
     isLoading,
     updateUser: (userId: string, data: TablesUpdate<'profiles'>) =>
       updateMutation.mutateAsync({ userId, data }),
-    inviteUser: inviteMutation.mutateAsync,
+    createUser: createUserMutation.mutateAsync,
     isUpdating: updateMutation.isPending,
-    isInviting: inviteMutation.isPending,
+    isCreatingUser: createUserMutation.isPending,
   }
 }

@@ -15,6 +15,9 @@ import {
   UserPlus,
   ToggleLeft,
   ToggleRight,
+  Copy,
+  RefreshCw,
+  Check,
 } from 'lucide-react'
 import { useRestaurantConfig } from '@/hooks/useRestaurantConfig'
 import { useUsers } from '@/hooks/useUsers'
@@ -355,69 +358,135 @@ function SectionRestaurant() {
 
 // ─── Section 2: Usuarios ──────────────────────────────────────────
 
-function InviteModal({ onClose }: { onClose: () => void }) {
-  const { inviteUser, isInviting } = useUsers()
-  const [email, setEmail] = useState('')
+function generatePassword(): string {
+  const chars = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%'
+  const arr = new Uint8Array(12)
+  crypto.getRandomValues(arr)
+  return Array.from(arr).map(b => chars[b % chars.length]).join('')
+}
+
+function CreateUserModal({ onClose }: { onClose: () => void }) {
+  const { createUser, isCreatingUser } = useUsers()
   const [fullName, setFullName] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState(() => generatePassword())
   const [role, setRole] = useState<'admin' | 'cashier' | 'waiter'>('cashier')
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(`Usuario: ${email}\nContraseña: ${password}`)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
 
   const handleSubmit = async () => {
-    if (!email.trim() || !fullName.trim()) { toast.error('Completa todos los campos'); return }
-    await inviteUser({ email: email.trim(), full_name: fullName.trim(), role })
+    if (!fullName.trim() || !email.trim() || !password.trim()) {
+      toast.error('Completa todos los campos')
+      return
+    }
+    await createUser({ full_name: fullName.trim(), email: email.trim(), password, role })
     onClose()
   }
 
   return (
     <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(15,23,42,.55)',
-        display: 'grid',
-        placeItems: 'center',
-        zIndex: 50,
-      }}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.55)', display: 'grid', placeItems: 'center', zIndex: 50 }}
       onClick={e => e.target === e.currentTarget && onClose()}
     >
-      <div style={{ background: '#fff', borderRadius: 14, width: 440, maxWidth: '92%', boxShadow: '0 25px 50px -12px rgba(0,0,0,.25)', overflow: 'hidden' }}>
+      <div style={{ background: '#fff', borderRadius: 14, width: 460, maxWidth: '92%', boxShadow: '0 25px 50px -12px rgba(0,0,0,.25)', overflow: 'hidden' }}>
+        {/* Header */}
         <div style={{ padding: '18px 22px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', margin: 0 }}>Invitar usuario</h3>
+          <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', margin: 0 }}>Crear usuario</h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}><X size={18} /></button>
         </div>
+
+        {/* Body */}
         <div style={{ padding: '22px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div>
-            <FieldLabel>Correo electrónico</FieldLabel>
-            <TextInput value={email} onChange={setEmail} placeholder="usuario@restaurante.com" type="email" />
-          </div>
           <div>
             <FieldLabel>Nombre completo</FieldLabel>
             <TextInput value={fullName} onChange={setFullName} placeholder="Juan Pérez" />
           </div>
           <div>
+            <FieldLabel>Correo electrónico</FieldLabel>
+            <TextInput value={email} onChange={setEmail} placeholder="juan@restaurante.com" type="email" />
+          </div>
+
+          {/* Contraseña + generador */}
+          <div>
+            <FieldLabel>Contraseña temporal</FieldLabel>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1, position: 'relative' }}>
+                <input
+                  type="text"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  style={{
+                    width: '100%',
+                    border: '1.5px solid #e2e8f0',
+                    borderRadius: 8,
+                    padding: '10px 12px',
+                    fontSize: 14,
+                    fontFamily: 'monospace',
+                    color: '#0f172a',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                    letterSpacing: 1,
+                  }}
+                  onFocus={e => (e.currentTarget.style.borderColor = '#10b981')}
+                  onBlur={e => (e.currentTarget.style.borderColor = '#e2e8f0')}
+                />
+              </div>
+              <button
+                onClick={() => setPassword(generatePassword())}
+                title="Generar contraseña"
+                style={{ padding: '0 12px', border: '1.5px solid #e2e8f0', borderRadius: 8, background: '#f8fafc', cursor: 'pointer', color: '#64748b', display: 'flex', alignItems: 'center' }}
+              >
+                <RefreshCw size={15} />
+              </button>
+            </div>
+            <p style={{ fontSize: 11, color: '#94a3b8', marginTop: 6, marginBottom: 0 }}>
+              El usuario deberá cambiar esta contraseña al ingresar por primera vez.
+            </p>
+          </div>
+
+          <div>
             <FieldLabel>Rol</FieldLabel>
             <select
               value={role}
               onChange={e => setRole(e.target.value as typeof role)}
-              style={{
-                width: '100%',
-                border: '1.5px solid #e2e8f0',
-                borderRadius: 8,
-                padding: '10px 12px',
-                fontSize: 14,
-                color: '#0f172a',
-                background: '#fff',
-                outline: 'none',
-              }}
+              style={{ width: '100%', border: '1.5px solid #e2e8f0', borderRadius: 8, padding: '10px 12px', fontSize: 14, color: '#0f172a', background: '#fff', outline: 'none' }}
             >
               <option value="admin">Administrador</option>
               <option value="cashier">Cajero</option>
               <option value="waiter">Mesero</option>
             </select>
           </div>
-          <p style={{ fontSize: 12, color: '#94a3b8', margin: 0 }}>
-            El usuario recibirá un correo con instrucciones para activar su cuenta.
-          </p>
+
+          {/* Copiar credenciales */}
+          <button
+            onClick={handleCopy}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 7,
+              padding: '10px',
+              border: `1.5px solid ${copied ? '#a7f3d0' : '#e2e8f0'}`,
+              borderRadius: 9,
+              background: copied ? '#ecfdf5' : '#f8fafc',
+              cursor: 'pointer',
+              fontSize: 13,
+              fontWeight: 600,
+              color: copied ? '#065f46' : '#334155',
+              transition: 'all .15s',
+            }}
+          >
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+            {copied ? 'Credenciales copiadas' : 'Copiar credenciales'}
+          </button>
         </div>
+
+        {/* Footer */}
         <div style={{ padding: '0 22px 22px', display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
           <button
             onClick={onClose}
@@ -427,24 +496,24 @@ function InviteModal({ onClose }: { onClose: () => void }) {
           </button>
           <button
             onClick={handleSubmit}
-            disabled={isInviting}
+            disabled={isCreatingUser}
             style={{
               padding: '10px 24px',
-              background: isInviting ? '#cbd5e1' : '#10b981',
+              background: isCreatingUser ? '#cbd5e1' : '#10b981',
               border: 'none',
               borderRadius: 10,
-              cursor: isInviting ? 'not-allowed' : 'pointer',
+              cursor: isCreatingUser ? 'not-allowed' : 'pointer',
               fontSize: 13,
               fontWeight: 700,
               color: '#fff',
               display: 'flex',
               alignItems: 'center',
               gap: 6,
-              boxShadow: isInviting ? 'none' : '0 4px 12px rgba(16,185,129,.3)',
+              boxShadow: isCreatingUser ? 'none' : '0 4px 12px rgba(16,185,129,.3)',
             }}
           >
-            {isInviting && <Loader2 size={14} className="animate-spin" />}
-            Enviar invitación
+            {isCreatingUser && <Loader2 size={14} className="animate-spin" />}
+            Crear usuario
           </button>
         </div>
       </div>
@@ -454,7 +523,7 @@ function InviteModal({ onClose }: { onClose: () => void }) {
 
 function SectionUsers() {
   const { users, isLoading, updateUser, isUpdating } = useUsers()
-  const [showInvite, setShowInvite] = useState(false)
+  const [showCreate, setShowCreate] = useState(false)
 
   if (isLoading) return <Skeleton />
 
@@ -463,7 +532,7 @@ function SectionUsers() {
       <SectionTitle>Usuarios</SectionTitle>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
         <button
-          onClick={() => setShowInvite(true)}
+          onClick={() => setShowCreate(true)}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -479,7 +548,7 @@ function SectionUsers() {
             boxShadow: '0 4px 12px rgba(16,185,129,.3)',
           }}
         >
-          <UserPlus size={15} /> Invitar usuario
+          <UserPlus size={15} /> Crear usuario
         </button>
       </div>
 
@@ -586,7 +655,7 @@ function SectionUsers() {
         ))}
       </div>
 
-      {showInvite && <InviteModal onClose={() => setShowInvite(false)} />}
+      {showCreate && <CreateUserModal onClose={() => setShowCreate(false)} />}
     </div>
   )
 }

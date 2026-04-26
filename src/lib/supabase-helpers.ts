@@ -306,12 +306,13 @@ export const getRestaurantProfiles = (restaurantId: string) =>
 export const updateProfile = (userId: string, data: TablesUpdate<'profiles'>) =>
   supabase.from('profiles').update(data).eq('id', userId).select().single()
 
-export const inviteUser = (params: {
+export const createUser = (params: {
   email: string
+  password: string
   full_name: string
   role: 'admin' | 'cashier' | 'waiter'
   restaurant_id: string
-}) => supabase.functions.invoke('invite-user', { body: params })
+}) => supabase.functions.invoke('create-user', { body: params })
 
 // --- Storage: restaurant-logos (logo + nequi QR) ---
 
