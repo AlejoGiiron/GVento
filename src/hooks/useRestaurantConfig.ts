@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-hot-toast'
 import { useAuth } from '@/hooks/useAuth'
 import { getRestaurant, updateRestaurant } from '@/lib/supabase-helpers'
-import type { TablesUpdate } from '@/types/database.types'
+import type { Json, TablesUpdate } from '@/types/database.types'
 
 export type PaymentMethod = 'cash' | 'card' | 'transfer' | 'nequi'
 
@@ -54,7 +54,7 @@ export function useRestaurantConfig() {
 
   const updateConfig = (patch: Partial<RestaurantConfig>) =>
     updateMutation.mutateAsync({
-      config: { ...config, ...patch } as Record<string, unknown>,
+      config: { ...config, ...patch } as Json,
     })
 
   return {
