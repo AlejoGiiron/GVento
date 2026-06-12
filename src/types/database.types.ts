@@ -1,6 +1,9 @@
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[]
 
 export type Database = {
+  __InternalSupabase: {
+    PostgrestVersion: '12'
+  }
   public: {
     Tables: {
       profiles: {
@@ -567,6 +570,7 @@ export type Database = {
           transfer_total: number
           nequi_total: number
         }
+        Relationships: []
       }
       product_performance: {
         Row: {
@@ -579,6 +583,7 @@ export type Database = {
           total_qty: number
           total_revenue: number
         }
+        Relationships: []
       }
       hourly_sales: {
         Row: {
@@ -588,6 +593,7 @@ export type Database = {
           order_count: number
           total_revenue: number
         }
+        Relationships: []
       }
       waiter_performance: {
         Row: {
@@ -599,6 +605,7 @@ export type Database = {
           total_revenue: number
           avg_ticket: number
         }
+        Relationships: []
       }
     }
     Functions: {

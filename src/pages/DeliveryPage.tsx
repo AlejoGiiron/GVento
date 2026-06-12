@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import {
   Truck, Phone, MapPin, Clock, User, X, Check, ChevronRight,
-  Plus, Pencil, Trash, RefreshCw, Settings, Package,
+  Pencil, Trash, RefreshCw, Settings, Package,
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { useAuth } from '@/hooks/useAuth'

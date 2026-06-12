@@ -50,6 +50,32 @@ Ejemplo: TablesPage usa `checkoutOrder` en lugar de `selectedOrder` para control
 `TableCheckoutModal`. Si `selectedOrder` se vuelve null por Realtime durante el cobro,
 el modal no se desmonta.
 
+## Aprendizajes de proyectos hermanos (G-Quota)
+
+Reglas duras traídas de G-Quota — aplican a todo el trabajo en este repo:
+
+- **NO ASUMIR, CONFIRMAR CONTRA LA BD:** ante un número raro o un comportamiento
+  inesperado, mirar el dato real (un `select` directo, `information_schema`), no
+  teorizar. La hipótesis se valida contra la base, no contra la intuición.
+- **TIPOS GENERADOS, NO A MANO:** regenerar `database.types.ts` con
+  `supabase gen types typescript` después de cada migración. Los 129 errores de
+  tipos de la Fase 0 vinieron justamente de tipos escritos a mano y
+  desincronizados con la BD (vistas sin `Relationships`).
+- **MIGRACIONES NUEVAS, NUNCA EDITAR LAS APLICADAS:** todo cambio de esquema va
+  en un archivo nuevo dentro de `supabase/`. Jamás modificar una migración que ya
+  se aplicó.
+- **`tsc` NO PRUEBA EL SQL:** triggers, RLS y vistas solo se verifican ejecutando
+  con datos reales contra la BD. El compilador de TypeScript no sabe nada del SQL.
+- **VERIFICAR CADA CASO CON DATOS LIMPIOS:** no encadenar pruebas sobre la misma
+  orden/mesa; cada escenario se prueba desde un estado limpio para no arrastrar
+  efectos de la prueba anterior.
+- **`git status` ANTES DE COMMITEAR:** revisar siempre qué se va a incluir; evitar
+  `git add -A` a ciegas.
+- **SECURITY DEFINER → `revoke execute from public`:** Postgres concede `EXECUTE`
+  a `PUBLIC` por defecto en toda función nueva. En funciones `SECURITY DEFINER`
+  hay que revocar ese permiso explícitamente y concederlo solo a los roles que lo
+  necesiten (`authenticated`, `service_role`, etc.).
+
 ## Variables de entorno requeridas
 VITE_GVENTO_SUPABASE_URL=
 VITE_GVENTO_SUPABASE_ANON_KEY=
@@ -220,8 +246,3 @@ Siguiente: —
 - AppLayout: sidebar slate-900, header con nombre y rol del usuario
 - Router completo en App.tsx con rutas públicas y protegidas
 - Páginas placeholder: Ventas, Mesas, Cocina, Productos, Reportes, Config
-
-## Estado actual del proyecto
-Última fase completada: 02 - Core POS
-En progreso: 03 - Gestión de mesas
-Siguiente: 04 - Delivery y tienda online

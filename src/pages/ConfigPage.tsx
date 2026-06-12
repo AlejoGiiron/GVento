@@ -18,6 +18,7 @@ import {
   Copy,
   RefreshCw,
   Check,
+  type LucideIcon,
 } from 'lucide-react'
 import { useRestaurantConfig } from '@/hooks/useRestaurantConfig'
 import { useUsers } from '@/hooks/useUsers'
@@ -30,14 +31,14 @@ import {
   deleteCourier,
 } from '@/lib/supabase-helpers'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import type { PaymentMethod, RestaurantConfig } from '@/hooks/useRestaurantConfig'
+import type { PaymentMethod } from '@/hooks/useRestaurantConfig'
 import type { Tables } from '@/types/database.types'
 
 // ─── Constants ────────────────────────────────────────────────────
 
 type SectionId = 'restaurante' | 'usuarios' | 'caja' | 'cocina' | 'delivery' | 'notificaciones'
 
-const SECTIONS: { id: SectionId; label: string; icon: React.ComponentType<{ size?: number; className?: string }> }[] = [
+const SECTIONS: { id: SectionId; label: string; icon: LucideIcon }[] = [
   { id: 'restaurante', label: 'Restaurante', icon: Building2 },
   { id: 'usuarios', label: 'Usuarios', icon: Users },
   { id: 'caja', label: 'Caja', icon: Wallet },
