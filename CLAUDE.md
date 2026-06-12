@@ -102,9 +102,26 @@ Resumen rápido:
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: 09 - Panel de configuración (sesión 2026-04-25)
+Última fase completada: Fase 0 - Desbloqueo de tipos / build (sesión 2026-06-12)
 En progreso: —
 Siguiente: —
+
+### Detalle Fase 0 - Desbloqueo de tipos y build (sesión 2026-06-12)
+- Causa raíz de 129 errores `never`: el schema hand-written de `database.types.ts` no
+  cumplía `GenericSchema` de postgrest-js 2.104 — las 4 vistas de reportes (fase 08a) se
+  agregaron sin `Relationships`, lo que tumbaba el tipado del cliente Supabase entero
+- Fix: `__InternalSupabase.PostgrestVersion: '12'` + `Relationships: []` en las 4 vistas
+- useRestaurantConfig: `config` casteado a `Json` (no `Record<string, unknown>`)
+- ConfigPage: íconos de secciones tipados como `LucideIcon` (acepta `style`); removido
+  import `RestaurantConfig` sin usar. DeliveryPage: removido import `Plus` sin usar
+- Resultado: `tsc --noEmit` 0 errores y `pnpm build` de producción pasa
+- KitchenPage:758 no requirió null guard — al tiparse `restaurant_id` como string, `rid`
+  se estrecha solo
+- CLAUDE.md: nueva sección "Aprendizajes de proyectos hermanos (G-Quota)"; eliminado bloque
+  "Estado actual" duplicado (decía fase 02)
+- `supabase/security-definer-revoke.sql`: auditoría (verificación + revoke) de las 3
+  funciones SECURITY DEFINER — pendiente de ejecutar/verificar por el usuario en Supabase
+- Rama: `fix/types-postgrest-aprendizajes` (commit c0b6d1d)
 
 ### Detalle fase 09 - Panel de configuración (sesión 2026-04-25)
 - ConfigPage.tsx: layout dos columnas (nav 220px + contenido scrollable), 6 secciones
