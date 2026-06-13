@@ -8,8 +8,11 @@ type Profile = Tables<'profiles'>
 interface AuthContextValue {
   user: User | null
   profile: Profile | null
+  roleId: string | null
+  organizationId: string | null
   isLoading: boolean
   signOut: () => Promise<void>
+  refreshProfile: () => Promise<void>
 }
 
 export const AuthContext = createContext<AuthContextValue | undefined>(undefined)
@@ -58,8 +61,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(null)
   }, [])
 
+  // Re-carga el profile del usuario actual (p. ej. tras cambiar de sede activa).
+  const refreshProfile = useCallback(async () => {
+    if (user) await fetchProfile(user.id)
+  }, [user, fetchProfile])
+
   return (
-    <AuthContext.Provider value={{ user, profile, isLoading, signOut }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        profile,
+        roleId: profile?.role_id ?? null,
+        organizationId: profile?.organization_id ?? null,
+        isLoading,
+        signOut,
+        refreshProfile,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   )

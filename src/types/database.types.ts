@@ -349,6 +349,33 @@ export type Database = {
           },
         ]
       }
+      organizations: {
+        Row: {
+          config: Json
+          created_at: string
+          id: string
+          logo_url: string | null
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          config?: Json
+          created_at?: string
+          id?: string
+          logo_url?: string | null
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          config?: Json
+          created_at?: string
+          id?: string
+          logo_url?: string | null
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       payments: {
         Row: {
           amount: number
@@ -465,8 +492,10 @@ export type Database = {
           full_name: string
           id: string
           is_active: boolean
+          organization_id: string | null
           restaurant_id: string
           role: Database["public"]["Enums"]["user_role"]
+          role_id: string | null
           updated_at: string
         }
         Insert: {
@@ -475,8 +504,10 @@ export type Database = {
           full_name: string
           id: string
           is_active?: boolean
+          organization_id?: string | null
           restaurant_id: string
           role?: Database["public"]["Enums"]["user_role"]
+          role_id?: string | null
           updated_at?: string
         }
         Update: {
@@ -485,16 +516,32 @@ export type Database = {
           full_name?: string
           id?: string
           is_active?: boolean
+          organization_id?: string | null
           restaurant_id?: string
           role?: Database["public"]["Enums"]["user_role"]
+          role_id?: string | null
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "profiles_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "profiles_restaurant_id_fkey"
             columns: ["restaurant_id"]
             isOneToOne: false
             referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "profiles_role_id_fkey"
+            columns: ["role_id"]
+            isOneToOne: false
+            referencedRelation: "roles"
             referencedColumns: ["id"]
           },
         ]
@@ -507,6 +554,7 @@ export type Database = {
           id: string
           logo_url: string | null
           name: string
+          organization_id: string
           phone: string | null
           updated_at: string
         }
@@ -517,6 +565,7 @@ export type Database = {
           id?: string
           logo_url?: string | null
           name: string
+          organization_id: string
           phone?: string | null
           updated_at?: string
         }
@@ -527,10 +576,57 @@ export type Database = {
           id?: string
           logo_url?: string | null
           name?: string
+          organization_id?: string
           phone?: string | null
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "restaurants_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      roles: {
+        Row: {
+          created_at: string
+          id: string
+          is_system: boolean
+          name: string
+          organization_id: string
+          permissions: Json
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_system?: boolean
+          name: string
+          organization_id: string
+          permissions?: Json
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_system?: boolean
+          name?: string
+          organization_id?: string
+          permissions?: Json
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "roles_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       tables: {
         Row: {
@@ -569,6 +665,39 @@ export type Database = {
             columns: ["restaurant_id"]
             isOneToOne: false
             referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_stores: {
+        Row: {
+          created_at: string
+          restaurant_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          restaurant_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          restaurant_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_stores_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_stores_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -673,11 +802,13 @@ export type Database = {
       }
     }
     Functions: {
+      get_my_organization_id: { Args: never; Returns: string }
       get_my_restaurant_id: { Args: never; Returns: string }
       get_my_role: {
         Args: never
         Returns: Database["public"]["Enums"]["user_role"]
       }
+      has_permission: { Args: { perm: string }; Returns: boolean }
     }
     Enums: {
       movement_type: "in" | "out"

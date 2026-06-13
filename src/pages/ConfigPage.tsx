@@ -18,11 +18,18 @@ import {
   Copy,
   RefreshCw,
   Check,
+  Store,
+  Shield,
+  Pencil,
+  Lock,
   type LucideIcon,
 } from 'lucide-react'
 import { useRestaurantConfig } from '@/hooks/useRestaurantConfig'
 import { useUsers } from '@/hooks/useUsers'
 import { useAuth } from '@/hooks/useAuth'
+import { usePermissions } from '@/hooks/usePermissions'
+import { useRoles, rolePermissions, type RoleRow } from '@/hooks/useRoles'
+import { useStores, type StoreRow } from '@/hooks/useStores'
 import {
   uploadRestaurantLogo,
   uploadNequiQR,
@@ -36,22 +43,57 @@ import type { Tables } from '@/types/database.types'
 
 // ─── Constants ────────────────────────────────────────────────────
 
-type SectionId = 'restaurante' | 'usuarios' | 'caja' | 'cocina' | 'delivery' | 'notificaciones'
+type SectionId = 'restaurante' | 'usuarios' | 'sedes' | 'roles' | 'caja' | 'cocina' | 'delivery' | 'notificaciones'
 
-const SECTIONS: { id: SectionId; label: string; icon: LucideIcon }[] = [
+const SECTIONS: { id: SectionId; label: string; icon: LucideIcon; permission?: string }[] = [
   { id: 'restaurante', label: 'Restaurante', icon: Building2 },
   { id: 'usuarios', label: 'Usuarios', icon: Users },
+  { id: 'sedes', label: 'Sedes', icon: Store, permission: 'sedes.gestionar' },
+  { id: 'roles', label: 'Roles y permisos', icon: Shield, permission: 'roles.gestionar' },
   { id: 'caja', label: 'Caja', icon: Wallet },
   { id: 'cocina', label: 'Cocina', icon: ChefHat },
   { id: 'delivery', label: 'Delivery', icon: Truck },
   { id: 'notificaciones', label: 'Notificaciones', icon: Bell },
 ]
 
-const ROLE_LABELS: Record<'admin' | 'cashier' | 'waiter', string> = {
-  admin: 'Administrador',
-  cashier: 'Cajero',
-  waiter: 'Mesero',
-}
+// Catálogo de permisos agrupado por módulo (para la matriz de roles).
+const PERMISSION_GROUPS: { module: string; perms: { key: string; label: string }[] }[] = [
+  { module: 'POS', perms: [
+    { key: 'pos.vender', label: 'Vender' },
+    { key: 'pos.descuento', label: 'Descuento' },
+    { key: 'pos.anular', label: 'Anular' },
+  ] },
+  { module: 'Caja', perms: [
+    { key: 'caja.abrir', label: 'Abrir turno' },
+    { key: 'caja.cerrar', label: 'Cerrar turno' },
+    { key: 'caja.movimientos', label: 'Movimientos' },
+  ] },
+  { module: 'Mesas', perms: [
+    { key: 'mesas.gestionar', label: 'Gestionar' },
+    { key: 'mesas.cobrar', label: 'Cobrar' },
+  ] },
+  { module: 'Cocina', perms: [
+    { key: 'cocina.acceder', label: 'Acceder' },
+  ] },
+  { module: 'Delivery', perms: [
+    { key: 'delivery.gestionar', label: 'Gestionar' },
+  ] },
+  { module: 'Productos', perms: [
+    { key: 'productos.ver', label: 'Ver' },
+    { key: 'productos.editar', label: 'Editar' },
+  ] },
+  { module: 'Reportes', perms: [
+    { key: 'reportes.financiero', label: 'Financiero' },
+    { key: 'reportes.stock', label: 'Stock' },
+    { key: 'reportes.consolidado', label: 'Consolidado' },
+  ] },
+  { module: 'Configuración', perms: [
+    { key: 'config.acceder', label: 'Acceder' },
+    { key: 'usuarios.gestionar', label: 'Usuarios' },
+    { key: 'sedes.gestionar', label: 'Sedes' },
+    { key: 'roles.gestionar', label: 'Roles' },
+  ] },
+]
 
 const DEFAULT_CASH_OUT_REASONS = ['Mercado', 'Domicilio', 'Servicios', 'Otro']
 const DEFAULT_STATIONS = ['Cocina fría', 'Cocina caliente', 'Barra']
@@ -366,13 +408,26 @@ function generatePassword(): string {
   return Array.from(arr).map(b => chars[b % chars.length]).join('')
 }
 
+// Deriva el enum legacy (que exige la Edge Function) desde el nombre del rol RBAC.
+function enumFromRoleName(name: string): 'admin' | 'cashier' | 'waiter' {
+  if (name === 'owner' || name === 'admin') return 'admin'
+  if (name === 'mozo') return 'waiter'
+  return 'cashier'
+}
+
 function CreateUserModal({ onClose }: { onClose: () => void }) {
   const { createUser, isCreatingUser } = useUsers()
+  const { roles } = useRoles()
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState(() => generatePassword())
-  const [role, setRole] = useState<'admin' | 'cashier' | 'waiter'>('cashier')
+  const [roleId, setRoleId] = useState('')
   const [copied, setCopied] = useState(false)
+
+  // Default: primer rol disponible (cajero suele ser el inicial razonable).
+  if (!roleId && roles.length > 0) {
+    setRoleId(roles.find(r => r.name === 'cajero')?.id ?? roles[0].id)
+  }
 
   const handleCopy = () => {
     navigator.clipboard.writeText(`Usuario: ${email}\nContraseña: ${password}`)
@@ -385,7 +440,15 @@ function CreateUserModal({ onClose }: { onClose: () => void }) {
       toast.error('Completa todos los campos')
       return
     }
-    await createUser({ full_name: fullName.trim(), email: email.trim(), password, role })
+    const selected = roles.find(r => r.id === roleId)
+    if (!selected) { toast.error('Selecciona un rol'); return }
+    await createUser({
+      full_name: fullName.trim(),
+      email: email.trim(),
+      password,
+      enumRole: enumFromRoleName(selected.name),
+      roleId: selected.id,
+    })
     onClose()
   }
 
@@ -453,13 +516,13 @@ function CreateUserModal({ onClose }: { onClose: () => void }) {
           <div>
             <FieldLabel>Rol</FieldLabel>
             <select
-              value={role}
-              onChange={e => setRole(e.target.value as typeof role)}
-              style={{ width: '100%', border: '1.5px solid #e2e8f0', borderRadius: 8, padding: '10px 12px', fontSize: 14, color: '#0f172a', background: '#fff', outline: 'none' }}
+              value={roleId}
+              onChange={e => setRoleId(e.target.value)}
+              style={{ width: '100%', border: '1.5px solid #e2e8f0', borderRadius: 8, padding: '10px 12px', fontSize: 14, color: '#0f172a', background: '#fff', outline: 'none', textTransform: 'capitalize' }}
             >
-              <option value="admin">Administrador</option>
-              <option value="cashier">Cajero</option>
-              <option value="waiter">Mesero</option>
+              {roles.map(r => (
+                <option key={r.id} value={r.id}>{r.name}</option>
+              ))}
             </select>
           </div>
 
@@ -524,6 +587,7 @@ function CreateUserModal({ onClose }: { onClose: () => void }) {
 
 function SectionUsers() {
   const { users, isLoading, updateUser, isUpdating } = useUsers()
+  const { roles } = useRoles()
   const [showCreate, setShowCreate] = useState(false)
 
   if (isLoading) return <Skeleton />
@@ -598,11 +662,9 @@ function SectionUsers() {
             </div>
 
             <select
-              value={user.role}
+              value={user.role_id ?? ''}
               disabled={isUpdating}
-              onChange={e =>
-                updateUser(user.id, { role: e.target.value as 'admin' | 'cashier' | 'waiter' })
-              }
+              onChange={e => updateUser(user.id, { role_id: e.target.value })}
               style={{
                 border: '1.5px solid #e2e8f0',
                 borderRadius: 7,
@@ -612,10 +674,12 @@ function SectionUsers() {
                 background: '#fff',
                 cursor: 'pointer',
                 outline: 'none',
+                textTransform: 'capitalize',
               }}
             >
-              {(Object.keys(ROLE_LABELS) as (keyof typeof ROLE_LABELS)[]).map(r => (
-                <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+              {!user.role_id && <option value="" disabled>Sin rol</option>}
+              {roles.map(r => (
+                <option key={r.id} value={r.id}>{r.name}</option>
               ))}
             </select>
 
@@ -1240,14 +1304,282 @@ function SectionNotificaciones() {
   )
 }
 
+// ─── Section: Sedes ───────────────────────────────────────────────
+
+function StoreModal({
+  store,
+  onClose,
+  onSave,
+  saving,
+}: {
+  store: StoreRow | 'new'
+  onClose: () => void
+  onSave: (data: { name: string; address: string; phone: string }) => void
+  saving: boolean
+}) {
+  const isNew = store === 'new'
+  const [name, setName] = useState(isNew ? '' : store.name)
+  const [address, setAddress] = useState(isNew ? '' : (store.address ?? ''))
+  const [phone, setPhone] = useState(isNew ? '' : (store.phone ?? ''))
+
+  const handleSave = () => {
+    if (!name.trim()) { toast.error('Ingresa el nombre de la sede'); return }
+    onSave({ name: name.trim(), address, phone })
+  }
+
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.55)', display: 'grid', placeItems: 'center', zIndex: 50 }}
+      onClick={e => e.target === e.currentTarget && onClose()}
+    >
+      <div style={{ background: '#fff', borderRadius: 14, width: 460, maxWidth: '92%', boxShadow: '0 25px 50px -12px rgba(0,0,0,.25)', overflow: 'hidden' }}>
+        <div style={{ padding: '18px 22px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', margin: 0 }}>{isNew ? 'Nueva sede' : 'Editar sede'}</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}><X size={18} /></button>
+        </div>
+        <div style={{ padding: 22, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div><FieldLabel>Nombre</FieldLabel><TextInput value={name} onChange={setName} placeholder="Sede Centro" /></div>
+          <div><FieldLabel>Dirección</FieldLabel><TextInput value={address} onChange={setAddress} placeholder="Calle 10 #5-20" /></div>
+          <div><FieldLabel>Teléfono</FieldLabel><TextInput value={phone} onChange={setPhone} placeholder="3001234567" /></div>
+        </div>
+        <div style={{ padding: '0 22px 22px', display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={{ padding: '10px 20px', border: '1.5px solid #e2e8f0', borderRadius: 9, background: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#334155' }}>Cancelar</button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            style={{ padding: '10px 24px', background: saving ? '#cbd5e1' : '#10b981', border: 'none', borderRadius: 10, cursor: saving ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: 6, boxShadow: saving ? 'none' : '0 4px 12px rgba(16,185,129,.3)' }}
+          >
+            {saving && <Loader2 size={14} className="animate-spin" />}
+            {isNew ? 'Crear sede' : 'Guardar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SectionSedes() {
+  const { stores, orgUsers, assignments, isLoading, createStore, updateStore, deleteStore, setAssignment, isMutating } = useStores()
+  const [editStore, setEditStore] = useState<StoreRow | 'new' | null>(null)
+
+  if (isLoading) return <Skeleton />
+
+  const isAssigned = (userId: string, storeId: string) =>
+    assignments.some(a => a.user_id === userId && a.restaurant_id === storeId)
+
+  const handleSave = async (data: { name: string; address: string; phone: string }) => {
+    if (editStore === 'new') await createStore(data)
+    else if (editStore) await updateStore({ id: editStore.id, data: { name: data.name, address: data.address || null, phone: data.phone || null } })
+    setEditStore(null)
+  }
+
+  const handleDelete = async (store: StoreRow) => {
+    if (stores.length <= 1) { toast.error('No puedes eliminar la única sede de la organización'); return }
+    if (!window.confirm(`¿Eliminar la sede "${store.name}"? Se borrarán también sus datos asociados.`)) return
+    await deleteStore(store.id)
+  }
+
+  return (
+    <div>
+      <SectionTitle>Sedes</SectionTitle>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+        <button
+          onClick={() => setEditStore('new')}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 18px', background: '#10b981', border: 'none', borderRadius: 10, cursor: 'pointer', fontSize: 13, fontWeight: 700, color: '#fff', boxShadow: '0 4px 12px rgba(16,185,129,.3)' }}
+        >
+          <Plus size={15} /> Crear sede
+        </button>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {stores.map(store => (
+          <div key={store.id} style={{ border: '1px solid #e2e8f0', borderRadius: 12, overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', padding: '14px 16px', borderBottom: '1px solid #f1f5f9' }}>
+              <div>
+                <p style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', margin: 0 }}>{store.name}</p>
+                <p style={{ fontSize: 12.5, color: '#64748b', margin: '3px 0 0' }}>
+                  {store.address || 'Sin dirección'}{store.phone ? ` · ${store.phone}` : ''}
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button onClick={() => setEditStore(store)} title="Editar" style={{ width: 30, height: 30, border: '1px solid #e2e8f0', background: '#fff', borderRadius: 7, cursor: 'pointer', color: '#64748b', display: 'grid', placeItems: 'center' }}><Pencil size={13} /></button>
+                <button onClick={() => handleDelete(store)} disabled={stores.length <= 1 || isMutating} title={stores.length <= 1 ? 'No puedes eliminar la única sede' : 'Eliminar'} style={{ width: 30, height: 30, border: '1px solid #fecaca', background: '#fef2f2', borderRadius: 7, cursor: stores.length <= 1 ? 'not-allowed' : 'pointer', color: '#dc2626', display: 'grid', placeItems: 'center', opacity: stores.length <= 1 ? 0.4 : 1 }}><Trash2 size={13} /></button>
+              </div>
+            </div>
+            {/* Acceso de usuarios */}
+            <div style={{ padding: '12px 16px' }}>
+              <p style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 10px' }}>Acceso de usuarios</p>
+              {orgUsers.length === 0 ? (
+                <p style={{ fontSize: 13, color: '#94a3b8', margin: 0 }}>Sin usuarios.</p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {orgUsers.map(u => {
+                    const checked = isAssigned(u.id, store.id)
+                    return (
+                      <label key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 13.5, color: '#334155', cursor: 'pointer', padding: '4px 0' }}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => setAssignment({ userId: u.id, restaurantId: store.id, assigned: !checked })}
+                          style={{ width: 16, height: 16, accentColor: '#10b981', cursor: 'pointer' }}
+                        />
+                        <span style={{ fontWeight: 600 }}>{u.full_name}</span>
+                        <span style={{ color: '#94a3b8' }}>{u.email}</span>
+                      </label>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {editStore && <StoreModal store={editStore} onClose={() => setEditStore(null)} onSave={handleSave} saving={isMutating} />}
+    </div>
+  )
+}
+
+// ─── Section: Roles y permisos ────────────────────────────────────
+
+function RoleModal({ role, onClose }: { role: RoleRow | 'new'; onClose: () => void }) {
+  const { createRole, updateRole, isMutating } = useRoles()
+  const isNew = role === 'new'
+  const [name, setName] = useState(isNew ? '' : role.name)
+  const [perms, setPerms] = useState<string[]>(isNew ? [] : rolePermissions(role))
+
+  const toggle = (key: string) =>
+    setPerms(p => (p.includes(key) ? p.filter(x => x !== key) : [...p, key]))
+
+  const handleSave = async () => {
+    if (!name.trim()) { toast.error('Ingresa un nombre para el rol'); return }
+    if (isNew) await createRole({ name: name.trim(), permissions: perms })
+    else await updateRole({ id: role.id, name: name.trim(), permissions: perms })
+    onClose()
+  }
+
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.55)', display: 'grid', placeItems: 'center', zIndex: 50 }}
+      onClick={e => e.target === e.currentTarget && onClose()}
+    >
+      <div style={{ background: '#fff', borderRadius: 14, width: 560, maxWidth: '94%', maxHeight: '88vh', boxShadow: '0 25px 50px -12px rgba(0,0,0,.25)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '18px 22px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+          <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', margin: 0 }}>{isNew ? 'Nuevo rol' : `Editar rol · ${role.name}`}</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}><X size={18} /></button>
+        </div>
+        <div style={{ padding: 22, overflowY: 'auto' }}>
+          <div style={{ marginBottom: 20 }}>
+            <FieldLabel>Nombre del rol</FieldLabel>
+            <TextInput value={name} onChange={setName} placeholder="Ej: Supervisor" />
+          </div>
+          <FieldLabel>Permisos</FieldLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 6 }}>
+            {PERMISSION_GROUPS.map(group => (
+              <div key={group.module} style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: '12px 14px' }}>
+                <p style={{ fontSize: 12, fontWeight: 700, color: '#0f172a', margin: '0 0 8px' }}>{group.module}</p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 18px' }}>
+                  {group.perms.map(perm => (
+                    <label key={perm.key} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13, color: '#334155', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={perms.includes(perm.key)} onChange={() => toggle(perm.key)} style={{ width: 15, height: 15, accentColor: '#10b981', cursor: 'pointer' }} />
+                      {perm.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div style={{ padding: '14px 22px', borderTop: '1px solid #f1f5f9', display: 'flex', gap: 10, justifyContent: 'flex-end', flexShrink: 0 }}>
+          <button onClick={onClose} style={{ padding: '10px 20px', border: '1.5px solid #e2e8f0', borderRadius: 9, background: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#334155' }}>Cancelar</button>
+          <button
+            onClick={handleSave}
+            disabled={isMutating}
+            style={{ padding: '10px 24px', background: isMutating ? '#cbd5e1' : '#10b981', border: 'none', borderRadius: 10, cursor: isMutating ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: 6, boxShadow: isMutating ? 'none' : '0 4px 12px rgba(16,185,129,.3)' }}
+          >
+            {isMutating && <Loader2 size={14} className="animate-spin" />}
+            {isNew ? 'Crear rol' : 'Guardar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SectionRoles() {
+  const { roles, roleCounts, isLoading, deleteRole, isMutating } = useRoles()
+  const [editRole, setEditRole] = useState<RoleRow | 'new' | null>(null)
+
+  if (isLoading) return <Skeleton />
+
+  const handleDelete = async (role: RoleRow) => {
+    if ((roleCounts[role.id] ?? 0) > 0) { toast.error('No puedes eliminar un rol con usuarios asignados'); return }
+    if (!window.confirm(`¿Eliminar el rol "${role.name}"?`)) return
+    await deleteRole(role.id)
+  }
+
+  return (
+    <div>
+      <SectionTitle>Roles y permisos</SectionTitle>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+        <button
+          onClick={() => setEditRole('new')}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 18px', background: '#10b981', border: 'none', borderRadius: 10, cursor: 'pointer', fontSize: 13, fontWeight: 700, color: '#fff', boxShadow: '0 4px 12px rgba(16,185,129,.3)' }}
+        >
+          <Plus size={15} /> Crear rol
+        </button>
+      </div>
+
+      <div style={{ border: '1px solid #e2e8f0', borderRadius: 12, overflow: 'hidden' }}>
+        {roles.map((role, idx) => {
+          const count = roleCounts[role.id] ?? 0
+          const permCount = rolePermissions(role).length
+          return (
+            <div key={role.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: idx < roles.length - 1 ? '1px solid #f1f5f9' : 'none' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: '#0f172a', textTransform: 'capitalize' }}>{role.name}</span>
+                  {role.is_system && (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10.5, fontWeight: 600, color: '#475569', background: '#f1f5f9', border: '1px solid #e2e8f0', padding: '2px 7px', borderRadius: 20 }}>
+                      <Lock size={9} /> Sistema
+                    </span>
+                  )}
+                </div>
+                <p style={{ fontSize: 12, color: '#64748b', margin: '2px 0 0' }}>
+                  {permCount} {permCount === 1 ? 'permiso' : 'permisos'} · {count} {count === 1 ? 'usuario' : 'usuarios'}
+                </p>
+              </div>
+              {role.is_system ? (
+                <span style={{ fontSize: 12, color: '#94a3b8' }}>No editable</span>
+              ) : (
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button onClick={() => setEditRole(role)} title="Editar" style={{ width: 30, height: 30, border: '1px solid #e2e8f0', background: '#fff', borderRadius: 7, cursor: 'pointer', color: '#64748b', display: 'grid', placeItems: 'center' }}><Pencil size={13} /></button>
+                  <button onClick={() => handleDelete(role)} disabled={count > 0 || isMutating} title={count > 0 ? 'Tiene usuarios asignados' : 'Eliminar'} style={{ width: 30, height: 30, border: '1px solid #fecaca', background: '#fef2f2', borderRadius: 7, cursor: count > 0 ? 'not-allowed' : 'pointer', color: '#dc2626', display: 'grid', placeItems: 'center', opacity: count > 0 ? 0.4 : 1 }}><Trash2 size={13} /></button>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {editRole && <RoleModal role={editRole} onClose={() => setEditRole(null)} />}
+    </div>
+  )
+}
+
 // ─── Main page ────────────────────────────────────────────────────
 
 export function ConfigPage() {
+  const { can } = usePermissions()
   const [active, setActive] = useState<SectionId>('restaurante')
+
+  const visibleSections = SECTIONS.filter(s => !s.permission || can(s.permission))
 
   const SECTION_MAP: Record<SectionId, React.ReactNode> = {
     restaurante: <SectionRestaurant />,
     usuarios: <SectionUsers />,
+    sedes: <SectionSedes />,
+    roles: <SectionRoles />,
     caja: <SectionCaja />,
     cocina: <SectionCocina />,
     delivery: <SectionDelivery />,
@@ -1282,7 +1614,7 @@ export function ConfigPage() {
         >
           Ajustes
         </p>
-        {SECTIONS.map(({ id, label, icon: Icon }) => {
+        {visibleSections.map(({ id, label, icon: Icon }) => {
           const isActive = active === id
           return (
             <button

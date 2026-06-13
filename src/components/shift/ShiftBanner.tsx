@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Clock, ArrowRightLeft, PowerOff, MoonStar } from 'lucide-react'
 import { useCashShift } from '@/hooks/useCashShift'
+import { usePermissions } from '@/hooks/usePermissions'
 import { CloseShiftModal } from './CloseShiftModal'
 import { MovementsModal } from './MovementsModal'
 
@@ -18,6 +19,7 @@ const formatTime = (isoStr: string) =>
 
 export function ShiftBanner() {
   const { currentShift, salesSummary } = useCashShift()
+  const { can } = usePermissions()
   const [showClose, setShowClose] = useState(false)
   const [showMovements, setShowMovements] = useState(false)
 
@@ -97,7 +99,8 @@ export function ShiftBanner() {
           Movimientos
         </button>
 
-        {/* Close shift button */}
+        {/* Close shift button — requiere permiso caja.cerrar */}
+        {can('caja.cerrar') && (
         <button
           onClick={() => setShowClose(true)}
           title="Cerrar turno"
@@ -118,6 +121,7 @@ export function ShiftBanner() {
           <PowerOff size={13} />
           Cerrar turno
         </button>
+        )}
       </div>
 
       {showClose && <CloseShiftModal onClose={() => setShowClose(false)} />}

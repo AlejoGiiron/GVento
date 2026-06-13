@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { useAuth } from '@/hooks/useAuth'
+import { usePermissions } from '@/hooks/usePermissions'
 import { useCashShift } from '@/hooks/useCashShift'
 import { useTables } from '@/hooks/useTables'
 import { useProducts } from '@/hooks/useProducts'
@@ -1221,7 +1222,8 @@ export function TablesPage() {
     setShowCheckout(true)
   }
 
-  const isAdmin = profile?.role === 'admin'
+  const { can } = usePermissions()
+  const canManageTables = can('mesas.gestionar')
 
   const zones = useMemo(
     () => [...new Set(tables.map((t) => t.zone).filter(Boolean))] as string[],
@@ -1324,7 +1326,7 @@ export function TablesPage() {
               >
                 <RefreshCw size={14} />
               </button>
-              {isAdmin && (
+              {canManageTables && (
                 <button
                   onClick={() => setShowConfig(true)}
                   style={{
@@ -1367,7 +1369,7 @@ export function TablesPage() {
           {filteredTables.length === 0 ? (
             <div style={{ padding: 60, textAlign: 'center', color: '#94a3b8', fontSize: 13.5 }}>
               <UtensilsCrossed size={32} style={{ margin: '0 auto 14px', display: 'block', opacity: 0.3 }} />
-              {isAdmin
+              {canManageTables
                 ? 'Sin mesas. Usa "Configurar" para agregar.'
                 : 'Sin mesas disponibles.'}
             </div>
