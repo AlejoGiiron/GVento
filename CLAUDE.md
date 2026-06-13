@@ -117,14 +117,29 @@ Resumen rápido:
     Con `owner` se ve todo.
   - Delivery v2: kanban de 3 columnas, scroll independiente por columna, indicador de
     urgencia (≥30 min), botones de llamar/mapa.
+  - Venta en espera: pausar/retomar múltiples ventas, diálogo de 3 opciones al retomar
+    con carrito activo, descartar con confirmación.
 - **`pos.anular` aplicado a "Vaciar carrito"** en el POS (no hay botón "anular venta"
   dedicado). Revisar si el target es el correcto al construir la anulación de ventas.
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: Grupo C — delivery v2 (sesión 2026-06-12)
+Última fase completada: Grupo D — venta en espera (sesión 2026-06-12)
 En progreso: —
-Siguiente: Grupo D — venta en espera
+Siguiente: Grupo E — identidad + reportes consolidados
+
+### Detalle Grupo D - Venta en espera (sesión 2026-06-12, rama feature/venta-en-espera)
+- cartStore: `heldOrders` en memoria (efímeras, SIN persistencia en Supabase ni
+  localStorage); `holdCurrentOrder(label)`, `resumeHeldOrder(id)`, `discardHeldOrder(id)`;
+  tipo `HeldOrder` (id, items, discount, discountType, customer, label, createdAt)
+- POS: botón "En espera" en el footer junto a Cobrar (mini-modal de referencia/label);
+  indicador "En espera (N)" en la cabecera del carrito; panel con label, ítems, total y
+  antigüedad, con Retomar/Descartar
+- Retomar con carrito activo no vacío → modal propio `ResumeConflictDialog` de 3 opciones
+  (guardar la actual / descartar la actual / cancelar); descartar usa window.confirm
+  (convención del repo)
+- `customer` queda null hasta que el POS capture cliente
+- tsc 0 + build verde; integrado a develop (Grupo D)
 
 ### Detalle Grupo C - Delivery v2 (sesión 2026-06-12, rama feature/delivery-v2)
 - Kanban simplificado a 3 columnas (Nuevos/En camino/Entregados) mapeando el enum real
