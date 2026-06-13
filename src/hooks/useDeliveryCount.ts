@@ -42,6 +42,8 @@ export function useDeliveryCount(): number {
       .subscribe()
 
     return () => {
+      // Cleanup correcto: unsubscribe antes de removeChannel.
+      ch.unsubscribe()
       supabase.removeChannel(ch)
     }
   }, [profile, fetchCount])

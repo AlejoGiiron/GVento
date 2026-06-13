@@ -51,16 +51,6 @@ const COLUMN_CONFIG: Record<DeliveryColumn, ColumnConfig> = {
     bg: '#fffbeb', border: '#fde68a', fg: '#854d0e', dot: '#f59e0b',
     headerBg: '#fef3c7',
   },
-  accepted: {
-    label: 'Aceptados',
-    bg: '#eff6ff', border: '#bfdbfe', fg: '#1e40af', dot: '#3b82f6',
-    headerBg: '#dbeafe',
-  },
-  preparing: {
-    label: 'En preparación',
-    bg: '#faf5ff', border: '#ddd6fe', fg: '#6d28d9', dot: '#7c3aed',
-    headerBg: '#ede9fe',
-  },
   in_transit: {
     label: 'En camino',
     bg: '#fff7ed', border: '#fed7aa', fg: '#c2410c', dot: '#f97316',
@@ -73,7 +63,24 @@ const COLUMN_CONFIG: Record<DeliveryColumn, ColumnConfig> = {
   },
 }
 
-const COLUMNS: DeliveryColumn[] = ['new', 'accepted', 'preparing', 'in_transit', 'delivered']
+const COLUMNS: DeliveryColumn[] = ['new', 'in_transit', 'delivered']
+
+// Umbral de urgencia: pedidos no entregados con más de estos minutos se resaltan.
+const URGENT_MINUTES = 30
+
+// Hora absoluta de creación (zona Bogotá).
+function formatClock(dateStr: string): string {
+  return new Date(dateStr).toLocaleTimeString('es-CO', {
+    hour: '2-digit', minute: '2-digit', timeZone: 'America/Bogota',
+  })
+}
+
+function elapsedMinutes(dateStr: string): number {
+  return Math.floor((Date.now() - new Date(dateStr).getTime()) / 60000)
+}
+
+const mapsLink = (address: string) =>
+  `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
 
 // ─── Assign courier modal ─────────────────────────────────────────
 
@@ -392,18 +399,18 @@ function DeliveryCard({
   const col = getDeliveryColumn(order)
   const cfg = COLUMN_CONFIG[col]
 
+  const mins = elapsedMinutes(order.created_at)
+  const urgent = col !== 'delivered' && mins >= URGENT_MINUTES
+
+  // Flujo de 3 pasos: avanzar al siguiente estado.
   const nextLabel: Record<DeliveryColumn, string | null> = {
-    new:        'Asignar repartidor',
-    accepted:   'Enviar a cocina',
-    preparing:  'En camino',
-    in_transit: 'Entregar',
+    new:        'Marcar en camino',
+    in_transit: 'Marcar entregado',
     delivered:  null,
   }
 
   const nextBg: Record<DeliveryColumn, string> = {
-    new:        '#3b82f6',
-    accepted:   '#7c3aed',
-    preparing:  '#f97316',
+    new:        '#f97316',
     in_transit: '#10b981',
     delivered:  '#10b981',
   }
@@ -411,10 +418,10 @@ function DeliveryCard({
   return (
     <div style={{
       background: '#fff',
-      border: `1.5px solid ${cfg.border}`,
+      border: urgent ? '1.5px solid #f59e0b' : `1.5px solid ${cfg.border}`,
       borderRadius: 12,
       overflow: 'hidden',
-      boxShadow: '0 1px 4px rgba(0,0,0,.05)',
+      boxShadow: urgent ? '0 0 0 3px rgba(245,158,11,.18)' : '0 1px 4px rgba(0,0,0,.05)',
     }}>
       {/* Card header */}
       <div style={{
@@ -429,14 +436,25 @@ function DeliveryCard({
           <span style={{ fontSize: 12, fontWeight: 700, color: cfg.fg, fontFamily: 'monospace' }}>
             #{order.id.slice(-6).toUpperCase()}
           </span>
+          {urgent && (
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 3,
+              background: '#f59e0b', color: '#fff', borderRadius: 5,
+              padding: '1px 6px', fontSize: 9.5, fontWeight: 700,
+              textTransform: 'uppercase', letterSpacing: 0.3,
+            }}>
+              <Clock size={9} /> Urgente
+            </span>
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 3,
-            fontSize: 11, color: cfg.fg, opacity: 0.8,
+            display: 'flex', alignItems: 'center', gap: 4,
+            fontSize: 11, color: cfg.fg, opacity: 0.85, fontFamily: 'monospace',
           }}>
-            <Clock size={11} />
-            {formatElapsed(order.created_at)}
+            <span>{formatClock(order.created_at)}</span>
+            <span style={{ opacity: 0.5 }}>·</span>
+            <span style={{ fontWeight: 700 }}>{formatElapsed(order.created_at)}</span>
           </div>
           {isAdmin && col !== 'delivered' && (
             <button
@@ -454,22 +472,49 @@ function DeliveryCard({
       <div style={{ padding: '12px 14px' }}>
         {/* Customer */}
         <div style={{ marginBottom: 10 }}>
-          {order.customer_name && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-              <User size={12} color="#94a3b8" />
-              <span style={{ fontSize: 13.5, fontWeight: 600, color: '#0f172a' }}>{order.customer_name}</span>
-            </div>
-          )}
-          {order.customer_phone && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-              <Phone size={12} color="#94a3b8" />
-              <span style={{ fontSize: 12.5, color: '#64748b' }}>{order.customer_phone}</span>
-            </div>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <User size={13} color="#64748b" />
+            <span style={{ fontSize: 14.5, fontWeight: 700, color: '#0f172a', letterSpacing: -0.2 }}>
+              {order.customer_name || 'Cliente sin nombre'}
+            </span>
+          </div>
           {order.delivery_address && (
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 8 }}>
               <MapPin size={12} color="#94a3b8" style={{ marginTop: 2, flexShrink: 0 }} />
               <span style={{ fontSize: 12, color: '#64748b', lineHeight: 1.35 }}>{order.delivery_address}</span>
+            </div>
+          )}
+          {/* Acciones de contacto */}
+          {(order.customer_phone || order.delivery_address) && (
+            <div style={{ display: 'flex', gap: 6 }}>
+              {order.customer_phone && (
+                <a
+                  href={`tel:${order.customer_phone}`}
+                  style={{
+                    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                    padding: '7px 8px', border: '1px solid #bbf7d0', background: '#f0fdf4',
+                    borderRadius: 7, fontSize: 12, fontWeight: 600, color: '#065f46', textDecoration: 'none',
+                  }}
+                >
+                  <Phone size={12} /> {order.customer_phone}
+                </a>
+              )}
+              {order.delivery_address && (
+                <a
+                  href={mapsLink(order.delivery_address)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Abrir en mapas"
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                    padding: '7px 12px', border: '1px solid #bfdbfe', background: '#eff6ff',
+                    borderRadius: 7, fontSize: 12, fontWeight: 600, color: '#1e40af', textDecoration: 'none',
+                    flexShrink: 0,
+                  }}
+                >
+                  <MapPin size={12} /> Mapa
+                </a>
+              )}
             </div>
           )}
         </div>
@@ -528,23 +573,41 @@ function DeliveryCard({
           </div>
         )}
 
-        {/* Action button */}
-        {nextLabel[col] && (
-          <button
-            onClick={col === 'new' ? onAssign : onAdvance}
-            style={{
-              width: '100%', padding: '10px',
-              border: 'none',
-              background: nextBg[col],
-              borderRadius: 8,
-              cursor: 'pointer',
-              fontSize: 12.5, fontWeight: 600, color: '#fff',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-              boxShadow: col === 'in_transit' ? '0 4px 12px rgba(16,185,129,.3)' : 'none',
-            }}
-          >
-            {nextLabel[col]} <ChevronRight size={13} />
-          </button>
+        {/* Actions */}
+        {col !== 'delivered' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {/* Asignar / reasignar repartidor (sigue funcionando como antes) */}
+            <button
+              onClick={onAssign}
+              style={{
+                width: '100%', padding: '9px',
+                border: '1.5px solid #e5e7eb', background: '#fff',
+                borderRadius: 8, cursor: 'pointer',
+                fontSize: 12.5, fontWeight: 600, color: '#334155',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              }}
+            >
+              <Truck size={13} /> {order.couriers ? 'Reasignar repartidor' : 'Asignar repartidor'}
+            </button>
+            {/* Avanzar de estado (flujo de 3 pasos) */}
+            {nextLabel[col] && (
+              <button
+                onClick={onAdvance}
+                style={{
+                  width: '100%', padding: '10px',
+                  border: 'none',
+                  background: nextBg[col],
+                  borderRadius: 8,
+                  cursor: 'pointer',
+                  fontSize: 12.5, fontWeight: 600, color: '#fff',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  boxShadow: col === 'in_transit' ? '0 4px 12px rgba(16,185,129,.3)' : 'none',
+                }}
+              >
+                {nextLabel[col]} <ChevronRight size={13} />
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -572,8 +635,9 @@ function KanbanColumn({
 
   return (
     <div style={{
-      width: 284,
-      flexShrink: 0,
+      flex: 1,
+      minWidth: 0,
+      height: '100%',
       display: 'flex',
       flexDirection: 'column',
       background: '#f8fafc',
@@ -581,7 +645,7 @@ function KanbanColumn({
       border: '1px solid #e5e7eb',
       overflow: 'hidden',
     }}>
-      {/* Column header */}
+      {/* Column header (fijo arriba) */}
       <div style={{
         padding: '12px 16px',
         background: cfg.headerBg,
@@ -609,8 +673,8 @@ function KanbanColumn({
         )}
       </div>
 
-      {/* Cards */}
-      <div style={{ flex: 1, overflow: 'auto', padding: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* Cards (scroll interno) */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
         {orders.length === 0 ? (
           <div style={{ padding: '24px 12px', textAlign: 'center', color: '#94a3b8' }}>
             <div style={{ fontSize: 22, marginBottom: 6, opacity: 0.4 }}>
@@ -660,10 +724,8 @@ export function DeliveryPage() {
   const [showCourierConfig, setShowCourierConfig] = useState(false)
 
   const ADVANCE_STATUS: Record<DeliveryColumn, DeliveryOrder['status'] | null> = {
-    new:        'pending',   // no aplica (usa AssignCourierModal)
-    accepted:   'preparing',
-    preparing:  'ready',
-    in_transit: 'delivered',
+    new:        'ready',      // Nuevos → En camino
+    in_transit: 'delivered',  // En camino → Entregados
     delivered:  null,
   }
 
@@ -759,14 +821,14 @@ export function DeliveryPage() {
         </div>
       </div>
 
-      {/* ── Kanban ── */}
+      {/* ── Kanban (3 columnas, sin scroll horizontal de página) ── */}
       <div style={{
         flex: 1,
-        overflow: 'auto',
+        minHeight: 0,
+        overflow: 'hidden',
         padding: '18px 20px',
         display: 'flex',
         gap: 14,
-        alignItems: 'flex-start',
       }}>
         {COLUMNS.map((col) => (
           <KanbanColumn
