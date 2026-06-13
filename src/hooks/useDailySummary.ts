@@ -31,8 +31,8 @@ export function useDailySummary(date: string) {
       if (error) throw error
       const rows = (data ?? []) as DailySalesRow[]
 
-      const order_count   = rows.reduce((s, r) => s + r.order_count,   0)
-      const total_revenue = rows.reduce((s, r) => s + r.total_revenue, 0)
+      const order_count   = rows.reduce((s, r) => s + (r.order_count   ?? 0), 0)
+      const total_revenue = rows.reduce((s, r) => s + (r.total_revenue ?? 0), 0)
       const avg_ticket    = order_count > 0 ? total_revenue / order_count : 0
 
       return {
@@ -42,10 +42,10 @@ export function useDailySummary(date: string) {
         avg_ticket,
         by_channel: rows,
         by_method: {
-          cash:     rows.reduce((s, r) => s + r.cash_total,     0),
-          card:     rows.reduce((s, r) => s + r.card_total,     0),
-          transfer: rows.reduce((s, r) => s + r.transfer_total, 0),
-          nequi:    rows.reduce((s, r) => s + r.nequi_total,    0),
+          cash:     rows.reduce((s, r) => s + (r.cash_total      ?? 0), 0),
+          card:     rows.reduce((s, r) => s + (r.card_total      ?? 0), 0),
+          transfer: rows.reduce((s, r) => s + (r.transfer_total  ?? 0), 0),
+          nequi:    rows.reduce((s, r) => s + (r.nequi_total     ?? 0), 0),
         },
       }
     },
