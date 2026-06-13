@@ -44,12 +44,26 @@ export function useUsers() {
       email: string
       password: string
       full_name: string
-      role: 'admin' | 'cashier' | 'waiter'
+      /** Rol enum legacy que requiere la Edge Function / trigger handle_new_user. */
+      enumRole: 'admin' | 'cashier' | 'waiter'
+      /** Rol RBAC (roles.id) que se asigna al perfil tras crearlo. */
+      roleId: string | null
     }) => {
-      const { data, error } = await createUserHelper({ ...params, restaurant_id: restaurantId! })
+      const { data, error } = await createUserHelper({
+        email: params.email,
+        password: params.password,
+        full_name: params.full_name,
+        role: params.enumRole,
+        restaurant_id: restaurantId!,
+      })
       if (error) throw error
-      const body = data as { error?: string } | null
+      const body = data as { error?: string; user_id?: string } | null
       if (body?.error) throw new Error(body.error)
+      // Asigna el rol RBAC al nuevo perfil (el trigger solo setea el enum).
+      if (body?.user_id && params.roleId) {
+        const { error: upErr } = await updateProfile(body.user_id, { role_id: params.roleId })
+        if (upErr) throw upErr
+      }
     },
     onSuccess: () => { invalidate(); toast.success('Usuario creado') },
     onError: (err: Error) => toast.error(err.message ?? 'Error al crear el usuario'),

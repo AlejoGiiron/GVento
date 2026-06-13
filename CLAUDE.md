@@ -102,24 +102,39 @@ Resumen rápido:
 
 ## Pendientes de verificar / deuda conocida
 
-- **RBAC — cambio de sede activa bloqueado por RLS** (no bloquea hoy, 1 sola sede):
-  el `StoreSelector` actualiza `profiles.restaurant_id`, pero la política
-  `"profiles: editar el propio"` tiene `with check (restaurant_id = get_my_restaurant_id())`,
-  que rechaza el cambio porque el nuevo `restaurant_id` ≠ el actual. Requiere una
-  migración de RLS (nueva) que permita fijar la sede activa a cualquier sede del
-  usuario en `user_stores`. Se resuelve en el Prompt 3 (cuando existan múltiples sedes).
-- **RBAC — verificación en navegador pendiente:** probar el gating de permisos con
-  una cuenta `cajero` (Andrés) vs `owner` — confirmar que el sidebar, las rutas y los
-  botones (descuento, anular, cerrar turno, configurar mesas, delivery) se muestran/ocultan
-  según el rol. Con `owner` se ve todo (todos los permisos).
+- **SELECT de `profiles` es por sede activa** (RLS `restaurant_id = get_my_restaurant_id()`):
+  las listas org-wide (asignar usuarios a sedes, conteo de usuarios por rol) solo ven
+  usuarios de la sede activa. Con 1 sede coincide con toda la org; al haber multi-sede
+  real hay que ampliar ese SELECT a nivel organización.
+- **Edge Function `create-user` valida enum `role === 'admin'`**: cambiar a
+  `has_permission(...)` cuando se elimine el enum `profiles.role`.
+- **Política vieja `"restaurants: admin actualiza"` (por enum `get_my_role()`)**: debe
+  quitarse al eliminar el enum `role` (queda redundante con `"restaurants: editar sede
+  con permiso"`).
+- **Verificación de gating en navegador pendiente:** probar permisos con una cuenta
+  `cajero` (Andrés) vs `owner` — sidebar, rutas y botones (descuento, anular, cerrar
+  turno, configurar mesas, delivery, secciones Sedes/Roles). Con `owner` se ve todo.
 - **`pos.anular` aplicado a "Vaciar carrito"** en el POS (no hay botón "anular venta"
   dedicado). Revisar si el target es el correcto al construir la anulación de ventas.
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: Grupo A — quick wins (sesión 2026-06-12)
+Última fase completada: Fase ARQ — multi-tenant + RBAC (sesión 2026-06-12)
 En progreso: —
-Siguiente: Fase ARQ — multi-tenant + RBAC
+Siguiente: —
+
+### Detalle Fase ARQ - Multi-tenant + RBAC (sesión 2026-06-12, rama feature/multi-tenant-rbac)
+- Migración multi-tenant-rbac.sql: organizations, roles (permissions jsonb), user_stores;
+  organization_id en restaurants/profiles, role_id en profiles; funciones SECURITY DEFINER
+  get_my_organization_id() y has_permission(); seed org G-10 + 4 roles de sistema
+- Capa de permisos frontend: usePermissions() con can()/isOwner/permissions[]; ProtectedRoute
+  por permiso; sidebar filtrado; checks role==='admin' reemplazados por can(); StoreSelector
+- Migración profiles-active-store-rls: cambio de sede activa validado contra user_stores
+- Migración restaurants-sedes-rls: SELECT por org + CRUD de sedes con has_permission('sedes.gestionar')
+- ConfigPage: sección Sedes (useStores: CRUD + asignación de usuarios via user_stores) y
+  sección Roles (useRoles: CRUD de roles custom, matriz de permisos por módulo, sistema protegido);
+  select de rol en Usuarios lista roles de la org y asigna role_id al crear
+- profiles.role (enum) se mantiene hasta migración posterior (ver deuda conocida)
 
 ### Detalle Grupo A - Quick wins (sesión 2026-06-12, rama fix/quick-wins)
 - Fix 1 — Apertura de caja NO bloqueante: AppLayout dejó de bloquear; banner amber
