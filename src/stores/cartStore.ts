@@ -62,8 +62,14 @@ export const useCartStore = create<CartStore>((set) => ({
   clear: () => set({ items: [], discount: 0, discountType: 'pct' }),
 
   setDiscount: (discount, type) =>
-    set((state) => ({
-      discount,
-      discountType: type ?? state.discountType,
-    })),
+    set((state) => {
+      const nextType = type ?? state.discountType
+      // Endurecer: descartar NaN/Infinity, enteros, y clampear según el tipo.
+      // Porcentaje: 0–100. Monto fijo: ≥ 0.
+      let value = Number.isFinite(discount) ? Math.round(discount) : 0
+      value = nextType === 'pct'
+        ? Math.min(100, Math.max(0, value))
+        : Math.max(0, value)
+      return { discount: value, discountType: nextType }
+    }),
 }))

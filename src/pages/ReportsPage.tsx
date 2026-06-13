@@ -131,20 +131,21 @@ export function ReportsPage() {
   const { dailySales: prevDailySales } = useReports({ from: prevFrom, to: prevTo })
 
   // ─── KPI aggregates ───────────────────────────────────────────────────────
-  const totalRev   = useMemo(() => dailySales.reduce((s, r) => s + r.total_revenue, 0), [dailySales])
-  const totalOrd   = useMemo(() => dailySales.reduce((s, r) => s + r.order_count,   0), [dailySales])
+  const totalRev   = useMemo(() => dailySales.reduce((s, r) => s + (r.total_revenue ?? 0), 0), [dailySales])
+  const totalOrd   = useMemo(() => dailySales.reduce((s, r) => s + (r.order_count   ?? 0), 0), [dailySales])
   const avgTicket  = useMemo(() => totalOrd > 0 ? totalRev / totalOrd : 0, [totalRev, totalOrd])
-  const prevRev    = useMemo(() => prevDailySales.reduce((s, r) => s + r.total_revenue, 0), [prevDailySales])
-  const prevOrd    = useMemo(() => prevDailySales.reduce((s, r) => s + r.order_count,   0), [prevDailySales])
+  const prevRev    = useMemo(() => prevDailySales.reduce((s, r) => s + (r.total_revenue ?? 0), 0), [prevDailySales])
+  const prevOrd    = useMemo(() => prevDailySales.reduce((s, r) => s + (r.order_count   ?? 0), 0), [prevDailySales])
   const prevTicket = useMemo(() => prevOrd > 0 ? prevRev / prevOrd : 0, [prevRev, prevOrd])
 
   // ─── Bar chart: pivot daily sales by day × channel ────────────────────────
   const barData = useMemo(() => {
     const map: Record<string, { day: string; dine_in: number; takeaway: number; delivery: number }> = {}
     for (const r of dailySales) {
+      if (r.day == null || r.order_type == null) continue
       if (!map[r.day]) map[r.day] = { day: r.day, dine_in: 0, takeaway: 0, delivery: 0 }
       const key = r.order_type as 'dine_in' | 'takeaway' | 'delivery'
-      map[r.day][key] += r.total_revenue
+      map[r.day][key] += r.total_revenue ?? 0
     }
     return Object.values(map).sort((a, b) => a.day.localeCompare(b.day))
   }, [dailySales])
@@ -153,7 +154,8 @@ export function ReportsPage() {
   const hourlyData = useMemo(() => {
     const map: Record<number, number> = {}
     for (const r of hourlySales) {
-      map[r.hour] = (map[r.hour] ?? 0) + r.total_revenue
+      if (r.hour == null) continue
+      map[r.hour] = (map[r.hour] ?? 0) + (r.total_revenue ?? 0)
     }
     return Array.from({ length: 24 }, (_, h) => ({
       label: `${h.toString().padStart(2, '0')}h`,
@@ -163,10 +165,10 @@ export function ReportsPage() {
 
   // ─── Pie: payment method totals ───────────────────────────────────────────
   const payData = useMemo(() => [
-    { name: 'Efectivo',      value: dailySales.reduce((s, r) => s + r.cash_total,     0), color: PAY_COLORS[0] },
-    { name: 'Tarjeta',       value: dailySales.reduce((s, r) => s + r.card_total,     0), color: PAY_COLORS[1] },
-    { name: 'Transferencia', value: dailySales.reduce((s, r) => s + r.transfer_total, 0), color: PAY_COLORS[2] },
-    { name: 'Nequi',         value: dailySales.reduce((s, r) => s + r.nequi_total,    0), color: PAY_COLORS[3] },
+    { name: 'Efectivo',      value: dailySales.reduce((s, r) => s + (r.cash_total     ?? 0), 0), color: PAY_COLORS[0] },
+    { name: 'Tarjeta',       value: dailySales.reduce((s, r) => s + (r.card_total     ?? 0), 0), color: PAY_COLORS[1] },
+    { name: 'Transferencia', value: dailySales.reduce((s, r) => s + (r.transfer_total ?? 0), 0), color: PAY_COLORS[2] },
+    { name: 'Nequi',         value: dailySales.reduce((s, r) => s + (r.nequi_total    ?? 0), 0), color: PAY_COLORS[3] },
   ].filter(d => d.value > 0), [dailySales])
 
   // ─── Products: aggregate by product_id ───────────────────────────────────
@@ -176,14 +178,15 @@ export function ReportsPage() {
       total_qty: number; total_revenue: number
     }> = {}
     for (const r of productPerformance) {
+      if (r.product_id == null) continue
       if (!map[r.product_id]) {
         map[r.product_id] = {
-          product_id: r.product_id, product_name: r.product_name,
-          category_name: r.category_name, total_qty: 0, total_revenue: 0,
+          product_id: r.product_id, product_name: r.product_name ?? '—',
+          category_name: r.category_name ?? '—', total_qty: 0, total_revenue: 0,
         }
       }
-      map[r.product_id].total_qty     += r.total_qty
-      map[r.product_id].total_revenue += r.total_revenue
+      map[r.product_id].total_qty     += r.total_qty     ?? 0
+      map[r.product_id].total_revenue += r.total_revenue ?? 0
     }
     return Object.values(map).sort((a, b) => b.total_revenue - a.total_revenue)
   }, [productPerformance])
@@ -245,10 +248,10 @@ export function ReportsPage() {
         { metric: 'Ventas totales (COP)', value: totalRev },
         { metric: 'Cantidad de órdenes',  value: totalOrd },
         { metric: 'Ticket promedio (COP)',value: Math.round(avgTicket) },
-        { metric: 'Efectivo (COP)',        value: dailySales.reduce((s, r) => s + r.cash_total,     0) },
-        { metric: 'Tarjeta (COP)',         value: dailySales.reduce((s, r) => s + r.card_total,     0) },
-        { metric: 'Transferencia (COP)',   value: dailySales.reduce((s, r) => s + r.transfer_total, 0) },
-        { metric: 'Nequi (COP)',           value: dailySales.reduce((s, r) => s + r.nequi_total,    0) },
+        { metric: 'Efectivo (COP)',        value: dailySales.reduce((s, r) => s + (r.cash_total     ?? 0), 0) },
+        { metric: 'Tarjeta (COP)',         value: dailySales.reduce((s, r) => s + (r.card_total     ?? 0), 0) },
+        { metric: 'Transferencia (COP)',   value: dailySales.reduce((s, r) => s + (r.transfer_total ?? 0), 0) },
+        { metric: 'Nequi (COP)',           value: dailySales.reduce((s, r) => s + (r.nequi_total    ?? 0), 0) },
       ])
 
       // Hoja 2: Ventas por día

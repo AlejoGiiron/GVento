@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Clock, ArrowRightLeft, PowerOff } from 'lucide-react'
+import { Clock, ArrowRightLeft, PowerOff, MoonStar } from 'lucide-react'
 import { useCashShift } from '@/hooks/useCashShift'
 import { CloseShiftModal } from './CloseShiftModal'
 import { MovementsModal } from './MovementsModal'
@@ -21,7 +21,22 @@ export function ShiftBanner() {
   const [showClose, setShowClose] = useState(false)
   const [showMovements, setShowMovements] = useState(false)
 
-  if (!currentShift) return null
+  // Sin turno activo: píldora gris "Sin turno" (no bloquea la navegación)
+  if (!currentShift) {
+    return (
+      <div style={{
+        display: 'inline-flex', alignItems: 'center', gap: 7,
+        padding: '6px 12px', borderRadius: 9,
+        background: '#f1f5f9', border: '1px solid #e2e8f0',
+        fontFamily: 'Inter, system-ui, sans-serif',
+      }}>
+        <MoonStar size={13} color="#94a3b8" strokeWidth={2} />
+        <span style={{ fontSize: 12.5, fontWeight: 600, color: '#64748b' }}>
+          Sin turno
+        </span>
+      </div>
+    )
+  }
 
   const totalSales = salesSummary?.total ?? 0
 

@@ -1,6 +1,7 @@
 export interface ComandaData {
   tableName: string
   zone?: string | null
+  waiter?: string | null
   orderId: string
   items: { qty: number; name: string; notes?: string | null }[]
 }
@@ -53,6 +54,7 @@ export function printComanda(data: ComandaData): void {
       <div style="font-size:16px;font-weight:700;letter-spacing:2px">COMANDA</div>
       <div style="font-size:14px;font-weight:700">Mesa: ${data.tableName}</div>
       ${data.zone ? `<div style="font-size:11px">${data.zone}</div>` : ''}
+      ${data.waiter ? `<div style="font-size:11px">Atiende: ${data.waiter}</div>` : ''}
       <div style="font-size:10px;margin-top:2px">${timeStr} · #${data.orderId.slice(-6).toUpperCase()}</div>
     </div>
     <div style="border-top:1px dashed #000;margin:6px 0"></div>

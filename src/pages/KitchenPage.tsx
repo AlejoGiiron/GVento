@@ -323,6 +323,11 @@ function OrderCard({
           <div style={{ fontSize: 20, fontWeight: 800, color: '#f8fafc', letterSpacing: -0.5, lineHeight: 1 }}>
             {getOrderLabel(order)}
           </div>
+          {order.waiter_name && (
+            <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>
+              Atiende: <span style={{ color: '#cbd5e1', fontWeight: 600 }}>{order.waiter_name}</span>
+            </div>
+          )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 7 }}>
             <span style={{
               padding: '3px 8px', borderRadius: 6,

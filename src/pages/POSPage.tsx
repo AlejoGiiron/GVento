@@ -10,6 +10,7 @@ import { useProducts } from '@/hooks/useProducts'
 import { useCategories } from '@/hooks/useCategories'
 import { useAuth } from '@/hooks/useAuth'
 import { useCashShift } from '@/hooks/useCashShift'
+import { OpenShiftModal } from '@/components/shift/OpenShiftModal'
 import { createOrder, addOrderItems, createPayment } from '@/lib/supabase-helpers'
 import type { ProductWithCategory, CartItem, DiscountType } from '@/stores/cartStore'
 import type { Enums } from '@/types/database.types'
@@ -487,23 +488,49 @@ function CartPanel({
         </div>
 
         {discountType === 'pct' ? (
-          <div style={{ display: 'flex', gap: 4 }}>
-            {[0, 5, 10, 15, 20].map((v) => (
-              <button
-                key={v}
-                onClick={() => setDiscount(v, 'pct')}
-                style={{
-                  flex: 1, padding: '6px 0',
-                  border: discount === v ? '1.5px solid #10b981' : '1px solid #e5e7eb',
-                  background: discount === v ? '#ecfdf5' : '#fff',
-                  color: discount === v ? '#065f46' : '#64748b',
-                  borderRadius: 7, fontSize: 11.5, fontWeight: 600,
-                  fontFamily: 'monospace', cursor: 'pointer',
+          <div>
+            {/* Input % editable (clamp 0–100 en el store) */}
+            <div style={{ position: 'relative', marginBottom: 6 }}>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={discount ? String(discount) : ''}
+                onChange={(e) => {
+                  const digits = e.target.value.replace(/\D/g, '')
+                  setDiscount(digits === '' ? 0 : parseInt(digits, 10), 'pct')
                 }}
-              >
-                {v === 0 ? '—' : `${v}%`}
-              </button>
-            ))}
+                placeholder="0"
+                style={{
+                  width: '100%', padding: '8px 26px 8px 12px',
+                  border: `1.5px solid ${discount > 0 ? '#10b981' : '#e2e8f0'}`,
+                  borderRadius: 8, fontSize: 13, fontFamily: 'monospace',
+                  outline: 'none', boxSizing: 'border-box', color: '#0f172a',
+                }}
+              />
+              <span style={{
+                position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
+                fontSize: 13, color: '#94a3b8', fontFamily: 'monospace', pointerEvents: 'none',
+              }}>%</span>
+            </div>
+            {/* Presets rápidos */}
+            <div style={{ display: 'flex', gap: 4 }}>
+              {[0, 5, 10, 15, 20].map((v) => (
+                <button
+                  key={v}
+                  onClick={() => setDiscount(v, 'pct')}
+                  style={{
+                    flex: 1, padding: '6px 0',
+                    border: discount === v ? '1.5px solid #10b981' : '1px solid #e5e7eb',
+                    background: discount === v ? '#ecfdf5' : '#fff',
+                    color: discount === v ? '#065f46' : '#64748b',
+                    borderRadius: 7, fontSize: 11.5, fontWeight: 600,
+                    fontFamily: 'monospace', cursor: 'pointer',
+                  }}
+                >
+                  {v === 0 ? '—' : `${v}%`}
+                </button>
+              ))}
+            </div>
           </div>
         ) : (
           <div style={{ position: 'relative' }}>
@@ -512,16 +539,17 @@ function CartPanel({
               fontSize: 13, color: '#94a3b8', fontFamily: 'monospace', pointerEvents: 'none',
             }}>$</span>
             <input
-              type="number"
-              min={0}
-              value={discount || ''}
-              onChange={(e) =>
-                setDiscount(Math.max(0, parseInt(e.target.value) || 0), 'fixed')
-              }
+              type="text"
+              inputMode="numeric"
+              value={discount ? String(discount) : ''}
+              onChange={(e) => {
+                const digits = e.target.value.replace(/\D/g, '')
+                setDiscount(digits === '' ? 0 : parseInt(digits, 10), 'fixed')
+              }}
               placeholder="0"
               style={{
                 width: '100%', padding: '8px 12px 8px 22px',
-                border: discount > 0 ? '1.5px solid #10b981' : '1px solid #e2e8f0',
+                border: `1.5px solid ${discount > 0 ? '#10b981' : '#e2e8f0'}`,
                 borderRadius: 8, fontSize: 13, fontFamily: 'monospace',
                 outline: 'none', boxSizing: 'border-box', color: '#0f172a',
               }}
@@ -931,8 +959,16 @@ export function POSPage() {
   const [query, setQuery] = useState('')
   const [orderType, setOrderType] = useState<OrderType>('takeaway')
   const [checkout, setCheckout] = useState(false)
+  const [showOpenShift, setShowOpenShift] = useState(false)
   const [notingIdx, setNotingIdx] = useState<number | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+  const { isOpen: isShiftOpen } = useCashShift()
+
+  // Cobrar exige turno abierto: si no hay, abre el modal de apertura primero.
+  const handleCheckout = () => {
+    if (!isShiftOpen) { setShowOpenShift(true); return }
+    setCheckout(true)
+  }
 
   const { data: categories = [], isLoading: catsLoading } = useCategories()
   const { data: products = [], isLoading: prodsLoading } = useProducts()
@@ -1120,8 +1156,15 @@ export function POSPage() {
         setOrderType={setOrderType}
         notingIdx={notingIdx}
         setNotingIdx={setNotingIdx}
-        onCheckout={() => setCheckout(true)}
+        onCheckout={handleCheckout}
       />
+
+      {showOpenShift && (
+        <OpenShiftModal
+          onClose={() => setShowOpenShift(false)}
+          onOpened={() => { setShowOpenShift(false); setCheckout(true) }}
+        />
+      )}
 
       {checkout && (
         <CheckoutModal

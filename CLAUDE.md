@@ -102,9 +102,28 @@ Resumen rápido:
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: Fase 0 - Desbloqueo de tipos / build (sesión 2026-06-12)
+Última fase completada: Grupo A — quick wins (sesión 2026-06-12)
 En progreso: —
-Siguiente: —
+Siguiente: Fase ARQ — multi-tenant + RBAC
+
+### Detalle Grupo A - Quick wins (sesión 2026-06-12, rama fix/quick-wins)
+- Fix 1 — Apertura de caja NO bloqueante: AppLayout dejó de bloquear; banner amber
+  descartable "No hay turno abierto" + botón Abrir turno; ShiftBanner muestra píldora
+  gris "Sin turno"; OpenShiftModal ahora cerrable (props onClose/onOpened); Cobrar en
+  POS y Mesas exige turno abierto (abre el modal de apertura si falta)
+- Fix 2 — Descuento %: cartStore.setDiscount clampa (pct 0–100, fijo ≥0, enteros, sin
+  NaN); POS pasa a input % editable + presets; input $ con borde constante (sin saltos)
+- Fix 3 — Responsable de mesa (texto libre): migración supabase/orders-waiter-name.sql
+  agrega orders.waiter_name text; OpenTableModal lo capta; visible en TableCard,
+  comanda (printer) y KDS
+- Fix 4 — Cerrar mesa sin consumo: botón "Cerrar mesa" en panel lateral cuando la orden
+  no tiene ítems; cancela la orden (status cancelled) y libera la mesa, con confirmación
+- Regeneración de tipos: database.types.ts regenerado con `supabase gen types` (formato
+  moderno, PostgrestVersion 14.5, Relationships reales, alias Views<> conservado). Reveló
+  que las vistas de reportes devuelven columnas number|null; se endureció ReportsPage y
+  useDailySummary (coalescer a 0, omitir filas con clave de agrupación nula)
+- Pendiente de aplicar por el usuario en Supabase: supabase/orders-waiter-name.sql (ya
+  aplicada — confirmada vía gen types que incluye waiter_name)
 
 ### Detalle Fase 0 - Desbloqueo de tipos y build (sesión 2026-06-12)
 - Causa raíz de 129 errores `never`: el schema hand-written de `database.types.ts` no
