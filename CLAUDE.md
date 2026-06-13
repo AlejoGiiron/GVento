@@ -111,17 +111,31 @@ Resumen rápido:
 - **Política vieja `"restaurants: admin actualiza"` (por enum `get_my_role()`)**: debe
   quitarse al eliminar el enum `role` (queda redundante con `"restaurants: editar sede
   con permiso"`).
-- **Verificación de gating en navegador pendiente:** probar permisos con una cuenta
-  `cajero` (Andrés) vs `owner` — sidebar, rutas y botones (descuento, anular, cerrar
-  turno, configurar mesas, delivery, secciones Sedes/Roles). Con `owner` se ve todo.
+- **Verificación en navegador pendiente:**
+  - Gating RBAC con cuenta `cajero` (Andrés) vs `owner` — sidebar, rutas y botones
+    (descuento, anular, cerrar turno, configurar mesas, delivery, secciones Sedes/Roles).
+    Con `owner` se ve todo.
+  - Delivery v2: kanban de 3 columnas, scroll independiente por columna, indicador de
+    urgencia (≥30 min), botones de llamar/mapa.
 - **`pos.anular` aplicado a "Vaciar carrito"** en el POS (no hay botón "anular venta"
   dedicado). Revisar si el target es el correcto al construir la anulación de ventas.
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: Fase ARQ — multi-tenant + RBAC (sesión 2026-06-12)
+Última fase completada: Grupo C — delivery v2 (sesión 2026-06-12)
 En progreso: —
-Siguiente: —
+Siguiente: Grupo D — venta en espera
+
+### Detalle Grupo C - Delivery v2 (sesión 2026-06-12, rama feature/delivery-v2)
+- Kanban simplificado a 3 columnas (Nuevos/En camino/Entregados) mapeando el enum real
+  sin tocar la BD: pending/preparing→Nuevos, ready→En camino, delivered→Entregados;
+  avance de 3 pasos (ready, delivered)
+- Scroll independiente por columna (altura fija, header fijo, sin scroll horizontal de página)
+- Tarjeta mejorada: cliente destacado, dirección con ícono, hora absoluta + transcurrido,
+  indicador de urgencia (≥30 min, borde/badge ámbar), botones tel: (llamar) y mapas
+- Asignar/reasignar repartidor + tiempo estimado intactos; patrón checkoutOrder conservado
+- Fix de cleanup Realtime: unsubscribe antes de removeChannel en useDelivery y useDeliveryCount
+- Integrado con ARQ vía rebase: DeliveryPage usa can('delivery.gestionar')
 
 ### Detalle Fase ARQ - Multi-tenant + RBAC (sesión 2026-06-12, rama feature/multi-tenant-rbac)
 - Migración multi-tenant-rbac.sql: organizations, roles (permissions jsonb), user_stores;
