@@ -9,6 +9,7 @@ import { useCartStore } from '@/stores/cartStore'
 import { useProducts } from '@/hooks/useProducts'
 import { useCategories } from '@/hooks/useCategories'
 import { useAuth } from '@/hooks/useAuth'
+import { usePermissions } from '@/hooks/usePermissions'
 import { useCashShift } from '@/hooks/useCashShift'
 import { OpenShiftModal } from '@/components/shift/OpenShiftModal'
 import { createOrder, addOrderItems, createPayment } from '@/lib/supabase-helpers'
@@ -376,6 +377,7 @@ function CartPanel({
   const discountType = useCartStore((s) => s.discountType)
   const clear = useCartStore((s) => s.clear)
   const setDiscount = useCartStore((s) => s.setDiscount)
+  const { can } = usePermissions()
 
   // dine_in requires a table_id (DB constraint) — that's handled by TablesPage, not the POS quick-sale flow
   const orderTypes = [
@@ -416,17 +418,19 @@ function CartPanel({
               </div>
             </div>
           </div>
-          <button
-            onClick={clear}
-            style={{
-              width: 34, height: 34, borderRadius: 8,
-              border: '1px solid #e5e7eb', background: '#fff',
-              cursor: 'pointer', color: '#64748b', display: 'grid', placeItems: 'center',
-            }}
-            title="Vaciar carrito"
-          >
-            <Trash size={15} />
-          </button>
+          {can('pos.anular') && (
+            <button
+              onClick={clear}
+              style={{
+                width: 34, height: 34, borderRadius: 8,
+                border: '1px solid #e5e7eb', background: '#fff',
+                cursor: 'pointer', color: '#64748b', display: 'grid', placeItems: 'center',
+              }}
+              title="Vaciar carrito (anular)"
+            >
+              <Trash size={15} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -456,7 +460,8 @@ function CartPanel({
         )}
       </div>
 
-      {/* Discount */}
+      {/* Discount — requiere permiso pos.descuento */}
+      {can('pos.descuento') && (
       <div style={{ padding: '12px 22px', borderTop: '1px solid #f1f5f9' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 9 }}>
           <Percent size={13} color="#334155" />
@@ -569,6 +574,7 @@ function CartPanel({
           </div>
         )}
       </div>
+      )}
 
       {/* Totals */}
       <div style={{ padding: '10px 22px', borderTop: '1px solid #f1f5f9' }}>

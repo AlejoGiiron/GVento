@@ -34,12 +34,18 @@ function App() {
               <Route index element={<Navigate to="/ventas" replace />} />
               <Route path="ventas" element={<POSPage />} />
               <Route path="mesas" element={<TablesPage />} />
-              <Route path="delivery" element={<DeliveryPage />} />
 
-              {/* Rutas solo para admin */}
-              <Route element={<ProtectedRoute roles={['admin']} />}>
+              {/* Rutas gateadas por permiso RBAC */}
+              <Route element={<ProtectedRoute permission="delivery.gestionar" />}>
+                <Route path="delivery" element={<DeliveryPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission="productos.editar" />}>
                 <Route path="productos" element={<ProductsPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission="reportes.financiero" />}>
                 <Route path="reportes" element={<ReportsPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission="config.acceder" />}>
                 <Route path="config" element={<ConfigPage />} />
                 <Route path="configuracion" element={<ConfigPage />} />
               </Route>

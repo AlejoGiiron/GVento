@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { useAuth } from '@/hooks/useAuth'
+import { usePermissions } from '@/hooks/usePermissions'
 import {
   useDelivery,
   getDeliveryColumn,
@@ -650,7 +651,9 @@ export function DeliveryPage() {
     refetchCouriers,
   } = useDelivery()
 
-  const isAdmin = profile?.role === 'admin'
+  const { can } = usePermissions()
+  // Quien gestiona delivery: avanza estados y administra repartidores.
+  const isAdmin = can('delivery.gestionar')
 
   // Patrón checkoutOrder: orden capturada al abrir modal, aislada del Realtime
   const [assigningOrder, setAssigningOrder] = useState<DeliveryOrder | null>(null)

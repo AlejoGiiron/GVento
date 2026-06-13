@@ -14,10 +14,12 @@ import {
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { useAuth } from '@/hooks/useAuth'
+import { usePermissions } from '@/hooks/usePermissions'
 import { useCashShift } from '@/hooks/useCashShift'
 import { useDeliveryCount } from '@/hooks/useDeliveryCount'
 import { ShiftBanner } from '@/components/shift/ShiftBanner'
 import { OpenShiftModal } from '@/components/shift/OpenShiftModal'
+import { StoreSelector } from '@/components/layout/StoreSelector'
 import type { Enums } from '@/types/database.types'
 
 type UserRole = Enums<'user_role'>
@@ -26,17 +28,18 @@ interface NavItem {
   to: string
   label: string
   icon: React.ComponentType<{ className?: string }>
-  roles?: UserRole[]
+  /** Permiso RBAC requerido para mostrar el item. Sin él, siempre visible. */
+  permission?: string
 }
 
 const NAV_ITEMS: NavItem[] = [
   { to: '/ventas', label: 'Ventas', icon: ShoppingCart },
   { to: '/mesas', label: 'Mesas', icon: LayoutGrid },
-  { to: '/cocina', label: 'Cocina', icon: ChefHat },
-  { to: '/delivery', label: 'Delivery', icon: Truck },
-  { to: '/productos', label: 'Productos', icon: Package, roles: ['admin'] },
-  { to: '/reportes', label: 'Reportes', icon: BarChart3, roles: ['admin'] },
-  { to: '/configuracion', label: 'Configuración', icon: Settings, roles: ['admin'] },
+  { to: '/cocina', label: 'Cocina', icon: ChefHat, permission: 'cocina.acceder' },
+  { to: '/delivery', label: 'Delivery', icon: Truck, permission: 'delivery.gestionar' },
+  { to: '/productos', label: 'Productos', icon: Package, permission: 'productos.editar' },
+  { to: '/reportes', label: 'Reportes', icon: BarChart3, permission: 'reportes.financiero' },
+  { to: '/configuracion', label: 'Configuración', icon: Settings, permission: 'config.acceder' },
 ]
 
 const ROLE_LABELS: Record<UserRole, string> = {
@@ -47,6 +50,7 @@ const ROLE_LABELS: Record<UserRole, string> = {
 
 export function AppLayout() {
   const { profile, signOut } = useAuth()
+  const { can } = usePermissions()
   const { isOpen, isLoadingShift } = useCashShift()
   const deliveryCount = useDeliveryCount()
   const navigate = useNavigate()
@@ -63,7 +67,7 @@ export function AppLayout() {
   }
 
   const visibleItems = NAV_ITEMS.filter(
-    item => !item.roles || (profile && item.roles.includes(profile.role)),
+    item => !item.permission || can(item.permission),
   )
 
   const initials = profile?.full_name
@@ -127,8 +131,9 @@ export function AppLayout() {
           {/* Left: shift banner */}
           <ShiftBanner />
 
-          {/* Right: user info */}
+          {/* Right: store selector + user info */}
           <div className="flex items-center gap-3">
+            <StoreSelector />
             <div className="text-right">
               <p className="text-sm font-medium text-slate-900 leading-tight">
                 {profile?.full_name ?? '—'}

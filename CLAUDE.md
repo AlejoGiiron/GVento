@@ -100,6 +100,21 @@ Resumen rápido:
 - Layout Login: `flex h-full`, split 40/60 (brand oscuro / form blanco)
 - Botón CTA: `#10b981`, border-radius 10px, shadow `rgba(16,185,129,.35)`
 
+## Pendientes de verificar / deuda conocida
+
+- **RBAC — cambio de sede activa bloqueado por RLS** (no bloquea hoy, 1 sola sede):
+  el `StoreSelector` actualiza `profiles.restaurant_id`, pero la política
+  `"profiles: editar el propio"` tiene `with check (restaurant_id = get_my_restaurant_id())`,
+  que rechaza el cambio porque el nuevo `restaurant_id` ≠ el actual. Requiere una
+  migración de RLS (nueva) que permita fijar la sede activa a cualquier sede del
+  usuario en `user_stores`. Se resuelve en el Prompt 3 (cuando existan múltiples sedes).
+- **RBAC — verificación en navegador pendiente:** probar el gating de permisos con
+  una cuenta `cajero` (Andrés) vs `owner` — confirmar que el sidebar, las rutas y los
+  botones (descuento, anular, cerrar turno, configurar mesas, delivery) se muestran/ocultan
+  según el rol. Con `owner` se ve todo (todos los permisos).
+- **`pos.anular` aplicado a "Vaciar carrito"** en el POS (no hay botón "anular venta"
+  dedicado). Revisar si el target es el correcto al construir la anulación de ventas.
+
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
 Última fase completada: Grupo A — quick wins (sesión 2026-06-12)
