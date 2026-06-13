@@ -37,14 +37,16 @@ export type DeliveryOrder = {
 
 export type CourierRow = Tables<'couriers'>
 
-// Columnas kanban lógicas — derivadas del status + courier_id
-export type DeliveryColumn = 'new' | 'accepted' | 'preparing' | 'in_transit' | 'delivered'
+// Columnas kanban — flujo simplificado de 3 pasos.
+// Mapeo desde el enum real de la BD (pending/preparing/ready/delivered):
+//   pending, preparing → "Nuevos"
+//   ready              → "En camino"
+//   delivered          → "Entregados"
+export type DeliveryColumn = 'new' | 'in_transit' | 'delivered'
 
 export function getDeliveryColumn(order: DeliveryOrder): DeliveryColumn {
   if (order.status === 'delivered') return 'delivered'
   if (order.status === 'ready') return 'in_transit'
-  if (order.status === 'preparing') return 'preparing'
-  if (order.courier_id) return 'accepted'
   return 'new'
 }
 
@@ -151,15 +153,15 @@ export function useDelivery() {
       })
 
     return () => {
+      // Cleanup correcto: unsubscribe antes de removeChannel.
+      channel.unsubscribe()
       supabase.removeChannel(channel)
     }
   }, [profile, fetchOrders, fetchCouriers])
 
-  // Órdenes agrupadas por columna kanban
+  // Órdenes agrupadas por columna kanban (3 columnas)
   const grouped: Record<DeliveryColumn, DeliveryOrder[]> = {
     new:        orders.filter((o) => getDeliveryColumn(o) === 'new'),
-    accepted:   orders.filter((o) => getDeliveryColumn(o) === 'accepted'),
-    preparing:  orders.filter((o) => getDeliveryColumn(o) === 'preparing'),
     in_transit: orders.filter((o) => getDeliveryColumn(o) === 'in_transit'),
     delivered:  orders.filter((o) => getDeliveryColumn(o) === 'delivered'),
   }
@@ -196,7 +198,7 @@ export function useDelivery() {
     grouped,
     couriers,
     loading,
-    activeCount: grouped.new.length + grouped.accepted.length + grouped.preparing.length + grouped.in_transit.length,
+    activeCount: grouped.new.length + grouped.in_transit.length,
     newCount: grouped.new.length,
     updateStatus,
     assignCourier,
