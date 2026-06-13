@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import {
   ShoppingCart,
@@ -8,6 +9,8 @@ import {
   Settings,
   LogOut,
   Truck,
+  Wallet,
+  X,
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { useAuth } from '@/hooks/useAuth'
@@ -47,6 +50,11 @@ export function AppLayout() {
   const { isOpen, isLoadingShift } = useCashShift()
   const deliveryCount = useDeliveryCount()
   const navigate = useNavigate()
+
+  const [bannerDismissed, setBannerDismissed] = useState(false)
+  const [showOpenShift, setShowOpenShift] = useState(false)
+
+  const showShiftBanner = !isLoadingShift && !isOpen && !bannerDismissed
 
   const handleSignOut = async () => {
     await signOut()
@@ -135,14 +143,47 @@ export function AppLayout() {
           </div>
         </header>
 
+        {/* Dismissible banner — no hay turno abierto (no bloquea la navegación) */}
+        {showShiftBanner && (
+          <div
+            className="flex-shrink-0 flex items-center gap-3 px-6 py-2.5 border-b"
+            style={{ background: '#fffbeb', borderColor: '#fde68a' }}
+          >
+            <Wallet size={16} color="#b45309" />
+            <span className="text-sm font-medium" style={{ color: '#92400e' }}>
+              No hay turno de caja abierto.
+            </span>
+            <button
+              onClick={() => setShowOpenShift(true)}
+              className="text-sm font-semibold px-3 py-1 rounded-md"
+              style={{ background: '#10b981', color: '#fff' }}
+            >
+              Abrir turno
+            </button>
+            <button
+              onClick={() => setBannerDismissed(true)}
+              className="ml-auto"
+              style={{ color: '#b45309', display: 'grid', placeItems: 'center' }}
+              title="Descartar"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )}
+
         {/* Page content */}
         <main className="flex-1 overflow-hidden bg-white">
           <Outlet />
         </main>
       </div>
 
-      {/* Blocking open-shift modal — shown when no active shift */}
-      {!isLoadingShift && !isOpen && <OpenShiftModal />}
+      {/* Open-shift modal — no bloqueante, se abre desde el banner */}
+      {showOpenShift && (
+        <OpenShiftModal
+          onClose={() => setShowOpenShift(false)}
+          onOpened={() => setShowOpenShift(false)}
+        />
+      )}
     </div>
   )
 }

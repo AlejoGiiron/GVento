@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { DollarSign, Wallet } from 'lucide-react'
+import { DollarSign, Wallet, X } from 'lucide-react'
 import { useCashShift } from '@/hooks/useCashShift'
 
 const formatCOP = (n: number) =>
@@ -8,7 +8,10 @@ const formatCOP = (n: number) =>
     minimumFractionDigits: 0, maximumFractionDigits: 0,
   }).format(n)
 
-export function OpenShiftModal() {
+export function OpenShiftModal({ onClose, onOpened }: {
+  onClose?: () => void
+  onOpened?: () => void
+} = {}) {
   const { openShift, isOpeningShift } = useCashShift()
   const [rawAmount, setRawAmount] = useState('')
 
@@ -20,6 +23,7 @@ export function OpenShiftModal() {
     if (!isValid || isOpeningShift) return
     try {
       await openShift(amount)
+      onOpened?.()
     } catch {
       // error toast handled in hook
     }
@@ -35,13 +39,31 @@ export function OpenShiftModal() {
         fontFamily: 'Inter, system-ui, sans-serif',
         padding: '20px',
       }}
+      onClick={onClose}
     >
-      <div style={{
-        background: '#fff', borderRadius: 16,
-        width: 420, maxWidth: '100%',
-        boxShadow: '0 25px 60px -12px rgba(0,0,0,.4)',
-        overflow: 'hidden',
-      }}>
+      <div
+        style={{
+          background: '#fff', borderRadius: 16,
+          width: 420, maxWidth: '100%',
+          boxShadow: '0 25px 60px -12px rgba(0,0,0,.4)',
+          overflow: 'hidden', position: 'relative',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Close button — solo cuando el modal es descartable */}
+        {onClose && (
+          <button
+            onClick={onClose}
+            style={{
+              position: 'absolute', top: 14, right: 14, zIndex: 1,
+              background: '#f1f5f9', border: 'none', width: 30, height: 30,
+              borderRadius: 8, cursor: 'pointer', color: '#64748b',
+              display: 'grid', placeItems: 'center',
+            }}
+          >
+            <X size={16} />
+          </button>
+        )}
         {/* Top accent */}
         <div style={{ height: 4, background: 'linear-gradient(90deg, #10b981, #059669)' }} />
 

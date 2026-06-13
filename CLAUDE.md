@@ -102,9 +102,9 @@ Resumen rápido:
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: Fase 0 - Desbloqueo de tipos / build (sesión 2026-06-12)
-En progreso: —
-Siguiente: —
+Última fase completada: Fase 0 — desbloqueo tipos + hardening seguridad
+En progreso: Grupo A — quick wins
+Siguiente: Fase ARQ — multi-tenant + RBAC
 
 ### Detalle Fase 0 - Desbloqueo de tipos y build (sesión 2026-06-12)
 - Causa raíz de 129 errores `never`: el schema hand-written de `database.types.ts` no

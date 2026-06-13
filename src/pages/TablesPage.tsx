@@ -17,6 +17,7 @@ import {
   updateOrderTotal, updateOrderStatus, createPayment,
   getTableActiveOrderCount, removeOrderItem, markItemsSentToKitchen,
 } from '@/lib/supabase-helpers'
+import { OpenShiftModal } from '@/components/shift/OpenShiftModal'
 import { printComanda } from '@/lib/printer'
 import type { Enums } from '@/types/database.types'
 import type { ProductWithCategory } from '@/stores/cartStore'
@@ -145,6 +146,13 @@ function TableCard({
         )}
       </div>
 
+      {/* Responsable */}
+      {order?.waiter_name && (table.status === 'occupied' || table.status === 'waiting_bill') && (
+        <div style={{ fontSize: 11.5, color: '#64748b' }}>
+          Atiende: <span style={{ fontWeight: 600, color: '#334155' }}>{order.waiter_name}</span>
+        </div>
+      )}
+
       {/* Order total */}
       {order && (
         <div style={{
@@ -173,6 +181,7 @@ function OpenTableModal({
 }) {
   const { profile } = useAuth()
   const [submitting, setSubmitting] = useState(false)
+  const [waiterName, setWaiterName] = useState('')
 
   const handleOpen = async () => {
     if (!profile) return
@@ -183,6 +192,7 @@ function OpenTableModal({
         status: 'pending',
         table_id: table.id,
         total: 0,
+        waiter_name: waiterName.trim() || null,
         restaurant_id: profile.restaurant_id,
         created_by: profile.id,
       })
@@ -239,6 +249,24 @@ function OpenTableModal({
               </div>
             </div>
           </div>
+
+          {/* Responsable (opcional) */}
+          <div style={{ marginBottom: 18 }}>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
+              Responsable <span style={{ color: '#94a3b8', fontWeight: 400 }}>(opcional)</span>
+            </label>
+            <input
+              value={waiterName}
+              onChange={(e) => setWaiterName(e.target.value)}
+              placeholder="¿Quién atiende la mesa?"
+              style={{
+                width: '100%', padding: '10px 12px', border: '1.5px solid #e5e7eb',
+                borderRadius: 10, fontSize: 13.5, outline: 'none', boxSizing: 'border-box',
+                color: '#0f172a', fontFamily: 'Inter, system-ui, sans-serif',
+              }}
+            />
+          </div>
+
           <div style={{ display: 'flex', gap: 10 }}>
             <button
               onClick={onClose}
@@ -919,9 +947,32 @@ function TableSidePanel({
 }) {
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null)
   const [sendingToKitchen, setSendingToKitchen] = useState(false)
+  const [closingTable, setClosingTable] = useState(false)
   const cfg = STATUS_CONFIG[table.status]
 
   const unsentItems = order?.order_items.filter((i) => !i.sent_to_kitchen) ?? []
+  const isEmptyOrder = !!order && order.order_items.length === 0
+
+  // Fix 4 — Cerrar mesa sin consumo: cancela la orden vacía y libera la mesa.
+  const handleCloseEmptyTable = async () => {
+    if (!order || order.order_items.length > 0) return
+    if (!window.confirm(`¿Cerrar ${table.name} sin consumo? Se cancelará la orden vacía y la mesa quedará libre.`)) return
+    setClosingTable(true)
+    try {
+      const { error: orderErr } = await updateOrderStatus(order.id, 'cancelled')
+      if (orderErr) throw orderErr
+      const { error: tableErr } = await updateTableStatus(table.id, 'free')
+      if (tableErr) throw tableErr
+      toast.success(`Mesa ${table.name} liberada`)
+      onClose()
+      onRefresh()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Error desconocido'
+      toast.error(`Error al cerrar mesa: ${msg}`)
+    } finally {
+      setClosingTable(false)
+    }
+  }
 
   const handleRemoveItem = async (item: OrderItemRow) => {
     if (!order) return
@@ -953,6 +1004,7 @@ function TableSidePanel({
       printComanda({
         tableName: table.name,
         zone: table.zone,
+        waiter: order.waiter_name,
         orderId: order.id,
         items: unsentItems.map((i) => ({ qty: i.qty, name: i.products?.name ?? '—', notes: i.notes })),
       })
@@ -1106,21 +1158,38 @@ function TableSidePanel({
           )}
         </div>
 
-        <button
-          disabled={!order || order.order_items.length === 0}
-          onClick={onCheckout}
-          style={{
-            width: '100%', padding: '14px',
-            background: !order || order.order_items.length === 0 ? '#cbd5e1' : '#10b981',
-            border: 'none', borderRadius: 10,
-            cursor: !order || order.order_items.length === 0 ? 'not-allowed' : 'pointer',
-            fontSize: 15, fontWeight: 700, color: '#fff',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-            boxShadow: !order || order.order_items.length === 0 ? 'none' : '0 6px 16px rgba(16,185,129,.35)',
-          }}
-        >
-          Cobrar <ChevronRight size={17} strokeWidth={2.5} />
-        </button>
+        {isEmptyOrder ? (
+          <button
+            disabled={closingTable}
+            onClick={handleCloseEmptyTable}
+            style={{
+              width: '100%', padding: '14px',
+              background: '#fff', border: '1.5px solid #fecaca', borderRadius: 10,
+              cursor: closingTable ? 'not-allowed' : 'pointer',
+              fontSize: 14, fontWeight: 700, color: '#dc2626',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              opacity: closingTable ? 0.6 : 1,
+            }}
+          >
+            <X size={16} strokeWidth={2.5} /> {closingTable ? 'Cerrando...' : 'Cerrar mesa'}
+          </button>
+        ) : (
+          <button
+            disabled={!order}
+            onClick={onCheckout}
+            style={{
+              width: '100%', padding: '14px',
+              background: !order ? '#cbd5e1' : '#10b981',
+              border: 'none', borderRadius: 10,
+              cursor: !order ? 'not-allowed' : 'pointer',
+              fontSize: 15, fontWeight: 700, color: '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              boxShadow: !order ? 'none' : '0 6px 16px rgba(16,185,129,.35)',
+            }}
+          >
+            Cobrar <ChevronRight size={17} strokeWidth={2.5} />
+          </button>
+        )}
       </div>
     </div>
   )
@@ -1138,10 +1207,19 @@ export function TablesPage() {
   const [showProductPicker, setShowProductPicker] = useState(false)
   const [showCheckout, setShowCheckout] = useState(false)
   const [showConfig, setShowConfig] = useState(false)
+  const [showOpenShift, setShowOpenShift] = useState(false)
   // Orden capturada al abrir el checkout — aislada de actualizaciones Realtime
   // para evitar que el modal se desmonte mientras está en progreso.
   const [checkoutOrder, setCheckoutOrder] = useState<ActiveOrder | null>(null)
-  const { refetchSales } = useCashShift()
+  const { refetchSales, isOpen: isShiftOpen } = useCashShift()
+
+  // Cobrar exige turno abierto: si no hay, abre el modal de apertura primero.
+  const handleStartCheckout = () => {
+    if (!selectedOrder) return
+    if (!isShiftOpen) { setShowOpenShift(true); return }
+    setCheckoutOrder(selectedOrder)
+    setShowCheckout(true)
+  }
 
   const isAdmin = profile?.role === 'admin'
 
@@ -1317,7 +1395,7 @@ export function TablesPage() {
           onClose={() => setSelectedTableId(null)}
           onAddItems={() => setShowProductPicker(true)}
           onRequestBill={handleRequestBill}
-          onCheckout={() => { setCheckoutOrder(selectedOrder); setShowCheckout(true) }}
+          onCheckout={handleStartCheckout}
           onRefresh={refetch}
         />
       )}
@@ -1355,6 +1433,16 @@ export function TablesPage() {
           restaurantId={profile.restaurant_id}
           onClose={() => setShowConfig(false)}
           onChanged={() => { refetch(); setShowConfig(false) }}
+        />
+      )}
+
+      {showOpenShift && (
+        <OpenShiftModal
+          onClose={() => setShowOpenShift(false)}
+          onOpened={() => {
+            setShowOpenShift(false)
+            if (selectedOrder) { setCheckoutOrder(selectedOrder); setShowCheckout(true) }
+          }}
         />
       )}
     </div>

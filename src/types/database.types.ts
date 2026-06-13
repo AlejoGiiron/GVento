@@ -275,6 +275,7 @@ export type Database = {
           courier_id: string | null
           estimated_delivery_minutes: number | null
           notes: string | null
+          waiter_name: string | null
           total: number
           restaurant_id: string
           created_by: string
@@ -292,6 +293,7 @@ export type Database = {
           courier_id?: string | null
           estimated_delivery_minutes?: number | null
           notes?: string | null
+          waiter_name?: string | null
           total: number
           restaurant_id: string
           created_by: string
@@ -309,6 +311,7 @@ export type Database = {
           courier_id?: string | null
           estimated_delivery_minutes?: number | null
           notes?: string | null
+          waiter_name?: string | null
           total?: number
           restaurant_id?: string
           created_by?: string
