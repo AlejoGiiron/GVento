@@ -3,6 +3,7 @@ import {
   Search, X, Plus, Trash, Minus, ShoppingCart, Percent,
   ChevronRight, Store, Bike, StickyNote,
   Banknote, CreditCard, Smartphone, Check, Building2, Printer,
+  Pause, Play, Clock,
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { useCartStore } from '@/stores/cartStore'
@@ -13,7 +14,7 @@ import { usePermissions } from '@/hooks/usePermissions'
 import { useCashShift } from '@/hooks/useCashShift'
 import { OpenShiftModal } from '@/components/shift/OpenShiftModal'
 import { createOrder, addOrderItems, createPayment } from '@/lib/supabase-helpers'
-import type { ProductWithCategory, CartItem, DiscountType } from '@/stores/cartStore'
+import type { ProductWithCategory, CartItem, DiscountType, HeldOrder } from '@/stores/cartStore'
 import type { Enums } from '@/types/database.types'
 
 type OrderType = 'dine_in' | 'takeaway' | 'delivery'
@@ -361,6 +362,9 @@ function CartPanel({
   notingIdx,
   setNotingIdx,
   onCheckout,
+  onHold,
+  heldCount,
+  onShowHeld,
 }: {
   subtotal: number
   discountAmt: number
@@ -371,6 +375,9 @@ function CartPanel({
   notingIdx: number | null
   setNotingIdx: (i: number | null) => void
   onCheckout: () => void
+  onHold: () => void
+  heldCount: number
+  onShowHeld: () => void
 }) {
   const items = useCartStore((s) => s.items)
   const discount = useCartStore((s) => s.discount)
@@ -418,19 +425,44 @@ function CartPanel({
               </div>
             </div>
           </div>
-          {can('pos.anular') && (
-            <button
-              onClick={clear}
-              style={{
-                width: 34, height: 34, borderRadius: 8,
-                border: '1px solid #e5e7eb', background: '#fff',
-                cursor: 'pointer', color: '#64748b', display: 'grid', placeItems: 'center',
-              }}
-              title="Vaciar carrito (anular)"
-            >
-              <Trash size={15} />
-            </button>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {/* Indicador de ventas en espera */}
+            {heldCount > 0 && (
+              <button
+                onClick={onShowHeld}
+                title="Ventas en espera"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  height: 34, padding: '0 11px', borderRadius: 8,
+                  border: '1px solid #fde68a', background: '#fffbeb',
+                  cursor: 'pointer', color: '#854d0e', fontSize: 12.5, fontWeight: 600,
+                }}
+              >
+                <Pause size={14} />
+                En espera
+                <span style={{
+                  background: '#f59e0b', color: '#fff', borderRadius: 100,
+                  minWidth: 18, height: 18, display: 'grid', placeItems: 'center',
+                  fontSize: 11, fontWeight: 700, padding: '0 4px',
+                }}>
+                  {heldCount}
+                </span>
+              </button>
+            )}
+            {can('pos.anular') && (
+              <button
+                onClick={clear}
+                style={{
+                  width: 34, height: 34, borderRadius: 8,
+                  border: '1px solid #e5e7eb', background: '#fff',
+                  cursor: 'pointer', color: '#64748b', display: 'grid', placeItems: 'center',
+                }}
+                title="Vaciar carrito (anular)"
+              >
+                <Trash size={15} />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -607,22 +639,41 @@ function CartPanel({
             {formatCOP(total)}
           </span>
         </div>
-        <button
-          disabled={items.length === 0}
-          onClick={onCheckout}
-          style={{
-            width: '100%', padding: '15px 16px',
-            background: items.length === 0 ? '#cbd5e1' : '#10b981',
-            border: 'none', borderRadius: 10,
-            cursor: items.length === 0 ? 'not-allowed' : 'pointer',
-            fontSize: 15, fontWeight: 700, color: '#fff',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-            boxShadow: items.length === 0 ? 'none' : '0 6px 16px rgba(16,185,129,.35)',
-            letterSpacing: 0.2,
-          }}
-        >
-          Cobrar <ChevronRight size={17} strokeWidth={2.5} />
-        </button>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button
+            disabled={items.length === 0}
+            onClick={onHold}
+            title="Poner la venta en espera"
+            style={{
+              flexShrink: 0, padding: '15px 16px',
+              background: '#fff',
+              border: `1.5px solid ${items.length === 0 ? '#e5e7eb' : '#fde68a'}`,
+              borderRadius: 10,
+              cursor: items.length === 0 ? 'not-allowed' : 'pointer',
+              fontSize: 14, fontWeight: 700,
+              color: items.length === 0 ? '#cbd5e1' : '#854d0e',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+            }}
+          >
+            <Pause size={16} /> En espera
+          </button>
+          <button
+            disabled={items.length === 0}
+            onClick={onCheckout}
+            style={{
+              flex: 1, padding: '15px 16px',
+              background: items.length === 0 ? '#cbd5e1' : '#10b981',
+              border: 'none', borderRadius: 10,
+              cursor: items.length === 0 ? 'not-allowed' : 'pointer',
+              fontSize: 15, fontWeight: 700, color: '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              boxShadow: items.length === 0 ? 'none' : '0 6px 16px rgba(16,185,129,.35)',
+              letterSpacing: 0.2,
+            }}
+          >
+            Cobrar <ChevronRight size={17} strokeWidth={2.5} />
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -959,6 +1010,216 @@ function CheckoutModal({
   )
 }
 
+// ─── Held orders (ventas en espera) ──────────────────────────────
+
+function heldItemCount(h: HeldOrder): number {
+  return h.items.reduce((a, x) => a + x.qty, 0)
+}
+
+function heldTotal(h: HeldOrder): number {
+  const subtotal = h.items.reduce((a, x) => a + x.product.price * x.qty, 0)
+  const disc = h.discountType === 'pct'
+    ? Math.round((subtotal * h.discount) / 100)
+    : Math.min(h.discount, subtotal)
+  return subtotal - disc
+}
+
+function formatHeldElapsed(createdAt: number): string {
+  const mins = Math.floor((Date.now() - createdAt) / 60000)
+  if (mins < 1) return 'recién'
+  if (mins < 60) return `hace ${mins} min`
+  const h = Math.floor(mins / 60)
+  const r = mins % 60
+  return r > 0 ? `hace ${h}h ${r}m` : `hace ${h}h`
+}
+
+// Mini-modal para capturar la referencia (label) al poner en espera.
+function HoldLabelModal({ onConfirm, onClose }: {
+  onConfirm: (label: string) => void
+  onClose: () => void
+}) {
+  const [label, setLabel] = useState('')
+
+  return (
+    <div
+      style={{ position: 'absolute', inset: 0, background: 'rgba(15,23,42,.55)', display: 'grid', placeItems: 'center', zIndex: 60 }}
+      onClick={onClose}
+    >
+      <div
+        style={{ background: '#fff', borderRadius: 14, width: 420, maxWidth: '92%', boxShadow: '0 25px 50px -12px rgba(0,0,0,.25)', overflow: 'hidden' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ padding: '18px 22px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Pause size={16} color="#854d0e" />
+            <span style={{ fontSize: 15, fontWeight: 700, color: '#0f172a' }}>Poner en espera</span>
+          </div>
+          <button onClick={onClose} style={{ background: '#f1f5f9', border: 'none', width: 30, height: 30, borderRadius: 8, cursor: 'pointer', color: '#64748b', display: 'grid', placeItems: 'center' }}>
+            <X size={15} />
+          </button>
+        </div>
+        <div style={{ padding: 22 }}>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
+            Referencia
+          </label>
+          <input
+            autoFocus
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && onConfirm(label.trim())}
+            placeholder="Ej: Señor de gorra, Mesa azul…"
+            style={{
+              width: '100%', padding: '11px 13px', border: '1.5px solid #e2e8f0',
+              borderRadius: 10, fontSize: 14, color: '#0f172a', outline: 'none', boxSizing: 'border-box',
+            }}
+            onFocus={(e) => (e.currentTarget.style.borderColor = '#10b981')}
+            onBlur={(e) => (e.currentTarget.style.borderColor = '#e2e8f0')}
+          />
+          <p style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 6, marginBottom: 0 }}>
+            Opcional. Si lo dejas vacío se usará la hora actual.
+          </p>
+          <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
+            <button
+              onClick={onClose}
+              style={{ flex: 1, padding: '12px', border: '1.5px solid #e5e7eb', background: '#fff', borderRadius: 9, cursor: 'pointer', fontSize: 13.5, fontWeight: 600, color: '#334155' }}
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={() => onConfirm(label.trim())}
+              style={{ flex: 2, padding: '12px', border: 'none', background: '#10b981', borderRadius: 9, cursor: 'pointer', fontSize: 13.5, fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+            >
+              <Pause size={15} /> Guardar en espera
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Panel con la lista de ventas en espera.
+function HeldOrdersPanel({ held, onResume, onDiscard, onClose }: {
+  held: HeldOrder[]
+  onResume: (id: string) => void
+  onDiscard: (id: string) => void
+  onClose: () => void
+}) {
+  return (
+    <div
+      style={{ position: 'absolute', inset: 0, background: 'rgba(15,23,42,.55)', display: 'grid', placeItems: 'center', zIndex: 55 }}
+      onClick={onClose}
+    >
+      <div
+        style={{ background: '#fff', borderRadius: 14, width: 460, maxWidth: '94%', maxHeight: '85%', boxShadow: '0 25px 50px -12px rgba(0,0,0,.25)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Pause size={16} color="#854d0e" />
+            <span style={{ fontSize: 15, fontWeight: 700, color: '#0f172a' }}>
+              Ventas en espera ({held.length})
+            </span>
+          </div>
+          <button onClick={onClose} style={{ background: '#f1f5f9', border: 'none', width: 30, height: 30, borderRadius: 8, cursor: 'pointer', color: '#64748b', display: 'grid', placeItems: 'center' }}>
+            <X size={15} />
+          </button>
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {held.length === 0 ? (
+            <div style={{ padding: '32px 16px', textAlign: 'center', color: '#94a3b8', fontSize: 13.5 }}>
+              No hay ventas en espera
+            </div>
+          ) : (
+            held.map((h) => (
+              <div key={h.id} style={{ border: '1px solid #e5e7eb', borderRadius: 11, padding: '12px 14px' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 14.5, fontWeight: 700, color: '#0f172a', letterSpacing: -0.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {h.label}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 3, fontSize: 12, color: '#64748b' }}>
+                      <span>{heldItemCount(h)} {heldItemCount(h) === 1 ? 'ítem' : 'ítems'}</span>
+                      <span style={{ color: '#cbd5e1' }}>·</span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                        <Clock size={11} /> {formatHeldElapsed(h.createdAt)}
+                      </span>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', fontFamily: 'monospace', flexShrink: 0 }}>
+                    {formatCOP(heldTotal(h))}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                  <button
+                    onClick={() => onResume(h.id)}
+                    style={{ flex: 1, padding: '9px', border: 'none', background: '#10b981', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                  >
+                    <Play size={14} /> Retomar
+                  </button>
+                  <button
+                    onClick={() => onDiscard(h.id)}
+                    style={{ flexShrink: 0, padding: '9px 14px', border: '1.5px solid #fecaca', background: '#fef2f2', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#dc2626', display: 'flex', alignItems: 'center', gap: 6 }}
+                  >
+                    <Trash size={14} /> Descartar
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Diálogo: qué hacer con el carrito activo al retomar otra venta.
+function ResumeConflictDialog({ onKeep, onDiscardCurrent, onCancel }: {
+  onKeep: () => void
+  onDiscardCurrent: () => void
+  onCancel: () => void
+}) {
+  return (
+    <div
+      style={{ position: 'absolute', inset: 0, background: 'rgba(15,23,42,.6)', display: 'grid', placeItems: 'center', zIndex: 65 }}
+      onClick={onCancel}
+    >
+      <div
+        style={{ background: '#fff', borderRadius: 14, width: 420, maxWidth: '92%', boxShadow: '0 25px 50px -12px rgba(0,0,0,.25)', overflow: 'hidden', padding: 22 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', marginBottom: 6 }}>
+          Tienes una venta activa
+        </div>
+        <p style={{ fontSize: 13, color: '#64748b', margin: '0 0 18px', lineHeight: 1.5 }}>
+          El carrito actual tiene ítems. ¿Qué hacer antes de retomar la otra venta?
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <button
+            onClick={onKeep}
+            style={{ width: '100%', padding: '12px', border: '1.5px solid #fde68a', background: '#fffbeb', borderRadius: 9, cursor: 'pointer', fontSize: 13.5, fontWeight: 700, color: '#854d0e', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}
+          >
+            <Pause size={15} /> Guardar la actual en espera
+          </button>
+          <button
+            onClick={onDiscardCurrent}
+            style={{ width: '100%', padding: '12px', border: '1.5px solid #fecaca', background: '#fef2f2', borderRadius: 9, cursor: 'pointer', fontSize: 13.5, fontWeight: 700, color: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}
+          >
+            <Trash size={15} /> Descartar la actual
+          </button>
+          <button
+            onClick={onCancel}
+            style={{ width: '100%', padding: '11px', border: '1.5px solid #e5e7eb', background: '#fff', borderRadius: 9, cursor: 'pointer', fontSize: 13.5, fontWeight: 600, color: '#334155' }}
+          >
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Main page export ────────────────────────────────────────────
 export function POSPage() {
   const [activeCat, setActiveCat] = useState<string | null>(null)
@@ -967,6 +1228,9 @@ export function POSPage() {
   const [checkout, setCheckout] = useState(false)
   const [showOpenShift, setShowOpenShift] = useState(false)
   const [notingIdx, setNotingIdx] = useState<number | null>(null)
+  const [showHoldModal, setShowHoldModal] = useState(false)
+  const [showHeldPanel, setShowHeldPanel] = useState(false)
+  const [resumeTarget, setResumeTarget] = useState<string | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const { isOpen: isShiftOpen } = useCashShift()
 
@@ -1028,6 +1292,47 @@ export function POSPage() {
   const discountType = useCartStore((s) => s.discountType)
   const add = useCartStore((s) => s.add)
   const clear = useCartStore((s) => s.clear)
+  const heldOrders = useCartStore((s) => s.heldOrders)
+  const holdCurrentOrder = useCartStore((s) => s.holdCurrentOrder)
+  const resumeHeldOrder = useCartStore((s) => s.resumeHeldOrder)
+  const discardHeldOrder = useCartStore((s) => s.discardHeldOrder)
+
+  // ── Ventas en espera ──
+  const confirmHold = (label: string) => {
+    holdCurrentOrder(label)
+    setShowHoldModal(false)
+    toast.success('Venta puesta en espera')
+  }
+
+  const handleResume = (id: string) => {
+    // Si el carrito actual tiene ítems, preguntar qué hacer con él primero.
+    if (items.length > 0) {
+      setResumeTarget(id)
+    } else {
+      resumeHeldOrder(id)
+      setShowHeldPanel(false)
+    }
+  }
+
+  const resumeKeepingCurrent = () => {
+    if (!resumeTarget) return
+    holdCurrentOrder('')          // guarda el carrito actual con label automático
+    resumeHeldOrder(resumeTarget) // restaura la venta elegida
+    setResumeTarget(null)
+    setShowHeldPanel(false)
+  }
+
+  const resumeDiscardingCurrent = () => {
+    if (!resumeTarget) return
+    resumeHeldOrder(resumeTarget) // sobrescribe el carrito actual
+    setResumeTarget(null)
+    setShowHeldPanel(false)
+  }
+
+  const handleDiscardHeld = (id: string) => {
+    if (!window.confirm('¿Descartar esta venta en espera? No se puede deshacer.')) return
+    discardHeldOrder(id)
+  }
 
   const subtotal = useMemo(
     () => items.reduce((a, x) => a + x.product.price * x.qty, 0),
@@ -1163,7 +1468,34 @@ export function POSPage() {
         notingIdx={notingIdx}
         setNotingIdx={setNotingIdx}
         onCheckout={handleCheckout}
+        onHold={() => setShowHoldModal(true)}
+        heldCount={heldOrders.length}
+        onShowHeld={() => setShowHeldPanel(true)}
       />
+
+      {showHoldModal && (
+        <HoldLabelModal
+          onConfirm={confirmHold}
+          onClose={() => setShowHoldModal(false)}
+        />
+      )}
+
+      {showHeldPanel && (
+        <HeldOrdersPanel
+          held={heldOrders}
+          onResume={handleResume}
+          onDiscard={handleDiscardHeld}
+          onClose={() => setShowHeldPanel(false)}
+        />
+      )}
+
+      {resumeTarget && (
+        <ResumeConflictDialog
+          onKeep={resumeKeepingCurrent}
+          onDiscardCurrent={resumeDiscardingCurrent}
+          onCancel={() => setResumeTarget(null)}
+        />
+      )}
 
       {showOpenShift && (
         <OpenShiftModal
