@@ -187,6 +187,7 @@ export function CloseShiftModal({ onClose }: CloseShiftModalProps) {
               <input
                 type="text"
                 inputMode="numeric"
+                data-testid="close-shift-declared"
                 value={rawAmount ? formatCOP(declared).replace('$', '').trim() : ''}
                 onChange={(e) => setRawAmount(e.target.value.replace(/\D/g, ''))}
                 placeholder="0"
