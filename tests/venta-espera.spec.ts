@@ -49,4 +49,33 @@ test.describe('Venta en espera', () => {
     await addAndHold(page, 'Venta 2')
     await expect(page.getByTitle(HELD_INDICATOR)).toContainText('2')
   })
+
+  test('descartar una venta en espera (con confirmación) la elimina', async ({ page }) => {
+    page.on('dialog', (dialog) => dialog.accept()) // window.confirm
+    await loginAsOwner(page)
+    await addAndHold(page, 'Para descartar')
+
+    await page.getByTitle(HELD_INDICATOR).click()
+    await page.getByRole('button', { name: 'Descartar' }).click()
+
+    await expect(page.getByText('No hay ventas en espera')).toBeVisible()
+  })
+
+  test('retomar con carrito activo abre el diálogo de 3 opciones', async ({ page }) => {
+    await loginAsOwner(page)
+    await addAndHold(page, 'En espera A')         // 1 en espera, carrito vacío
+    await page.getByTestId('product-card').first().click() // carrito activo con ítems
+
+    await page.getByTitle(HELD_INDICATOR).click()
+    await page.getByRole('button', { name: 'Retomar' }).click()
+
+    // Diálogo de conflicto con 3 opciones.
+    await expect(page.getByText('Tienes una venta activa')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Guardar la actual en espera' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Descartar la actual' })).toBeVisible()
+
+    // Elegir "descartar la actual" → retoma la venta en espera.
+    await page.getByRole('button', { name: 'Descartar la actual' }).click()
+    await expect(page.getByText('Carrito vacío')).toHaveCount(0)
+  })
 })

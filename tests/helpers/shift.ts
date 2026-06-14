@@ -26,3 +26,19 @@ export async function closeShiftIfOpen(page: Page): Promise<void> {
   // El header vuelve al estado "Sin turno".
   await expect(page.getByText('Sin turno')).toBeVisible({ timeout: 15_000 })
 }
+
+/**
+ * Garantiza el estado "con turno abierto": si no hay turno, lo abre con el monto
+ * indicado. Idempotente. Requiere `caja.abrir` (owner) y el banner visible.
+ */
+export async function openShiftIfClosed(page: Page, amount = 0): Promise<void> {
+  // Si ya hay turno, el header muestra "Cerrar turno".
+  if ((await page.getByRole('button', { name: 'Cerrar turno', exact: true }).count()) > 0) return
+
+  // Abrir desde el banner amber "No hay turno de caja abierto".
+  await page.getByRole('button', { name: 'Abrir turno' }).first().click()
+  await expect(page.getByRole('heading', { name: 'Abrir turno de caja' })).toBeVisible()
+  await page.getByTestId('open-shift-amount').fill(String(amount))
+  await page.getByRole('button', { name: /Abrir turno de caja/ }).click()
+  await expect(page.getByText(/Turno desde/)).toBeVisible({ timeout: 15_000 })
+}

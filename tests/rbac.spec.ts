@@ -24,6 +24,14 @@ test.describe('RBAC — gating de permisos', () => {
     }
   })
 
+  test('cajero SÍ ve Ventas, Mesas y Delivery', async ({ page }) => {
+    await loginAsCashier(page)
+    // Delivery es visible porque el cajero tiene delivery.gestionar.
+    await expect(page.getByRole('link', { name: 'Ventas' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Mesas' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Delivery' })).toBeVisible()
+  })
+
   test('cajero que navega a /configuracion por URL es redirigido a /ventas', async ({ page }) => {
     await loginAsCashier(page)
     await page.goto('/configuracion')

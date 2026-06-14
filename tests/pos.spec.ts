@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { loginAsOwner } from './helpers/auth'
-import { closeShiftIfOpen } from './helpers/shift'
+import { closeShiftIfOpen, openShiftIfClosed } from './helpers/shift'
 
 // "$ 12.000" → 12000
 function parseCOP(text: string): number {
@@ -43,5 +43,29 @@ test.describe('POS — venta y carrito', () => {
 
     await page.getByRole('button', { name: 'Cobrar' }).click()
     await expect(page.getByRole('heading', { name: 'Abrir turno de caja' })).toBeVisible()
+  })
+
+  test('checkout: 4 métodos de pago y cálculo de vuelto en efectivo', async ({ page }) => {
+    await loginAsOwner(page)
+    await openShiftIfClosed(page, 0) // cobrar requiere turno abierto
+
+    await page.getByTestId('product-card').first().click()
+    await page.getByRole('button', { name: 'Cobrar' }).click()
+
+    // Paso método: los 4 métodos visibles.
+    await expect(page.getByText('Total a cobrar')).toBeVisible()
+    for (const m of ['Efectivo', 'Tarjeta', 'Transferencia', 'Nequi / QR']) {
+      await expect(page.getByText(m, { exact: true })).toBeVisible()
+    }
+
+    // Efectivo → continuar → ingresar recibido > total → vuelto.
+    await page.getByText('Efectivo', { exact: true }).click()
+    await page.getByRole('button', { name: /Continuar/ }).click()
+    await page.getByTestId('checkout-received').fill('100000')
+    await expect(page.getByText('Vuelto')).toBeVisible()
+
+    // No se confirma el cobro (no crea orden). Se cierra el turno abierto para el setup.
+    await page.goto('/ventas')
+    await closeShiftIfOpen(page)
   })
 })

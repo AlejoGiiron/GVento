@@ -106,6 +106,7 @@ export function OpenShiftModal({ onClose, onOpened }: {
                 <input
                   type="text"
                   inputMode="numeric"
+                  data-testid="open-shift-amount"
                   value={rawAmount ? formatCOP(amount).replace('$', '').trim() : ''}
                   onChange={(e) => setRawAmount(e.target.value.replace(/\D/g, ''))}
                   placeholder="0"
