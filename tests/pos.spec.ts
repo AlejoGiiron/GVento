@@ -26,7 +26,8 @@ test.describe('POS — venta y carrito', () => {
     const before = parseCOP(await page.getByTestId('cart-total').innerText())
     await page.getByRole('button', { name: '10%' }).click()
 
-    await expect(page.getByText(/Descuento/)).toBeVisible()
+    // La fila de totales "Descuento (10%)" confirma que el descuento se aplicó.
+    await expect(page.getByText('Descuento (10%)')).toBeVisible()
     const after = parseCOP(await page.getByTestId('cart-total').innerText())
     expect(after).toBeLessThan(before)
   })
@@ -34,12 +35,13 @@ test.describe('POS — venta y carrito', () => {
   test('Cobrar exige turno abierto si no hay turno', async ({ page }) => {
     await loginAsOwner(page)
 
-    // Estado determinista: si hay turno abierto, se cierra → siempre "sin turno".
+    // Carrito con ítems primero; luego garantizar estado "sin turno" justo antes
+    // de cobrar (minimiza la ventana frente al estado compartido del backend).
+    await page.getByTestId('product-card').first().click()
     await closeShiftIfOpen(page)
     await expect(page.getByText('Sin turno')).toBeVisible()
 
-    await page.getByTestId('product-card').first().click()
     await page.getByRole('button', { name: 'Cobrar' }).click()
-    await expect(page.getByText('Abrir turno de caja')).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Abrir turno de caja' })).toBeVisible()
   })
 })
