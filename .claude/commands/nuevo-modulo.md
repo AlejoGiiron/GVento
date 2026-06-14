@@ -34,6 +34,15 @@ Añade la ruta `/nombre-en-kebab-case` dentro del bloque `<ProtectedRoute>` → 
 
 Agrega la entrada a `NAV_ITEMS` con el ícono de lucide-react más apropiado y el label en español. Si es admin-only, añade `roles: ['admin']`.
 
+## 5. Tests E2E — `tests/{modulo}.spec.ts` (paso final, obligatorio)
+
+7. Crea `tests/[modulo].spec.ts` con Playwright cubriendo los flujos principales del módulo (happy path + validaciones + limpieza de datos de prueba).
+
+- Reutiliza los helpers existentes (`tests/helpers/auth.ts`, `tests/helpers/shift.ts`).
+- Selectores robustos con `data-testid` donde el texto sea ambiguo.
+- Tests deterministas e idempotentes; `describe.serial` si hay dependencia de datos.
+- Ver la sección "Política de testing (obligatoria)" del `CLAUDE.md`.
+
 ## Convenciones obligatorias
 - TypeScript strict — sin `any`, usar `unknown` si es necesario
 - Strings de UI en español (Colombia)

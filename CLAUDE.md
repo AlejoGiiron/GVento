@@ -121,15 +121,45 @@ Resumen rápido:
     con carrito activo, descartar con confirmación.
 - **`pos.anular` aplicado a "Vaciar carrito"** en el POS (no hay botón "anular venta"
   dedicado). Revisar si el target es el correcto al construir la anulación de ventas.
-- **Tests E2E corren contra el mismo Supabase que la app** — pendiente crear proyecto
-  de testing separado para aislarlos de producción (`closeShiftIfOpen` cierra la caja
-  real; los specs pueden crear datos). Ver tests/README.md.
+### Deuda de testing
+- **Tests E2E corren contra el mismo Supabase que la app** — `closeShiftIfOpen` cierra
+  la caja real; los specs pueden crear datos. Ver tests/README.md.
+- **`pos-vuelto` es flaky** (pasa en retry) por estado compartido del backend; se
+  estabilizará con un proyecto de testing separado.
+- **`retries: 2`** absorbe la flakiness inherente al backend compartido; **no es solución
+  de fondo** (un test roto falla las 3 veces; uno flaky pasa).
+- **PRIORITARIO a futuro: proyecto Supabase de testing separado** para tests
+  deterministas sin retries.
+- **Los flujos de caja y mesas mutan estado compartido** — pueden acumular datos
+  residuales entre corridas (p. ej. mesas ocupadas).
+
+## Política de testing (obligatoria)
+- Todo módulo o funcionalidad nueva **DEBE** incluir su spec E2E en `tests/` antes de
+  considerarse completo.
+- El prompt de cada feature nuevo termina con: "crea/actualiza el spec de Playwright que
+  cubra esta funcionalidad".
+- Antes de cada merge a `develop`: `pnpm test:e2e` debe pasar al 100%.
+- Selectores robustos con `data-testid` donde el texto sea ambiguo.
+- Tests deterministas e idempotentes (aprendizaje: verificar con datos limpios).
+- Los tests corren en serie (`workers: 1`) por compartir backend.
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: Grupo D — venta en espera (sesión 2026-06-12)
+Última fase completada: Testing E2E — suite Playwright 44/44 (sesión 2026-06-14)
 En progreso: —
 Siguiente: Grupo E — identidad + reportes consolidados
+
+### Detalle Testing E2E (sesión 2026-06-14, ramas feature/e2e-tests + feature/e2e-coverage)
+- Suite Playwright de 44 tests en 10 specs cubriendo los 10 módulos: auth, rbac, pos,
+  venta-espera, delivery, productos, caja, mesas, config, reportes
+- Helpers: auth (loginAsOwner/Cashier), shift (closeShiftIfOpen/openShiftIfClosed)
+- data-testid en la app donde el texto es ambiguo: product-card, cart-total,
+  close-shift-declared, open-shift-amount, movement-amount, checkout-received,
+  config-restaurant-name; títulos en botones de config de mesas
+- Determinismo: sufijo Date.now, limpieza por test, page.on('dialog') para window.confirm,
+  describe.serial donde hay dependencia de datos; retries:2 por backend compartido
+- Resultado: 43 passed + 1 flaky (pos-vuelto pasa en retry) = 44/44, exit 0
+- Ver "Política de testing (obligatoria)" y "Deuda de testing" arriba
 
 ### Detalle Grupo D - Venta en espera (sesión 2026-06-12, rama feature/venta-en-espera)
 - cartStore: `heldOrders` en memoria (efímeras, SIN persistencia en Supabase ni
