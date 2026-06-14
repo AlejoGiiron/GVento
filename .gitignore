@@ -2,7 +2,9 @@
 .env
 .env.local
 .env.*.local
+.env.test
 !.env.example
+!.env.test.example
 
 # Node
 node_modules/
@@ -38,6 +40,9 @@ pnpm-debug.log*
 
 # Testing
 coverage/
+test-results/
+playwright-report/
+playwright/.cache/
 
 # Claude Design handoff — vive en Claude Design, no en el repo
 design_handoff_*/

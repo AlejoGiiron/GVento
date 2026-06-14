@@ -121,6 +121,9 @@ Resumen rápido:
     con carrito activo, descartar con confirmación.
 - **`pos.anular` aplicado a "Vaciar carrito"** en el POS (no hay botón "anular venta"
   dedicado). Revisar si el target es el correcto al construir la anulación de ventas.
+- **Tests E2E corren contra el mismo Supabase que la app** — pendiente crear proyecto
+  de testing separado para aislarlos de producción (`closeShiftIfOpen` cierra la caja
+  real; los specs pueden crear datos). Ver tests/README.md.
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]

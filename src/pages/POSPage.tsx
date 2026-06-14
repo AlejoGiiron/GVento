@@ -191,6 +191,7 @@ function ProductCard({ product, onAdd }: { product: ProductWithCategory; onAdd: 
 
   return (
     <button
+      data-testid="product-card"
       onClick={onAdd}
       style={{
         background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14,
@@ -632,10 +633,13 @@ function CartPanel({
           alignItems: 'baseline', marginBottom: 12,
         }}>
           <span style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>Total</span>
-          <span style={{
-            fontSize: 30, fontWeight: 700, color: '#0f172a',
-            fontFamily: 'monospace', letterSpacing: -0.8,
-          }}>
+          <span
+            data-testid="cart-total"
+            style={{
+              fontSize: 30, fontWeight: 700, color: '#0f172a',
+              fontFamily: 'monospace', letterSpacing: -0.8,
+            }}
+          >
             {formatCOP(total)}
           </span>
         </div>
