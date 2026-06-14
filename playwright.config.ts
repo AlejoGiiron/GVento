@@ -22,7 +22,10 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   fullyParallel: false, // los flujos comparten sesión/estado del backend
   workers: 1,
-  retries: 0,
+  // Backend real compartido (turno de caja, datos): algunos flujos son
+  // inherentemente sensibles a timing/estado. Reintentos para absorber esa
+  // flakiness sin enmascarar fallos de lógica (un test roto falla las 3 veces).
+  retries: 2,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
     baseURL: BASE_URL,

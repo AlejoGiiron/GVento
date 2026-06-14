@@ -17,8 +17,8 @@ test.describe('Configuración', () => {
 
     for (const label of SECTIONS) {
       await page.getByRole('button', { name: label }).click()
-      // El SectionTitle (h2) de la sección debe renderizar.
-      await expect(page.getByRole('heading', { name: label })).toBeVisible()
+      // El SectionTitle (h2) de la sección debe renderizar (exact: evita h3 anidados).
+      await expect(page.getByRole('heading', { name: label, exact: true })).toBeVisible()
     }
   })
 
@@ -39,12 +39,12 @@ test.describe('Configuración', () => {
     // Cambia a un valor temporal y guarda.
     await nameInput.fill(`${original} ·`)
     await page.getByRole('button', { name: 'Guardar' }).click()
-    await expect(page.getByText('Cambios guardados')).toBeVisible()
+    await expect(page.getByText('Cambios guardados').first()).toBeVisible()
 
     // Restaura el valor original (no dejar datos sucios).
     await nameInput.fill(original)
     await page.getByRole('button', { name: 'Guardar' }).click()
-    await expect(page.getByText('Cambios guardados')).toBeVisible()
+    await expect(page.getByText('Cambios guardados').first()).toBeVisible()
   })
 
   test.describe.serial('Roles custom', () => {
@@ -53,10 +53,12 @@ test.describe('Configuración', () => {
       await page.goto('/configuracion')
       await page.getByRole('button', { name: 'Roles y permisos' }).click()
 
+      // Botón de sección (abre el modal).
       await page.getByRole('button', { name: 'Crear rol' }).click()
       await page.getByPlaceholder('Ej: Supervisor').fill(ROLE)
       await page.getByRole('checkbox').first().check() // al menos un permiso
-      await page.getByRole('button', { name: 'Crear rol' }).click()
+      // Botón submit del modal (último "Crear rol" del DOM).
+      await page.getByRole('button', { name: 'Crear rol' }).last().click()
 
       await expect(page.getByText(ROLE)).toBeVisible()
     })

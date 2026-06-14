@@ -56,7 +56,9 @@ test.describe('Venta en espera', () => {
     await addAndHold(page, 'Para descartar')
 
     await page.getByTitle(HELD_INDICATOR).click()
-    await page.getByRole('button', { name: 'Descartar' }).click()
+    // Desambiguar del botón de descarte del banner amber (icono, title="Descartar"
+    // sin texto): el del panel tiene texto visible "Descartar".
+    await page.getByRole('button', { name: 'Descartar' }).filter({ hasText: 'Descartar' }).click()
 
     await expect(page.getByText('No hay ventas en espera')).toBeVisible()
   })

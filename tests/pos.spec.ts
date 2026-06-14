@@ -47,9 +47,11 @@ test.describe('POS — venta y carrito', () => {
 
   test('checkout: 4 métodos de pago y cálculo de vuelto en efectivo', async ({ page }) => {
     await loginAsOwner(page)
+    // Agregar el producto ANTES de tocar el turno (el banner que aparece/desaparece
+    // al abrir turno reacomoda el layout y desestabiliza el click a la card).
+    await page.getByTestId('product-card').first().click()
     await openShiftIfClosed(page, 0) // cobrar requiere turno abierto
 
-    await page.getByTestId('product-card').first().click()
     await page.getByRole('button', { name: 'Cobrar' }).click()
 
     // Paso método: los 4 métodos visibles.

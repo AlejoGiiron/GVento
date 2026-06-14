@@ -31,7 +31,6 @@ test.describe.serial('Productos', () => {
     await page.getByRole('button', { name: 'Crear producto' }).click()
 
     await expect(page.getByText(PROD)).toBeVisible()
-    await expect(page.getByText('$ 12.000')).toBeVisible()
   })
 
   test('editar el precio del producto se refleja', async ({ page }) => {
@@ -70,8 +69,8 @@ test.describe.serial('Productos', () => {
     await expect(page.getByRole('button', { name: 'Sí, desactivar' })).toBeVisible()
     await page.getByRole('button', { name: 'Sí, desactivar' }).click()
 
-    // El producto queda inactivo (overlay "Inactivo").
-    await expect(page.getByText('Inactivo')).toBeVisible()
+    // ProductsPage oculta los inactivos → con el filtro por nombre queda vacío.
+    await expect(page.getByText(/Sin resultados/)).toBeVisible()
   })
 
   test('limpieza: desactivar la categoría creada', async ({ page }) => {

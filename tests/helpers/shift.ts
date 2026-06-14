@@ -12,6 +12,12 @@ import { type Page, expect } from '@playwright/test'
  */
 export async function closeShiftIfOpen(page: Page): Promise<void> {
   const closeBtn = page.getByRole('button', { name: 'Cerrar turno', exact: true })
+  const openBanner = page.getByRole('button', { name: 'Abrir turno' })
+
+  // Esperar a que el turno cargue: uno de los dos botones accionables aparece
+  // SOLO tras resolverse la query (la píldora "Sin turno" se ve también
+  // mientras carga, por eso no sirve como señal).
+  await expect(closeBtn.or(openBanner)).toBeVisible({ timeout: 15_000 })
 
   // Sin botón "Cerrar turno" → ya no hay turno abierto.
   if ((await closeBtn.count()) === 0) return
@@ -32,11 +38,17 @@ export async function closeShiftIfOpen(page: Page): Promise<void> {
  * indicado. Idempotente. Requiere `caja.abrir` (owner) y el banner visible.
  */
 export async function openShiftIfClosed(page: Page, amount = 0): Promise<void> {
+  const closeBtn = page.getByRole('button', { name: 'Cerrar turno', exact: true })
+  const openBanner = page.getByRole('button', { name: 'Abrir turno' })
+
+  // Esperar a que el turno cargue (uno de los dos botones accionables).
+  await expect(closeBtn.or(openBanner)).toBeVisible({ timeout: 15_000 })
+
   // Si ya hay turno, el header muestra "Cerrar turno".
-  if ((await page.getByRole('button', { name: 'Cerrar turno', exact: true }).count()) > 0) return
+  if ((await closeBtn.count()) > 0) return
 
   // Abrir desde el banner amber "No hay turno de caja abierto".
-  await page.getByRole('button', { name: 'Abrir turno' }).first().click()
+  await openBanner.first().click()
   await expect(page.getByRole('heading', { name: 'Abrir turno de caja' })).toBeVisible()
   await page.getByTestId('open-shift-amount').fill(String(amount))
   await page.getByRole('button', { name: /Abrir turno de caja/ }).click()

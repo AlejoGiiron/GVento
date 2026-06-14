@@ -19,7 +19,7 @@ test.describe.serial('Caja', () => {
     await openShiftIfClosed(page, 0)
 
     await page.getByRole('button', { name: 'Movimientos' }).click()
-    await expect(page.getByText('Movimientos manuales')).toBeVisible()
+    await expect(page.getByText('Movimientos manuales', { exact: true })).toBeVisible()
 
     await page.getByTestId('movement-amount').fill('20000')
     await page.getByPlaceholder(/Venta externa/).fill('Ingreso de prueba E2E')
@@ -30,10 +30,15 @@ test.describe.serial('Caja', () => {
 
   test('cerrar turno muestra resumen y diferencia', async ({ page }) => {
     await openShiftIfClosed(page, 0)
+    // Dejar que el header (banner amber → ShiftBanner) deje de re-acomodarse
+    // antes de clickear, para evitar inestabilidad de layout.
+    await page.waitForLoadState('networkidle').catch(() => {})
 
-    await page.getByRole('button', { name: 'Cerrar turno', exact: true }).click()
+    const closeBtn = page.getByRole('button', { name: 'Cerrar turno', exact: true })
+    await expect(closeBtn).toBeVisible()
+    await closeBtn.click()
     await expect(page.getByText('Cerrar turno de caja')).toBeVisible()
-    await expect(page.getByText('Efectivo esperado')).toBeVisible()
+    await expect(page.getByText('Efectivo esperado', { exact: true })).toBeVisible()
 
     await page.getByTestId('close-shift-declared').fill('0')
     await expect(page.getByText(/Cuadre exacto|Sobrante|Faltante/)).toBeVisible()
