@@ -901,6 +901,7 @@ function TableConfigModal({
                   </div>
                   <button
                     onClick={() => startEdit(t)}
+                    title="Editar mesa"
                     style={{ width: 28, height: 28, border: '1px solid #e5e7eb', background: '#fff', borderRadius: 6, cursor: 'pointer', color: '#64748b', display: 'grid', placeItems: 'center' }}
                   >
                     <Pencil size={12} />
@@ -908,6 +909,7 @@ function TableConfigModal({
                   <button
                     onClick={() => handleDelete(t)}
                     disabled={deletingId === t.id}
+                    title="Eliminar mesa"
                     style={{ width: 28, height: 28, border: '1px solid #fecaca', background: '#fef2f2', borderRadius: 6, cursor: deletingId === t.id ? 'not-allowed' : 'pointer', color: '#dc2626', display: 'grid', placeItems: 'center' }}
                   >
                     <Trash size={12} />

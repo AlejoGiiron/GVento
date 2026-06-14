@@ -879,6 +879,7 @@ function CheckoutModal({
               </div>
               <input
                 autoFocus
+                data-testid="checkout-received"
                 value={received ? formatCOP(receivedNum) : ''}
                 onChange={(e) => setReceived(e.target.value)}
                 placeholder={formatCOP(total)}

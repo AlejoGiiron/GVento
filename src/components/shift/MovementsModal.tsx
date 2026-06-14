@@ -150,6 +150,7 @@ export function MovementsModal({ onClose }: MovementsModalProps) {
                 <input
                   type="text"
                   inputMode="numeric"
+                  data-testid="movement-amount"
                   value={rawAmount ? formatCOP(amount).replace('$', '').trim() : ''}
                   onChange={(e) => setRawAmount(e.target.value.replace(/\D/g, ''))}
                   placeholder="0"

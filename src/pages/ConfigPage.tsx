@@ -122,16 +122,19 @@ function TextInput({
   placeholder,
   type = 'text',
   maxLength,
+  testId,
 }: {
   value: string
   onChange: (v: string) => void
   placeholder?: string
   type?: string
   maxLength?: number
+  testId?: string
 }) {
   return (
     <input
       type={type}
+      data-testid={testId}
       value={value}
       onChange={e => onChange(e.target.value)}
       placeholder={placeholder}
@@ -374,7 +377,7 @@ function SectionRestaurant() {
       <div style={{ display: 'grid', gap: 16, gridTemplateColumns: '1fr 1fr', maxWidth: 560 }}>
         <div style={{ gridColumn: '1 / -1' }}>
           <FieldLabel>Nombre del restaurante</FieldLabel>
-          <TextInput value={name} onChange={setName} placeholder="G-Vento Resto" />
+          <TextInput value={name} onChange={setName} placeholder="G-Vento Resto" testId="config-restaurant-name" />
         </div>
         <div style={{ gridColumn: '1 / -1' }}>
           <FieldLabel>Dirección</FieldLabel>
