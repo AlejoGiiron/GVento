@@ -15,6 +15,7 @@ import {
 import { toast } from 'react-hot-toast'
 import { useAuth } from '@/hooks/useAuth'
 import { usePermissions } from '@/hooks/usePermissions'
+import { useRestaurantConfig } from '@/hooks/useRestaurantConfig'
 import { useCashShift } from '@/hooks/useCashShift'
 import { useDeliveryCount } from '@/hooks/useDeliveryCount'
 import { ShiftBanner } from '@/components/shift/ShiftBanner'
@@ -51,7 +52,12 @@ const ROLE_LABELS: Record<UserRole, string> = {
 export function AppLayout() {
   const { profile, signOut } = useAuth()
   const { can } = usePermissions()
+  const { restaurant } = useRestaurantConfig()
   const { isOpen, isLoadingShift } = useCashShift()
+
+  // Branding de la SEDE activa (restaurants): nombre + logo capturados en Config.
+  const brandName = restaurant?.name ?? 'G-Vento'
+  const brandLogo = restaurant?.logo_url ?? null
   const deliveryCount = useDeliveryCount()
   const navigate = useNavigate()
 
@@ -81,9 +87,24 @@ export function AppLayout() {
     <div className="flex h-screen overflow-hidden bg-white">
       {/* Sidebar */}
       <aside className="w-56 flex-shrink-0 bg-slate-900 flex flex-col">
-        <div className="px-5 py-4 border-b border-slate-700/60">
-          <span className="text-white font-bold text-lg tracking-tight">G-Vento</span>
-          <span className="block text-slate-400 text-xs mt-0.5">Sistema POS</span>
+        <div className="px-5 py-4 border-b border-slate-700/60 flex items-center gap-2.5">
+          {brandLogo && (
+            <img
+              src={brandLogo}
+              alt={brandName}
+              data-testid="sidebar-brand-logo"
+              className="w-9 h-9 rounded-lg object-cover flex-shrink-0"
+            />
+          )}
+          <div className="min-w-0">
+            <span
+              data-testid="sidebar-brand-name"
+              className="block text-white font-bold text-lg tracking-tight truncate"
+            >
+              {brandName}
+            </span>
+            <span className="block text-slate-400 text-xs mt-0.5">Sistema POS</span>
+          </div>
         </div>
 
         <nav className="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto">

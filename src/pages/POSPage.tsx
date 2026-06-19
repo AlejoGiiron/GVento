@@ -11,6 +11,7 @@ import { useProducts } from '@/hooks/useProducts'
 import { useCategories } from '@/hooks/useCategories'
 import { useAuth } from '@/hooks/useAuth'
 import { usePermissions } from '@/hooks/usePermissions'
+import { useRestaurantConfig } from '@/hooks/useRestaurantConfig'
 import { useCashShift } from '@/hooks/useCashShift'
 import { OpenShiftModal } from '@/components/shift/OpenShiftModal'
 import { createOrder, addOrderItems, createPayment } from '@/lib/supabase-helpers'
@@ -74,6 +75,8 @@ function PrintTicket({
   orderType,
   orderId,
   receivedAmt,
+  restaurantName,
+  restaurantAddress,
 }: {
   items: CartItem[]
   subtotal: number
@@ -86,6 +89,8 @@ function PrintTicket({
   orderType: OrderType
   orderId: string
   receivedAmt?: number
+  restaurantName: string
+  restaurantAddress?: string | null
 }) {
   const now = new Date()
   const dateStr = now.toLocaleDateString('es-CO', {
@@ -106,8 +111,8 @@ function PrintTicket({
   return (
     <div className="ticket-print">
       <div style={{ textAlign: 'center', marginBottom: 6 }}>
-        <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: 3 }}>G-VENTO</div>
-        <div style={{ fontSize: 11 }}>Coctelería &amp; Bar</div>
+        <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: 3 }}>{restaurantName.toUpperCase()}</div>
+        {restaurantAddress && <div style={{ fontSize: 11 }}>{restaurantAddress}</div>}
         <div style={{ fontSize: 10, marginTop: 4 }}>{dateStr}  {timeStr}</div>
         <div style={{ fontSize: 10 }}>#{ref} · {orderTypeLabel}</div>
       </div>
@@ -708,6 +713,7 @@ function CheckoutModal({
   onComplete: () => void
 }) {
   const { profile } = useAuth()
+  const { restaurant } = useRestaurantConfig()
   const { refetchSales } = useCashShift()
   const [step, setStep] = useState<'method' | 'amount' | 'success'>('method')
   const [method, setMethod] = useState<PaymentMethodUI>('efectivo')
@@ -1007,6 +1013,8 @@ function CheckoutModal({
               orderType={orderType}
               orderId={orderId}
               receivedAmt={method === 'efectivo' ? receivedNum : undefined}
+              restaurantName={restaurant?.name ?? 'G-Vento'}
+              restaurantAddress={restaurant?.address}
             />
           </div>
         )}

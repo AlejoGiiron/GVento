@@ -7,38 +7,43 @@ test.describe('Reportes', () => {
     await page.goto('/reportes')
   })
 
-  test('la página carga con los KPIs', async ({ page }) => {
+  test('las pestañas Financiero y Stock cargan', async ({ page }) => {
+    await expect(page.getByTestId('report-tab-financiero')).toBeVisible()
+    await expect(page.getByTestId('report-tab-stock')).toBeVisible()
+    // Financiero por defecto: KPIs financieros.
     await expect(page.getByText('Ventas totales')).toBeVisible()
-    await expect(page.getByText('Órdenes', { exact: true })).toBeVisible()
-    await expect(page.getByText('Ticket promedio')).toBeVisible()
-    await expect(page.getByText('Unidades vendidas')).toBeVisible()
   })
 
-  test('cambiar rango de fechas con atajos', async ({ page }) => {
+  test('cambiar entre tabs funciona', async ({ page }) => {
+    await expect(page.getByText('Ventas totales')).toBeVisible() // financiero por defecto
+
+    await page.getByTestId('report-tab-stock').click()
+    await expect(page.getByText('Productos vendidos', { exact: true })).toBeVisible() // KPI de stock
+    await expect(page.getByTestId('export-stock')).toBeVisible()
+
+    await page.getByTestId('report-tab-financiero').click()
+    await expect(page.getByText('Ventas totales')).toBeVisible()
+    await expect(page.getByTestId('export-financiero')).toBeVisible()
+  })
+
+  test('el selector de fechas es compartido y afecta ambos tabs', async ({ page }) => {
     await page.getByRole('button', { name: 'Hoy' }).click()
-    await page.getByRole('button', { name: 'Esta semana' }).click()
-    // La página sigue respondiendo con los KPIs tras cambiar el rango.
-    await expect(page.getByText('Ventas totales')).toBeVisible()
+    await expect(page.getByText('Ventas totales')).toBeVisible() // financiero responde
+
+    await page.getByTestId('report-tab-stock').click()
+    await expect(page.getByText('Unidades vendidas', { exact: true })).toBeVisible() // stock usa el mismo rango
   })
 
-  test('las gráficas se renderizan (o estado vacío)', async ({ page }) => {
-    await page.getByRole('button', { name: 'Este mes' }).click()
-    const empty = page.getByText('Sin ventas en el período')
-    if (await empty.isVisible()) {
-      await expect(empty).toBeVisible()
-    } else {
-      await expect(page.locator('svg.recharts-surface').first()).toBeVisible()
-    }
+  test('cada tab tiene su botón de exportar', async ({ page }) => {
+    await expect(page.getByTestId('export-financiero')).toBeVisible()
+
+    await page.getByTestId('report-tab-stock').click()
+    await expect(page.getByTestId('export-stock')).toBeVisible()
   })
 
-  test('el botón Exportar Excel existe y es clickeable', async ({ page }) => {
-    const btn = page.getByRole('button', { name: /Exportar Excel/ })
-    await expect(btn).toBeVisible()
-    // Con datos (botón habilitado) el clic dispara la descarga del .xlsx.
-    if (await btn.isEnabled()) {
-      const download = page.waitForEvent('download')
-      await btn.click()
-      expect((await download).suggestedFilename()).toContain('.xlsx')
-    }
+  test('el sidebar muestra el nombre del restaurante', async ({ page }) => {
+    const brand = page.getByTestId('sidebar-brand-name')
+    await expect(brand).toBeVisible()
+    await expect(brand).not.toHaveText('')
   })
 })

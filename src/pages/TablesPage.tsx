@@ -8,6 +8,7 @@ import {
 import { toast } from 'react-hot-toast'
 import { useAuth } from '@/hooks/useAuth'
 import { usePermissions } from '@/hooks/usePermissions'
+import { useRestaurantConfig } from '@/hooks/useRestaurantConfig'
 import { useCashShift } from '@/hooks/useCashShift'
 import { useTables } from '@/hooks/useTables'
 import { useProducts } from '@/hooks/useProducts'
@@ -951,6 +952,7 @@ function TableSidePanel({
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null)
   const [sendingToKitchen, setSendingToKitchen] = useState(false)
   const [closingTable, setClosingTable] = useState(false)
+  const { restaurant } = useRestaurantConfig()
   const cfg = STATUS_CONFIG[table.status]
 
   const unsentItems = order?.order_items.filter((i) => !i.sent_to_kitchen) ?? []
@@ -1005,6 +1007,7 @@ function TableSidePanel({
         await updateOrderStatus(order.id, 'preparing')
       }
       printComanda({
+        restaurantName: restaurant?.name,
         tableName: table.name,
         zone: table.zone,
         waiter: order.waiter_name,
