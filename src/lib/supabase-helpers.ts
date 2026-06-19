@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import type { Tables, TablesInsert, TablesUpdate } from '@/types/database.types'
+import type { Json, Tables, TablesInsert, TablesUpdate } from '@/types/database.types'
 
 // --- Profiles ---
 
@@ -117,6 +117,39 @@ export const removeProductExtra = (productId: string, extraId: string) =>
     .eq('product_id', productId)
     .eq('extra_id', extraId)
 
+// IDs de productos de la sede que tienen al menos un extra ACTIVO asignado.
+// Se usa en POS/Mesas para decidir si abrir el modal de configuración.
+export const getProductsWithActiveExtras = (restaurantId: string) =>
+  supabase
+    .from('product_extras')
+    .select('product_id, products!inner(restaurant_id), extras!inner(is_active)')
+    .eq('products.restaurant_id', restaurantId)
+    .eq('extras.is_active', true)
+
+// --- Venta con extras (RPC atómica) ---
+
+// La RPC lee precio y producto vinculado de la BD (datos de confianza); el
+// cliente solo aporta extra_id y qty (por unidad del ítem).
+export type OrderItemExtraPayload = {
+  extra_id: string
+  qty: number
+}
+
+export type OrderItemPayload = {
+  product_id: string
+  qty: number
+  unit_price: number
+  notes: string | null
+  extras: OrderItemExtraPayload[]
+}
+
+// Inserta order_items + order_item_extras y descuenta stock vinculado, atómico.
+export const addOrderItemsWithExtras = (orderId: string, items: OrderItemPayload[]) =>
+  supabase.rpc('add_order_items_with_extras', {
+    p_order_id: orderId,
+    p_items: items as unknown as Json,
+  })
+
 // --- Storage: product-images ---
 
 export const uploadProductImage = async (
@@ -171,16 +204,16 @@ export const getTableActiveOrderCount = (tableId: string) =>
     .eq('table_id', tableId)
     .in('status', ['pending', 'preparing', 'ready'])
 
+const ORDER_ITEMS_WITH_EXTRAS = `
+  id, qty, unit_price, notes, sent_to_kitchen,
+  products(id, name, price),
+  order_item_extras(id, qty, unit_price, extras(id, name))
+` as const
+
 export const getActiveOrderByTable = (tableId: string) =>
   supabase
     .from('orders')
-    .select(`
-      *,
-      order_items(
-        id, qty, unit_price, notes, sent_to_kitchen,
-        products(id, name, price)
-      )
-    `)
+    .select(`*, order_items(${ORDER_ITEMS_WITH_EXTRAS})`)
     .eq('table_id', tableId)
     .in('status', ['pending', 'preparing', 'ready'])
     .order('created_at', { ascending: false })
@@ -190,13 +223,7 @@ export const getActiveOrderByTable = (tableId: string) =>
 export const getActiveOrdersForTables = (tableIds: string[]) =>
   supabase
     .from('orders')
-    .select(`
-      *,
-      order_items(
-        id, qty, unit_price, notes, sent_to_kitchen,
-        products(id, name, price)
-      )
-    `)
+    .select(`*, order_items(${ORDER_ITEMS_WITH_EXTRAS})`)
     .in('table_id', tableIds)
     .in('status', ['pending', 'preparing', 'ready'])
 

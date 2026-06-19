@@ -4,7 +4,12 @@ export interface ComandaData {
   zone?: string | null
   waiter?: string | null
   orderId: string
-  items: { qty: number; name: string; notes?: string | null }[]
+  items: {
+    qty: number
+    name: string
+    notes?: string | null
+    extras?: { name: string; qty: number }[]
+  }[]
 }
 
 const CSS_ID = 'gvento-printer-css'
@@ -63,6 +68,7 @@ export function printComanda(data: ComandaData): void {
     ${data.items.map(item => `
       <div style="margin-bottom:4px">
         <div style="font-weight:700;font-size:14px">${item.qty}x ${item.name}</div>
+        ${(item.extras ?? []).map(ex => `<div style="padding-left:16px;font-size:12px">+ ${ex.name} ×${ex.qty}</div>`).join('')}
         ${item.notes ? `<div style="padding-left:16px;font-size:11px">* ${item.notes}</div>` : ''}
       </div>
     `).join('')}

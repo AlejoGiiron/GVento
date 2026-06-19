@@ -1,5 +1,5 @@
 import { useState, useEffect, useId } from 'react'
-import { X, ChevronRight, Package } from 'lucide-react'
+import { X, ChevronRight, Package, AlertTriangle } from 'lucide-react'
 import { ImageUpload } from './ImageUpload'
 import { useProductMutations } from '@/hooks/useProductMutations'
 import { useExtras } from '@/hooks/useExtras'
@@ -308,14 +308,31 @@ export function ProductModal({ product, categories, onClose }: ProductModalProps
                   <label style={fieldLabel}>Unidades disponibles</label>
                   <input
                     type="number"
-                    min={0}
                     value={stockQty}
                     onChange={(e) => setStockQty(e.target.value)}
                     placeholder="0"
-                    style={{ ...inputStyle, width: 140 }}
+                    style={{
+                      ...inputStyle, width: 140,
+                      borderColor: Number(stockQty) < 0 ? '#ef4444' : '#e5e7eb',
+                      color: Number(stockQty) < 0 ? '#b91c1c' : '#0f172a',
+                    }}
                     onFocus={(e) => { e.currentTarget.style.borderColor = '#10b981' }}
-                    onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb' }}
+                    onBlur={(e) => { e.currentTarget.style.borderColor = Number(stockQty) < 0 ? '#ef4444' : '#e5e7eb' }}
                   />
+                  {Number(stockQty) < 0 && (
+                    <div
+                      data-testid="oversold-alert"
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 6,
+                        marginTop: 8, padding: '6px 10px', borderRadius: 8,
+                        background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c',
+                        fontSize: 12, fontWeight: 600,
+                      }}
+                    >
+                      <AlertTriangle size={13} />
+                      Sobreventa: reponer {Math.abs(Number(stockQty))} unidades del insumo
+                    </div>
+                  )}
                 </div>
               )}
             </div>

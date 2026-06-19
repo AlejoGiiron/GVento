@@ -6,15 +6,17 @@ import {
   Pause, Play, Clock,
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
-import { useCartStore } from '@/stores/cartStore'
+import { useCartStore, cartItemTotal } from '@/stores/cartStore'
 import { useProducts } from '@/hooks/useProducts'
 import { useCategories } from '@/hooks/useCategories'
+import { useProductsWithExtras } from '@/hooks/useProductsWithExtras'
 import { useAuth } from '@/hooks/useAuth'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useRestaurantConfig } from '@/hooks/useRestaurantConfig'
 import { useCashShift } from '@/hooks/useCashShift'
 import { OpenShiftModal } from '@/components/shift/OpenShiftModal'
-import { createOrder, addOrderItems, createPayment } from '@/lib/supabase-helpers'
+import { ItemConfigModal } from '@/components/pos/ItemConfigModal'
+import { createOrder, addOrderItemsWithExtras, createPayment } from '@/lib/supabase-helpers'
 import type { ProductWithCategory, CartItem, DiscountType, HeldOrder } from '@/stores/cartStore'
 import type { Enums } from '@/types/database.types'
 
@@ -125,6 +127,12 @@ function PrintTicket({
             <span style={{ fontWeight: 600 }}>{item.qty}x {item.product.name}</span>
             <span>{formatCOP(item.product.price * item.qty)}</span>
           </div>
+          {item.extras.map((ex) => (
+            <div key={ex.extra_id} style={{ display: 'flex', justifyContent: 'space-between', paddingLeft: 14, fontSize: 10 }}>
+              <span>+ {ex.name} ×{ex.qty * item.qty}</span>
+              <span>{formatCOP(ex.price * ex.qty * item.qty)}</span>
+            </div>
+          ))}
           {item.note && (
             <div style={{ paddingLeft: 14, fontSize: 10 }}>* {item.note}</div>
           )}
@@ -246,8 +254,9 @@ function ProductCard({ product, onAdd }: { product: ProductWithCategory; onAdd: 
 }
 
 // ─── Cart line item ──────────────────────────────────────────────
-function CartLine({ item, index, noting, onToggleNote }: {
+function CartLine({ item, index, noting, onToggleNote, hasExtras, onEditExtras }: {
   item: CartItem; index: number; noting: boolean; onToggleNote: () => void
+  hasExtras: boolean; onEditExtras: () => void
 }) {
   const setQty = useCartStore((s) => s.setQty)
   const setNote = useCartStore((s) => s.setNote)
@@ -269,12 +278,24 @@ function CartLine({ item, index, noting, onToggleNote }: {
             {item.product.name}
           </div>
           <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', fontFamily: 'monospace', flexShrink: 0 }}>
-            {formatCOP(item.product.price * item.qty)}
+            {formatCOP(cartItemTotal(item))}
           </div>
         </div>
         <div style={{ fontSize: 11.5, color: '#94a3b8', fontFamily: 'monospace', marginTop: 2 }}>
           {formatCOP(item.product.price)} c/u
         </div>
+
+        {/* Extras del ítem */}
+        {item.extras.length > 0 && (
+          <div data-testid="cart-item-extras" style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {item.extras.map((ex) => (
+              <div key={ex.extra_id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: '#065f46' }}>
+                <span>+ {ex.name} ×{ex.qty}</span>
+                <span style={{ fontFamily: 'monospace' }}>{formatCOP(ex.price * ex.qty * item.qty)}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         {item.note && !noting && (
           <div style={{
@@ -324,6 +345,11 @@ function CartLine({ item, index, noting, onToggleNote }: {
             </button>
           </div>
           <div style={{ flex: 1 }} />
+          {hasExtras && (
+            <button onClick={onEditExtras} style={iconBtnStyle} title="Extras" data-testid="cart-edit-extras">
+              <Plus size={13} />
+            </button>
+          )}
           <button onClick={onToggleNote} style={iconBtnStyle} title="Nota">
             <StickyNote size={13} />
           </button>
@@ -371,6 +397,8 @@ function CartPanel({
   onHold,
   heldCount,
   onShowHeld,
+  productsWithExtras,
+  onEditExtras,
 }: {
   subtotal: number
   discountAmt: number
@@ -384,6 +412,8 @@ function CartPanel({
   onHold: () => void
   heldCount: number
   onShowHeld: () => void
+  productsWithExtras: Set<string>
+  onEditExtras: (item: CartItem) => void
 }) {
   const items = useCartStore((s) => s.items)
   const discount = useCartStore((s) => s.discount)
@@ -488,11 +518,13 @@ function CartPanel({
         ) : (
           items.map((item, idx) => (
             <CartLine
-              key={`${item.product.id}-${idx}`}
+              key={item.id}
               item={item}
               index={idx}
               noting={notingIdx === idx}
               onToggleNote={() => setNotingIdx(notingIdx === idx ? null : idx)}
+              hasExtras={productsWithExtras.has(item.product.id)}
+              onEditExtras={() => onEditExtras(item)}
             />
           ))
         )}
@@ -753,13 +785,14 @@ function CheckoutModal({
       })
       if (orderErr || !order) throw orderErr ?? new Error('Error al crear orden')
 
-      const { error: itemsErr } = await addOrderItems(
+      const { error: itemsErr } = await addOrderItemsWithExtras(
+        order.id,
         items.map((item) => ({
-          order_id: order.id,
           product_id: item.product.id,
           qty: item.qty,
           unit_price: item.product.price,
           notes: item.note || null,
+          extras: item.extras.map((ex) => ({ extra_id: ex.extra_id, qty: ex.qty })),
         })),
       )
       if (itemsErr) throw itemsErr
@@ -1030,7 +1063,7 @@ function heldItemCount(h: HeldOrder): number {
 }
 
 function heldTotal(h: HeldOrder): number {
-  const subtotal = h.items.reduce((a, x) => a + x.product.price * x.qty, 0)
+  const subtotal = h.items.reduce((a, x) => a + cartItemTotal(x), 0)
   const disc = h.discountType === 'pct'
     ? Math.round((subtotal * h.discount) / 100)
     : Math.min(h.discount, subtotal)
@@ -1244,8 +1277,12 @@ export function POSPage() {
   const [showHoldModal, setShowHoldModal] = useState(false)
   const [showHeldPanel, setShowHeldPanel] = useState(false)
   const [resumeTarget, setResumeTarget] = useState<string | null>(null)
+  // Configuración de extras: producto a agregar, o ítem del carrito a editar.
+  const [configProduct, setConfigProduct] = useState<ProductWithCategory | null>(null)
+  const [editingItem, setEditingItem] = useState<CartItem | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const { isOpen: isShiftOpen } = useCashShift()
+  const productsWithExtras = useProductsWithExtras()
 
   // Cobrar exige turno abierto: si no hay, abre el modal de apertura primero.
   const handleCheckout = () => {
@@ -1304,6 +1341,8 @@ export function POSPage() {
   const discount = useCartStore((s) => s.discount)
   const discountType = useCartStore((s) => s.discountType)
   const add = useCartStore((s) => s.add)
+  const addItem = useCartStore((s) => s.addItem)
+  const updateItemExtras = useCartStore((s) => s.updateItemExtras)
   const clear = useCartStore((s) => s.clear)
   const heldOrders = useCartStore((s) => s.heldOrders)
   const holdCurrentOrder = useCartStore((s) => s.holdCurrentOrder)
@@ -1347,8 +1386,15 @@ export function POSPage() {
     discardHeldOrder(id)
   }
 
+  // Agregar producto: si tiene extras asignados, abrir el modal de
+  // configuración; si no, agregar directo (sin fricción).
+  const handleAddProduct = (product: ProductWithCategory) => {
+    if (productsWithExtras.has(product.id)) setConfigProduct(product)
+    else add(product)
+  }
+
   const subtotal = useMemo(
-    () => items.reduce((a, x) => a + x.product.price * x.qty, 0),
+    () => items.reduce((a, x) => a + cartItemTotal(x), 0),
     [items],
   )
   const discountAmt =
@@ -1463,7 +1509,7 @@ export function POSPage() {
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
               {filtered.map((p) => (
-                <ProductCard key={p.id} product={p} onAdd={() => add(p)} />
+                <ProductCard key={p.id} product={p} onAdd={() => handleAddProduct(p)} />
               ))}
             </div>
           )}
@@ -1484,7 +1530,29 @@ export function POSPage() {
         onHold={() => setShowHoldModal(true)}
         heldCount={heldOrders.length}
         onShowHeld={() => setShowHeldPanel(true)}
+        productsWithExtras={productsWithExtras}
+        onEditExtras={(item) => setEditingItem(item)}
       />
+
+      {/* Configurar extras al AGREGAR un producto */}
+      {configProduct && (
+        <ItemConfigModal
+          product={configProduct}
+          onConfirm={(extras) => { addItem(configProduct, extras); setConfigProduct(null) }}
+          onClose={() => setConfigProduct(null)}
+        />
+      )}
+
+      {/* Editar extras de un ítem ya en el carrito */}
+      {editingItem && (
+        <ItemConfigModal
+          product={editingItem.product}
+          initial={editingItem.extras}
+          confirmLabel="Guardar extras"
+          onConfirm={(extras) => { updateItemExtras(editingItem.id, extras); setEditingItem(null) }}
+          onClose={() => setEditingItem(null)}
+        />
+      )}
 
       {showHoldModal && (
         <HoldLabelModal

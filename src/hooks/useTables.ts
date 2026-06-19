@@ -9,6 +9,13 @@ import type { Tables } from '@/types/database.types'
 
 export type TableRow = Tables<'tables'>
 
+export type OrderItemExtraRow = {
+  id: string
+  qty: number
+  unit_price: number
+  extras: { id: string; name: string } | null
+}
+
 export type OrderItemRow = {
   id: string
   qty: number
@@ -16,6 +23,7 @@ export type OrderItemRow = {
   notes: string | null
   sent_to_kitchen: boolean
   products: { id: string; name: string; price: number } | null
+  order_item_extras: OrderItemExtraRow[]
 }
 
 export type ActiveOrder = Tables<'orders'> & {
