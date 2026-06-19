@@ -16,10 +16,27 @@ proyecto. No son inocuos:
   `VITE_GVENTO_SUPABASE_URL` (y la anon key) del entorno a ese proyecto.
 - **Mínimo:** correr solo en **horarios sin operación**.
 
+## ⚠️ Puerto dedicado — NO correr contra otra app
+
+Los tests usan un **puerto dedicado de G-Vento: `5180`** (no el `5173` por defecto
+de Vite). Playwright **siempre levanta su propio servidor de gvento ahí**
+(`reuseExistingServer: false` + `--strictPort`), así nunca se conecta por accidente
+a otra app que esté ocupando un puerto.
+
+Esto importa porque **G-Mura y G-Vento pueden correr en paralelo**: G-Mura suele
+ocupar el `5173`. Si los tests apuntaran a un puerto compartido con
+`reuseExistingServer`, Playwright se conectaría a la app equivocada (login falla,
+o peor, mutarías datos del proyecto incorrecto). Salvaguardas:
+
+- **Puerto dedicado `5180` + `strictPort`**: si está ocupado, la corrida **falla
+  ruidosamente** en vez de servir/conectarse a otra cosa.
+- **Health check** (`tests/global-setup.ts`): antes de la suite verifica que el HTML
+  servido contiene el marcador `G-Vento`; si no, **aborta**.
+
+No hace falta tener un `pnpm dev` corriendo a mano: Playwright lo arranca en `5180`.
+
 ## Requisitos
 
-- El dev server de Vite (`pnpm dev` en `http://localhost:5173`). Playwright lo
-  levanta solo (`webServer` en `playwright.config.ts`, con `reuseExistingServer`).
 - El `.env` del proyecto con `VITE_GVENTO_SUPABASE_URL` y `VITE_GVENTO_SUPABASE_ANON_KEY`
   (los tests usan el backend real de Supabase contra la org de prueba).
 - Dos cuentas de prueba: un **owner** y un **cajero** (ver abajo).

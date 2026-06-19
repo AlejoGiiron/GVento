@@ -1,4 +1,5 @@
 export interface ComandaData {
+  restaurantName?: string | null
   tableName: string
   zone?: string | null
   waiter?: string | null
@@ -51,6 +52,7 @@ export function printComanda(data: ComandaData): void {
   div.className = 'comanda-print'
   div.innerHTML = `
     <div style="text-align:center;margin-bottom:8px">
+      ${data.restaurantName ? `<div style="font-size:13px;font-weight:700;letter-spacing:1px">${data.restaurantName.toUpperCase()}</div>` : ''}
       <div style="font-size:16px;font-weight:700;letter-spacing:2px">COMANDA</div>
       <div style="font-size:14px;font-weight:700">Mesa: ${data.tableName}</div>
       ${data.zone ? `<div style="font-size:11px">${data.zone}</div>` : ''}

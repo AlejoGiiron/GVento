@@ -9,7 +9,7 @@ import {
   LineChart, Line,
   PieChart, Pie, Cell,
 } from 'recharts'
-import { Download, TrendingUp, TrendingDown, ShoppingBag, DollarSign, Package } from 'lucide-react'
+import { Download, TrendingUp, TrendingDown, ShoppingBag, DollarSign, Package, Wallet, Boxes } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { useReports } from '@/hooks/useReports'
 
@@ -117,6 +117,7 @@ export function ReportsPage() {
   const [to,   setTo]   = useState(() => format(new Date(), 'yyyy-MM-dd'))
   const [activeShortcut, setActiveShortcut] = useState<string>('mes')
   const [isExporting, setIsExporting] = useState(false)
+  const [activeTab, setActiveTab] = useState<'financiero' | 'stock'>('financiero')
 
   // ─── Previous period (same length, ending day before `from`) ──────────────
   const periodLen = useMemo(
@@ -202,6 +203,20 @@ export function ReportsPage() {
   const totalUnits = useMemo(() => allProducts.reduce((s, p) => s + p.total_qty, 0), [allProducts])
   const isEmpty    = !isLoading && totalOrd === 0
 
+  // ─── Stock: ranking de categorías (unidades + revenue) ────────────────────
+  const categoryRanking = useMemo(() => {
+    const map: Record<string, { category: string; total_qty: number; total_revenue: number }> = {}
+    for (const p of allProducts) {
+      const cat = p.category_name || '—'
+      if (!map[cat]) map[cat] = { category: cat, total_qty: 0, total_revenue: 0 }
+      map[cat].total_qty     += p.total_qty
+      map[cat].total_revenue += p.total_revenue
+    }
+    return Object.values(map).sort((a, b) => b.total_revenue - a.total_revenue)
+  }, [allProducts])
+  // Vacío de stock: no se vendieron productos en el período.
+  const isStockEmpty = !isLoading && allProducts.length === 0
+
   // ─── Shortcut handlers ────────────────────────────────────────────────────
   function applyShortcut(key: string) {
     const now = new Date()
@@ -230,14 +245,30 @@ export function ReportsPage() {
   }
 
   // ─── Excel export ─────────────────────────────────────────────────────────
-  async function handleExport() {
+  async function downloadWorkbook(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    wb: any,
+    suffix: string,
+  ) {
+    const buf  = await wb.xlsx.writeBuffer()
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href = url
+    a.download = `gvento_${suffix}_${format(new Date(), 'yyyy-MM-dd')}.xlsx`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  async function handleExportFinanciero() {
     setIsExporting(true)
     try {
       const { default: ExcelJS } = await import('exceljs')
       const wb = new ExcelJS.Workbook()
       wb.creator = 'G-Vento POS'
 
-      // Hoja 1: Resumen
       const ws1 = wb.addWorksheet('Resumen')
       ws1.columns = [
         { header: 'Métrica', key: 'metric', width: 32 },
@@ -254,7 +285,6 @@ export function ReportsPage() {
         { metric: 'Nequi (COP)',           value: dailySales.reduce((s, r) => s + (r.nequi_total    ?? 0), 0) },
       ])
 
-      // Hoja 2: Ventas por día
       const ws2 = wb.addWorksheet('Ventas por día')
       ws2.columns = [
         { header: 'Fecha',         key: 'day',         width: 14 },
@@ -274,31 +304,46 @@ export function ReportsPage() {
         })
       }
 
-      // Hoja 3: Detalle de productos
-      const ws3 = wb.addWorksheet('Detalle de productos')
-      ws3.columns = [
+      await downloadWorkbook(wb, 'financiero')
+    } catch {
+      toast.error('Error al exportar el reporte')
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
+  async function handleExportStock() {
+    setIsExporting(true)
+    try {
+      const { default: ExcelJS } = await import('exceljs')
+      const wb = new ExcelJS.Workbook()
+      wb.creator = 'G-Vento POS'
+
+      const ws1 = wb.addWorksheet('Detalle de productos')
+      ws1.columns = [
         { header: 'Producto',          key: 'product_name',  width: 32 },
         { header: 'Categoría',         key: 'category_name', width: 20 },
         { header: 'Unidades vendidas', key: 'total_qty',     width: 18 },
-        { header: 'Revenue (COP)',      key: 'total_revenue', width: 18 },
+        { header: 'Revenue (COP)',     key: 'total_revenue', width: 18 },
       ]
       for (const p of allProducts) {
-        ws3.addRow({
+        ws1.addRow({
           product_name: p.product_name, category_name: p.category_name,
           total_qty: p.total_qty, total_revenue: p.total_revenue,
         })
       }
 
-      const buf  = await wb.xlsx.writeBuffer()
-      const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
-      const url  = URL.createObjectURL(blob)
-      const a    = document.createElement('a')
-      a.href = url
-      a.download = `gvento_reporte_${format(new Date(), 'yyyy-MM-dd')}.xlsx`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
+      const ws2 = wb.addWorksheet('Categorías')
+      ws2.columns = [
+        { header: 'Categoría',         key: 'category',      width: 24 },
+        { header: 'Unidades vendidas', key: 'total_qty',     width: 18 },
+        { header: 'Revenue (COP)',     key: 'total_revenue', width: 18 },
+      ]
+      for (const c of categoryRanking) {
+        ws2.addRow({ category: c.category, total_qty: c.total_qty, total_revenue: c.total_revenue })
+      }
+
+      await downloadWorkbook(wb, 'stock')
     } catch {
       toast.error('Error al exportar el reporte')
     } finally {
@@ -308,6 +353,7 @@ export function ReportsPage() {
 
   // ─── Render ───────────────────────────────────────────────────────────────
   const exportDisabled = isExporting || isLoading || isEmpty
+  const exportStockDisabled = isExporting || isLoading || isStockEmpty
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -358,8 +404,49 @@ export function ReportsPage() {
               onChange={e => { setTo(e.target.value); setActiveShortcut('') }}
               style={{ fontSize: 13, padding: '6px 10px', border: '1.5px solid #e2e8f0', borderRadius: 8, color: '#0f172a', outline: 'none' }}
             />
+          </div>
+        </div>
+
+        {/* Tabs Financiero / Stock (selector de fechas compartido arriba) */}
+        <div style={{ display: 'flex', gap: 4, marginTop: 12 }}>
+          {([
+            { id: 'financiero' as const, label: 'Financiero', icon: <Wallet size={14} /> },
+            { id: 'stock'      as const, label: 'Stock',      icon: <Boxes size={14} /> },
+          ]).map(t => {
+            const active = activeTab === t.id
+            return (
+              <button
+                key={t.id}
+                data-testid={`report-tab-${t.id}`}
+                onClick={() => setActiveTab(t.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  fontSize: 13, fontWeight: 600, padding: '8px 16px',
+                  border: 'none', cursor: 'pointer',
+                  borderBottom: active ? '2px solid #10b981' : '2px solid transparent',
+                  background: 'transparent',
+                  color: active ? '#0f172a' : '#64748b',
+                  transition: 'all .12s',
+                }}
+              >
+                {t.icon} {t.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* ── Contenido scrollable ── */}
+      <div style={{ flex: 1, overflowY: 'auto', background: '#f8fafc' }}>
+        <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+          {activeTab === 'financiero' && (
+          <>
+          {/* Export financiero */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <button
-              onClick={handleExport}
+              data-testid="export-financiero"
+              onClick={handleExportFinanciero}
               disabled={exportDisabled}
               style={{
                 display: 'flex', alignItems: 'center', gap: 6,
@@ -369,22 +456,15 @@ export function ReportsPage() {
                 background: exportDisabled ? '#cbd5e1'     : '#10b981',
                 color: '#fff',
                 boxShadow: exportDisabled ? 'none' : '0 4px 12px rgba(16,185,129,.35)',
-                transition: 'all .15s',
               }}
             >
               <Download size={14} />
               {isExporting ? 'Exportando…' : 'Exportar Excel'}
             </button>
           </div>
-        </div>
-      </div>
 
-      {/* ── Contenido scrollable ── */}
-      <div style={{ flex: 1, overflowY: 'auto', background: '#f8fafc' }}>
-        <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
-
-          {/* KPIs */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
+          {/* KPIs financieros */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
             <KPICard
               label="Ventas totales"
               value={COP(totalRev)}
@@ -404,13 +484,6 @@ export function ReportsPage() {
               value={COP(avgTicket)}
               icon={<TrendingUp size={15} />}
               change={pctChange(avgTicket, prevTicket)}
-              isLoading={isLoading}
-            />
-            <KPICard
-              label="Unidades vendidas"
-              value={totalUnits.toLocaleString('es-CO')}
-              icon={<Package size={15} />}
-              change={null}
               isLoading={isLoading}
             />
           </div>
@@ -616,6 +689,106 @@ export function ReportsPage() {
                 </div>
               </div>
             </>
+          )}
+          </>
+          )}
+
+          {activeTab === 'stock' && (
+          <>
+          {/* Export stock */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button
+              data-testid="export-stock"
+              onClick={handleExportStock}
+              disabled={exportStockDisabled}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                fontSize: 13, fontWeight: 600, padding: '7px 14px',
+                borderRadius: 9, border: 'none',
+                cursor:     exportStockDisabled ? 'not-allowed' : 'pointer',
+                background: exportStockDisabled ? '#cbd5e1'     : '#10b981',
+                color: '#fff',
+                boxShadow: exportStockDisabled ? 'none' : '0 4px 12px rgba(16,185,129,.35)',
+              }}
+            >
+              <Download size={14} />
+              {isExporting ? 'Exportando…' : 'Exportar Excel'}
+            </button>
+          </div>
+
+          {/* KPIs de stock */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+            <KPICard label="Unidades vendidas"  value={totalUnits.toLocaleString('es-CO')}            icon={<Package size={15} />}     change={null} isLoading={isLoading} />
+            <KPICard label="Productos vendidos"  value={allProducts.length.toLocaleString('es-CO')}    icon={<Boxes size={15} />}       change={null} isLoading={isLoading} />
+            <KPICard label="Categorías"          value={categoryRanking.length.toLocaleString('es-CO')} icon={<ShoppingBag size={15} />} change={null} isLoading={isLoading} />
+          </div>
+
+          {isStockEmpty ? (
+            <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: '52px 24px', textAlign: 'center' }}>
+              <p style={{ fontSize: 15, fontWeight: 700, color: '#0f172a' }}>Sin productos vendidos en el período</p>
+              <p style={{ fontSize: 13.5, color: '#64748b', marginTop: 6 }}>Ajusta el rango de fechas para ver el consumo de productos.</p>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 16 }}>
+              {/* Productos más vendidos */}
+              <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: 20 }}>
+                <p style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 2 }}>Productos más vendidos</p>
+                <p style={{ fontSize: 11.5, color: '#94a3b8', marginBottom: 16 }}>Unidades y revenue del período</p>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+                    <thead>
+                      <tr style={{ borderBottom: '2px solid #f1f5f9' }}>
+                        {['#', 'Producto', 'Categoría', 'Unidades', 'Revenue'].map((h, i) => (
+                          <th key={h} style={{ padding: '7px 10px', fontSize: 11.5, fontWeight: 600, color: '#64748b', textAlign: i >= 3 ? 'right' : 'left', whiteSpace: 'nowrap' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allProducts.slice(0, 15).map((p, i) => (
+                        <tr key={p.product_id} style={{ borderBottom: '1px solid #f8fafc' }}>
+                          <td style={{ padding: '10px', color: '#94a3b8', fontWeight: 700, fontSize: 11 }}>{i + 1}</td>
+                          <td style={{ padding: '10px', color: '#0f172a', fontWeight: 600, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.product_name}</td>
+                          <td style={{ padding: '10px', color: '#64748b' }}>{p.category_name}</td>
+                          <td style={{ padding: '10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#0f172a' }}>{p.total_qty.toLocaleString('es-CO')}</td>
+                          <td style={{ padding: '10px', textAlign: 'right', fontFamily: 'monospace', color: '#334155' }}>{COP(p.total_revenue)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Ranking de categorías */}
+              <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: 20 }}>
+                <p style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 2 }}>Ranking de categorías</p>
+                <p style={{ fontSize: 11.5, color: '#94a3b8', marginBottom: 16 }}>Por revenue del período</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {categoryRanking.map((c, i) => {
+                    const max = categoryRanking[0]?.total_revenue || 1
+                    const pct = (c.total_revenue / max) * 100
+                    return (
+                      <div key={c.category}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, marginBottom: 4 }}>
+                          <span style={{ color: '#334155', fontWeight: 600 }}>{c.category}</span>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#0f172a' }}>{COP(c.total_revenue)}</span>
+                        </div>
+                        <div style={{ height: 6, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}>
+                          <div style={{ width: `${pct}%`, height: '100%', background: PAY_COLORS[i % PAY_COLORS.length] }} />
+                        </div>
+                        <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 3 }}>{c.total_qty.toLocaleString('es-CO')} unidades</div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Stock/consumo: preparado para cuando los productos registren inventario */}
+          <div style={{ fontSize: 11.5, color: '#94a3b8', textAlign: 'center' }}>
+            El control de stock por unidades disponibles se mostrará aquí cuando los productos registren inventario.
+          </div>
+          </>
           )}
         </div>
       </div>
