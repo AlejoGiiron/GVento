@@ -145,9 +145,28 @@ Resumen rápido:
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: Testing E2E — suite Playwright 44/44 (sesión 2026-06-14)
+Última fase completada: Grupo E — identidad por sede + reportes Financiero/Stock (sesión 2026-06-19)
 En progreso: —
-Siguiente: Grupo E — identidad + reportes consolidados
+Siguiente: —
+
+### Detalle Grupo E - Identidad + reportes Financiero/Stock (sesión 2026-06-19, rama feature/identidad-reportes)
+- Branding por SEDE (restaurants), no por org: nombre/logo/dirección ya se capturan en
+  Config y los tickets necesitan la dirección de la sede (con 1 sede = la org)
+  - Sidebar (AppLayout): logo + nombre de la sede, fallback "G-Vento" (data-testid
+    sidebar-brand-name); POSPage PrintTicket: nombre + dirección reales; printer.ts
+    comanda + TablesPage: nombre de la sede; LoginPage queda genérico (pre-auth, RLS)
+- ReportsPage en dos tabs Financiero/Stock con selector de fechas COMPARTIDO:
+  - Financiero: KPIs ventas/órdenes/ticket, barras día·canal, línea horaria, pie métodos,
+    comparación vs período anterior, export financiero
+  - Stock: KPIs unidades/productos/categorías, top productos, ranking de categorías,
+    export stock; nota de stock-prep (inventario por unidad pendiente)
+  - data-testid: report-tab-financiero/stock, export-financiero/stock
+- Blindaje de colisión de puertos E2E (G-Mura ocupa 5173): puerto DEDICADO 5180 +
+  --strictPort + reuseExistingServer:false (Playwright siempre levanta su propio gvento);
+  tests/global-setup.ts con health check del marcador "G-Vento"; README documentado
+- Suite E2E ampliada a 45 tests (reportes 5); resultado 45/45 verde, aislado de G-Mura
+
+### Detalle Testing E2E (sesión 2026-06-14, ramas feature/e2e-tests + feature/e2e-coverage)
 
 ### Detalle Testing E2E (sesión 2026-06-14, ramas feature/e2e-tests + feature/e2e-coverage)
 - Suite Playwright de 44 tests en 10 specs cubriendo los 10 módulos: auth, rbac, pos,
