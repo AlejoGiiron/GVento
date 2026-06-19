@@ -62,6 +62,61 @@ export const archiveProduct = (productId: string) =>
 export const updateProductStock = (productId: string, stock_qty: number) =>
   supabase.from('products').update({ stock_qty }).eq('id', productId)
 
+// --- Extras (catálogo de subproductos reutilizables) ---
+
+// Solo activos: para asignación a productos y selección en POS (prompt 2).
+export const getExtras = (restaurantId: string) =>
+  supabase
+    .from('extras')
+    .select('*')
+    .eq('restaurant_id', restaurantId)
+    .eq('is_active', true)
+    .order('name')
+
+// Incluye inactivos: para el catálogo de configuración.
+export const getAllExtras = (restaurantId: string) =>
+  supabase
+    .from('extras')
+    .select('*')
+    .eq('restaurant_id', restaurantId)
+    .order('is_active', { ascending: false })
+    .order('name')
+
+export const upsertExtra = (extra: TablesInsert<'extras'>) =>
+  supabase.from('extras').upsert(extra).select().single()
+
+export const deactivateExtra = (extraId: string) =>
+  supabase.from('extras').update({ is_active: false }).eq('id', extraId)
+
+// Cuántas líneas de venta usan este extra (para impedir su borrado).
+export const countOrderItemsUsingExtra = (extraId: string) =>
+  supabase
+    .from('order_item_extras')
+    .select('*', { count: 'exact', head: true })
+    .eq('extra_id', extraId)
+
+// --- product_extras (qué extras aplican a cada producto) ---
+
+export const getProductExtras = (productId: string) =>
+  supabase
+    .from('product_extras')
+    .select('*, extras(*)')
+    .eq('product_id', productId)
+
+export const addProductExtra = (productId: string, extraId: string) =>
+  supabase
+    .from('product_extras')
+    .insert({ product_id: productId, extra_id: extraId })
+    .select()
+    .single()
+
+export const removeProductExtra = (productId: string, extraId: string) =>
+  supabase
+    .from('product_extras')
+    .delete()
+    .eq('product_id', productId)
+    .eq('extra_id', extraId)
+
 // --- Storage: product-images ---
 
 export const uploadProductImage = async (

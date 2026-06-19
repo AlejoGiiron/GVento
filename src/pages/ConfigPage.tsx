@@ -22,6 +22,8 @@ import {
   Shield,
   Pencil,
   Lock,
+  Puzzle,
+  Package,
   type LucideIcon,
 } from 'lucide-react'
 import { useRestaurantConfig } from '@/hooks/useRestaurantConfig'
@@ -30,12 +32,15 @@ import { useAuth } from '@/hooks/useAuth'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useRoles, rolePermissions, type RoleRow } from '@/hooks/useRoles'
 import { useStores, type StoreRow } from '@/hooks/useStores'
+import { useExtras } from '@/hooks/useExtras'
+import { useProducts } from '@/hooks/useProducts'
 import {
   uploadRestaurantLogo,
   uploadNequiQR,
   upsertCourier,
   getAllCouriers,
   deleteCourier,
+  countOrderItemsUsingExtra,
 } from '@/lib/supabase-helpers'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { PaymentMethod } from '@/hooks/useRestaurantConfig'
@@ -43,13 +48,14 @@ import type { Tables } from '@/types/database.types'
 
 // ─── Constants ────────────────────────────────────────────────────
 
-type SectionId = 'restaurante' | 'usuarios' | 'sedes' | 'roles' | 'caja' | 'cocina' | 'delivery' | 'notificaciones'
+type SectionId = 'restaurante' | 'usuarios' | 'sedes' | 'roles' | 'extras' | 'caja' | 'cocina' | 'delivery' | 'notificaciones'
 
 const SECTIONS: { id: SectionId; label: string; icon: LucideIcon; permission?: string }[] = [
   { id: 'restaurante', label: 'Restaurante', icon: Building2 },
   { id: 'usuarios', label: 'Usuarios', icon: Users },
   { id: 'sedes', label: 'Sedes', icon: Store, permission: 'sedes.gestionar' },
   { id: 'roles', label: 'Roles y permisos', icon: Shield, permission: 'roles.gestionar' },
+  { id: 'extras', label: 'Extras', icon: Puzzle, permission: 'productos.editar' },
   { id: 'caja', label: 'Caja', icon: Wallet },
   { id: 'cocina', label: 'Cocina', icon: ChefHat },
   { id: 'delivery', label: 'Delivery', icon: Truck },
@@ -1570,6 +1576,247 @@ function SectionRoles() {
   )
 }
 
+// ─── Section: Extras ──────────────────────────────────────────────
+
+type ExtraRow = Tables<'extras'>
+
+const formatCOP = (n: number) =>
+  new Intl.NumberFormat('es-CO', {
+    style: 'currency', currency: 'COP',
+    minimumFractionDigits: 0, maximumFractionDigits: 0,
+  }).format(n)
+
+function ExtraFormModal({
+  extra,
+  restaurantId,
+  onClose,
+}: {
+  extra: ExtraRow | null
+  restaurantId: string
+  onClose: () => void
+}) {
+  const { saveExtra } = useExtras()
+  const { data: products = [] } = useProducts()
+
+  const [name, setName] = useState(extra?.name ?? '')
+  const [price, setPrice] = useState(extra ? String(extra.price) : '')
+  const [tracksStock, setTracksStock] = useState(!!extra?.linked_product_id)
+  const [linkedProductId, setLinkedProductId] = useState(extra?.linked_product_id ?? '')
+
+  const priceNum = parseInt(price.replace(/\D/g, ''), 10) || 0
+  const isValid = name.trim().length > 0 && (!tracksStock || !!linkedProductId)
+  const saving = saveExtra.isPending
+
+  const handleSave = async () => {
+    if (!isValid) return
+    await saveExtra.mutateAsync({
+      ...(extra ? { id: extra.id } : {}),
+      restaurant_id: restaurantId,
+      name: name.trim(),
+      price: priceNum,
+      linked_product_id: tracksStock ? (linkedProductId || null) : null,
+      is_active: true,
+    })
+    onClose()
+  }
+
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.55)', display: 'grid', placeItems: 'center', zIndex: 50 }}
+      onClick={e => e.target === e.currentTarget && onClose()}
+    >
+      <div style={{ background: '#fff', borderRadius: 14, width: 440, boxShadow: '0 25px 50px -12px rgba(0,0,0,.25)' }}>
+        <div style={{ padding: '18px 22px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', margin: 0 }}>
+            {extra ? 'Editar extra' : 'Nuevo extra'}
+          </h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}><X size={18} /></button>
+        </div>
+
+        <div style={{ padding: '22px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div>
+            <FieldLabel>Nombre</FieldLabel>
+            <TextInput value={name} onChange={setName} placeholder="Ej: Topping de queso" testId="extra-name" />
+          </div>
+
+          <div>
+            <FieldLabel>Precio (COP)</FieldLabel>
+            <div style={{ position: 'relative' }}>
+              <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 13, color: '#94a3b8', fontFamily: 'monospace', pointerEvents: 'none' }}>$</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                data-testid="extra-price"
+                value={price ? formatCOP(priceNum).replace('$', '').trim() : ''}
+                onChange={e => setPrice(e.target.value.replace(/\D/g, ''))}
+                placeholder="0"
+                style={{ width: '100%', border: '1.5px solid #e2e8f0', borderRadius: 8, padding: '10px 12px 10px 24px', fontSize: 14, color: '#0f172a', outline: 'none', background: '#fff', boxSizing: 'border-box', fontFamily: 'monospace' }}
+                onFocus={e => (e.currentTarget.style.borderColor = '#10b981')}
+                onBlur={e => (e.currentTarget.style.borderColor = '#e2e8f0')}
+              />
+            </div>
+          </div>
+
+          {/* Toggle: descuenta inventario */}
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#334155' }}>Descuenta inventario</div>
+                <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 2 }}>
+                  Vender este extra descuenta stock de un producto
+                </div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={tracksStock}
+                data-testid="extra-link-toggle"
+                onClick={() => setTracksStock(!tracksStock)}
+                style={{ width: 44, height: 24, borderRadius: 12, background: tracksStock ? '#10b981' : '#e2e8f0', border: 'none', cursor: 'pointer', position: 'relative', transition: 'background .15s', flexShrink: 0 }}
+              >
+                <span style={{ position: 'absolute', top: 2, left: tracksStock ? 22 : 2, width: 20, height: 20, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,.2)', transition: 'left .15s' }} />
+              </button>
+            </div>
+
+            {tracksStock && (
+              <div style={{ marginTop: 12 }}>
+                <FieldLabel>Producto vinculado</FieldLabel>
+                <select
+                  value={linkedProductId}
+                  data-testid="extra-link-product"
+                  onChange={e => setLinkedProductId(e.target.value)}
+                  style={{ width: '100%', border: '1.5px solid #e2e8f0', borderRadius: 8, padding: '10px 12px', fontSize: 14, color: '#0f172a', outline: 'none', background: '#fff', cursor: 'pointer' }}
+                  onFocus={e => (e.currentTarget.style.borderColor = '#10b981')}
+                  onBlur={e => (e.currentTarget.style.borderColor = '#e2e8f0')}
+                >
+                  <option value="">Seleccionar producto...</option>
+                  {products.map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div style={{ padding: '0 22px 22px', display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={{ padding: '10px 20px', border: '1.5px solid #e2e8f0', borderRadius: 9, background: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#334155' }}>
+            Cancelar
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={!isValid || saving}
+            data-testid="extra-save"
+            style={{ padding: '10px 24px', background: !isValid || saving ? '#cbd5e1' : '#10b981', border: 'none', borderRadius: 10, cursor: !isValid || saving ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: 6, boxShadow: !isValid || saving ? 'none' : '0 4px 12px rgba(16,185,129,.3)' }}
+          >
+            {saving && <Loader2 size={14} className="animate-spin" />}
+            Guardar
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SectionExtras() {
+  const { profile } = useAuth()
+  const restaurantId = profile?.restaurant_id ?? ''
+  const { extras, isLoading, deactivate } = useExtras()
+  const { data: products = [] } = useProducts()
+  const [editExtra, setEditExtra] = useState<ExtraRow | null | 'new'>()
+
+  const productName = (id: string | null) =>
+    id ? (products.find(p => p.id === id)?.name ?? 'Producto eliminado') : null
+
+  // Borrado lógico, nunca físico: si el extra está en ventas (order_item_extras),
+  // el FK ON DELETE RESTRICT impediría borrarlo y conservamos el histórico. Por eso
+  // siempre desactivamos y, cuando está en uso, lo explicitamos en el mensaje.
+  const handleDeactivate = async (extra: ExtraRow) => {
+    const { count } = await countOrderItemsUsingExtra(extra.id)
+    const inUse = (count ?? 0) > 0
+    const message = inUse
+      ? `«${extra.name}» se usa en ${count} línea${count === 1 ? '' : 's'} de venta, así que no se puede eliminar. ` +
+        `Se desactivará para que no aparezca en nuevas ventas (el histórico se conserva). ¿Continuar?`
+      : `¿Desactivar «${extra.name}»?`
+    if (!window.confirm(message)) return
+    deactivate.mutate(extra.id)
+  }
+
+  if (isLoading) return <Skeleton />
+
+  return (
+    <div>
+      <SectionTitle>Extras</SectionTitle>
+      <p style={{ fontSize: 13, color: '#64748b', marginTop: -16, marginBottom: 24 }}>
+        Subproductos reutilizables (toppings, adiciones, salsas). Se asignan a cada
+        producto desde su ficha en <strong>Productos</strong>.
+      </p>
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>Catálogo</h3>
+        <button
+          onClick={() => setEditExtra('new')}
+          data-testid="extra-new"
+          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', background: '#10b981', border: 'none', borderRadius: 9, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#fff', boxShadow: '0 4px 12px rgba(16,185,129,.3)' }}
+        >
+          <Plus size={14} /> Nuevo extra
+        </button>
+      </div>
+
+      <div style={{ border: '1px solid #e2e8f0', borderRadius: 12, overflow: 'hidden' }}>
+        {extras.length === 0 && (
+          <div style={{ padding: '28px 16px', textAlign: 'center', color: '#94a3b8', fontSize: 14 }}>
+            No hay extras en el catálogo
+          </div>
+        )}
+        {extras.map((e, idx) => (
+          <div
+            key={e.id}
+            data-testid="extra-row"
+            style={{ display: 'flex', alignItems: 'center', padding: '12px 16px', borderBottom: idx < extras.length - 1 ? '1px solid #f1f5f9' : 'none', gap: 12, opacity: e.is_active ? 1 : 0.5 }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ fontSize: 14, fontWeight: 600, color: '#0f172a', margin: 0 }}>{e.name}</p>
+              {e.linked_product_id && (
+                <p style={{ fontSize: 12, color: '#64748b', margin: '2px 0 0', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <Package size={12} /> Descuenta: {productName(e.linked_product_id)}
+                </p>
+              )}
+            </div>
+            <span style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', fontFamily: 'monospace' }}>{formatCOP(Number(e.price))}</span>
+            <span style={{ fontSize: 11, fontWeight: 600, color: e.is_active ? '#065f46' : '#64748b', background: e.is_active ? '#ecfdf5' : '#f1f5f9', padding: '3px 10px', borderRadius: 20 }}>
+              {e.is_active ? 'Activo' : 'Inactivo'}
+            </span>
+            <button
+              onClick={() => setEditExtra(e)}
+              style={{ background: 'none', border: '1px solid #e2e8f0', borderRadius: 7, padding: '5px 10px', cursor: 'pointer', fontSize: 12, color: '#334155' }}
+            >
+              Editar
+            </button>
+            {e.is_active && (
+              <button
+                onClick={() => handleDeactivate(e)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}
+                title="Desactivar"
+              >
+                <Trash2 size={15} />
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {editExtra !== undefined && (
+        <ExtraFormModal
+          extra={editExtra === 'new' ? null : editExtra}
+          restaurantId={restaurantId}
+          onClose={() => setEditExtra(undefined)}
+        />
+      )}
+    </div>
+  )
+}
+
 // ─── Main page ────────────────────────────────────────────────────
 
 export function ConfigPage() {
@@ -1583,6 +1830,7 @@ export function ConfigPage() {
     usuarios: <SectionUsers />,
     sedes: <SectionSedes />,
     roles: <SectionRoles />,
+    extras: <SectionExtras />,
     caja: <SectionCaja />,
     cocina: <SectionCocina />,
     delivery: <SectionDelivery />,

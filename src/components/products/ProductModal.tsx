@@ -1,7 +1,9 @@
 import { useState, useEffect, useId } from 'react'
-import { X, ChevronRight } from 'lucide-react'
+import { X, ChevronRight, Package } from 'lucide-react'
 import { ImageUpload } from './ImageUpload'
 import { useProductMutations } from '@/hooks/useProductMutations'
+import { useExtras } from '@/hooks/useExtras'
+import { useProductExtras } from '@/hooks/useProductExtras'
 import { useAuth } from '@/hooks/useAuth'
 import type { ProductWithCategory } from '@/stores/cartStore'
 import type { Tables } from '@/types/database.types'
@@ -21,9 +23,33 @@ interface ProductModalProps {
 export function ProductModal({ product, categories, onClose }: ProductModalProps) {
   const { profile } = useAuth()
   const { saveProduct, uploadImage, removeImage } = useProductMutations()
+  const { extras } = useExtras()
+  const { assignedIds, reconcile } = useProductExtras(product?.id ?? null)
   const formId = useId()
 
   const isEditing = !!product
+
+  // Extras del catálogo asignables a este producto (solo activos).
+  const activeExtras = extras.filter(e => e.is_active)
+  const [selectedExtras, setSelectedExtras] = useState<Set<string>>(new Set())
+  const [extrasInit, setExtrasInit] = useState(false)
+
+  // Inicializa la selección desde lo ya asignado en BD (modo edición).
+  useEffect(() => {
+    if (!extrasInit && product && assignedIds.size > 0) {
+      setSelectedExtras(new Set(assignedIds))
+      setExtrasInit(true)
+    }
+  }, [assignedIds, product, extrasInit])
+
+  const toggleExtra = (id: string) => {
+    setSelectedExtras(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   const [name, setName] = useState(product?.name ?? '')
   const [description, setDescription] = useState(product?.description ?? '')
@@ -90,6 +116,9 @@ export function ProductModal({ product, categories, onClose }: ProductModalProps
         stock_tracking: stockTracking,
         stock_qty: stockTracking ? (parseInt(stockQty) || 0) : null,
       })
+
+      // Sincroniza los extras asignados (product_extras) con la selección.
+      await reconcile.mutateAsync({ productId, extraIds: [...selectedExtras] })
 
       onClose()
     } finally {
@@ -287,6 +316,63 @@ export function ProductModal({ product, categories, onClose }: ProductModalProps
                     onFocus={(e) => { e.currentTarget.style.borderColor = '#10b981' }}
                     onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb' }}
                   />
+                </div>
+              )}
+            </div>
+
+            {/* Extras disponibles */}
+            <div>
+              <label style={fieldLabel}>Extras disponibles</label>
+              {activeExtras.length === 0 ? (
+                <div style={{
+                  fontSize: 12.5, color: '#94a3b8', lineHeight: 1.5,
+                  border: '1px dashed #e2e8f0', borderRadius: 9, padding: '12px 14px',
+                }}>
+                  No hay extras en el catálogo. Créalos en{' '}
+                  <strong style={{ color: '#64748b' }}>Configuración → Extras</strong>{' '}
+                  y vuelve a marcar los que apliquen a este producto.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {activeExtras.map(extra => {
+                    const checked = selectedExtras.has(extra.id)
+                    return (
+                      <button
+                        type="button"
+                        key={extra.id}
+                        data-testid="product-extra-option"
+                        onClick={() => toggleExtra(extra.id)}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 10,
+                          padding: '10px 12px', textAlign: 'left',
+                          border: `1.5px solid ${checked ? '#10b981' : '#e5e7eb'}`,
+                          background: checked ? '#ecfdf5' : '#fff',
+                          borderRadius: 9, cursor: 'pointer', width: '100%',
+                          transition: 'all .12s',
+                        }}
+                      >
+                        <span style={{
+                          width: 18, height: 18, borderRadius: 5, flexShrink: 0,
+                          border: `1.5px solid ${checked ? '#10b981' : '#cbd5e1'}`,
+                          background: checked ? '#10b981' : '#fff',
+                          display: 'grid', placeItems: 'center',
+                        }}>
+                          {checked && (
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                          )}
+                        </span>
+                        <span style={{ flex: 1, fontSize: 13.5, fontWeight: 600, color: '#0f172a' }}>
+                          {extra.name}
+                        </span>
+                        {extra.linked_product_id && (
+                          <Package size={13} color="#94a3b8" />
+                        )}
+                        <span style={{ fontSize: 12.5, fontWeight: 700, color: '#64748b', fontFamily: 'monospace' }}>
+                          {formatCOP(Number(extra.price))}
+                        </span>
+                      </button>
+                    )
+                  })}
                 </div>
               )}
             </div>
