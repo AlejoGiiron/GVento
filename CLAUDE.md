@@ -122,14 +122,26 @@ Resumen rápido:
 - **`pos.anular` aplicado a "Vaciar carrito"** en el POS (no hay botón "anular venta"
   dedicado). Revisar si el target es el correcto al construir la anulación de ventas.
 ### Deuda de testing
-- **Tests E2E corren contra el mismo Supabase que la app** — `closeShiftIfOpen` cierra
-  la caja real; los specs pueden crear datos. Ver tests/README.md.
+- **⚠️ NO correr E2E contra producción.** Los usuarios de prueba (owner.test,
+  cajero.test) fueron ELIMINADOS de producción en la limpieza para el cliente.
+  Producción quedó limpia y NO se vuelve a tocar con tests. La verificación E2E
+  se hace en el **laboratorio (Supabase separado)** cuando se monte.
+- **Suite E2E de extras (59 tests total) PENDIENTE de correr en laboratorio.** El
+  spec `tests/extras-pos.spec.ts` (8 tests, incluye el caso de sobreventa con
+  stock negativo) está escrito y **compila** (`playwright test --list` lista los 59),
+  pero NO se ejecutó contra producción. Igual `extras.spec.ts` (Parte 1) volverá a
+  correrse en el laboratorio.
+- **TODO: montar Supabase de laboratorio** con un negocio + sedes de prueba y los
+  usuarios owner.test/cajero.test recreados, para correr la suite de forma
+  determinista (y sin `retries`). Esto reemplaza al "proyecto de testing separado"
+  que ya se venía señalando como prioritario.
+- **Tests E2E corren contra el mismo Supabase que la app** (cuando se corren) —
+  `closeShiftIfOpen` cierra la caja real; los specs pueden crear datos. Ver
+  tests/README.md.
 - **`pos-vuelto` es flaky** (pasa en retry) por estado compartido del backend; se
-  estabilizará con un proyecto de testing separado.
+  estabilizará con el Supabase de laboratorio.
 - **`retries: 2`** absorbe la flakiness inherente al backend compartido; **no es solución
   de fondo** (un test roto falla las 3 veces; uno flaky pasa).
-- **PRIORITARIO a futuro: proyecto Supabase de testing separado** para tests
-  deterministas sin retries.
 - **Los flujos de caja y mesas mutan estado compartido** — pueden acumular datos
   residuales entre corridas (p. ej. mesas ocupadas).
 
@@ -145,9 +157,54 @@ Resumen rápido:
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: Grupo E — identidad por sede + reportes Financiero/Stock (sesión 2026-06-19)
+Última fase completada: Grupo B — Extras (Parte 1 catálogo/asignación + Parte 2 venta
+  en POS/Mesas con RPC atómica y stock negativo) (sesión 2026-06-19)
 En progreso: —
-Siguiente: —
+Siguiente: montar Supabase de laboratorio y correr la suite E2E de extras (59 tests)
+Pendiente de correr en laboratorio: tests/extras.spec.ts + tests/extras-pos.spec.ts
+  (NO contra producción — usuarios de prueba eliminados)
+
+### Detalle Grupo B - Extras / subproductos reutilizables (sesión 2026-06-19)
+
+**Parte 1 — catálogo + asignación** (rama feature/extras-productos, merge a develop):
+- Migración `supabase/product-extras.sql`: tablas `extras` (catálogo por sede;
+  `linked_product_id` FK ON DELETE SET NULL = el insumo cuyo stock descuenta el extra),
+  `product_extras` (N:N producto↔extra, ON DELETE CASCADE), `order_item_extras`
+  (extras por línea, `extra_id` ON DELETE RESTRICT = no borrar extra en uso, `unit_price`
+  snapshot). RLS por `restaurant_id`/`has_permission('productos.editar')`; pertenencia de
+  las hijas vía fila padre.
+- Catálogo en ConfigPage (sección "Extras", precedente couriers): `useExtras` (CRUD),
+  `ExtraFormModal` con toggle "descuenta inventario" + selector de producto vinculado.
+  Borrado lógico (soft-deactivate); `handleDeactivate` chequea `countOrderItemsUsingExtra`
+  y avisa con `window.confirm` que se desactiva (no se elimina) — nunca FK error.
+- Asignación en ProductModal (sección "Extras disponibles"): `useProductExtras(productId)`
+  con `reconcile` que recibe el productId explícito (sirve para productos recién creados).
+- tests/extras.spec.ts (6 tests). Suite Parte 1: 51/51 verde (corrida histórica antes de
+  limpiar producción).
+
+**Parte 2 — venta en POS/Mesas + stock negativo** (rama feature/extras-pos):
+- RPC `supabase/order-extras-rpc.sql` `add_order_items_with_extras(p_order_id, p_items jsonb)`
+  SECURITY DEFINER: inserta order_items + order_item_extras y descuenta stock vinculado en
+  UNA transacción. DEFINER porque el descuento hace `UPDATE products` (RLS solo-admin) y un
+  cajero debe poder vender. SEGURIDAD: no confía en el JSON — del JSON usa solo `extra_id` y
+  `qty`; lee `price`/`linked_product_id` de la BD; valida extra activo+sede, producto de la
+  sede y que el extra esté asignado al producto (`product_extras`). `revoke execute` a
+  public/anon, `grant` a authenticated.
+- Migración `supabase/products-allow-negative-stock.sql`: quita el check `stock_qty >= 0`
+  (resuelve el constraint dinámicamente por definición). El stock de insumos puede ser
+  NEGATIVO = señal visible de sobreventa (estimación, no verdad de caja; un bar vende aunque
+  diga 0). La RPC descuenta sin `greatest(0,…)`.
+- Semántica de qty: el cliente envía qty del extra POR UNIDAD; la RPC guarda en
+  `order_item_extras.qty` el total de línea (qty_extra × qty_ítem) y descuenta esa cantidad.
+- cartStore: `CartExtra`, `CartItem.id+extras`, `addItem`/`updateItemExtras`, helper
+  `cartItemTotal`. `ItemConfigModal` (src/components/pos) reutilizable por POS y Mesas:
+  qty por extra + subtotal en vivo. `useProductsWithExtras` (set de productos con extras)
+  decide si abrir el modal o agregar directo (sin fricción si no hay extras).
+- Extras reflejados en: carrito (editable), PrintTicket, comanda (printer.ts) y KDS
+  (KitchenPage). ProductCard/ProductModal: alerta roja "Sobreventa: reponer N"
+  (data-testid `oversold-alert`, `stock-badge`) cuando el stock es negativo.
+- tests/extras-pos.spec.ts (8 tests, incl. sobreventa). Total suite: 59 (compila vía
+  `--list`); PENDIENTE de correr en laboratorio.
 
 ### Detalle Grupo E - Identidad + reportes Financiero/Stock (sesión 2026-06-19, rama feature/identidad-reportes)
 - Branding por SEDE (restaurants), no por org: nombre/logo/dirección ya se capturan en
