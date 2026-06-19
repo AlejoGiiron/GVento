@@ -928,6 +928,10 @@ export type Database = {
       }
     }
     Functions: {
+      add_order_items_with_extras: {
+        Args: { p_items: Json; p_order_id: string }
+        Returns: undefined
+      }
       get_my_organization_id: { Args: never; Returns: string }
       get_my_restaurant_id: { Args: never; Returns: string }
       get_my_role: {

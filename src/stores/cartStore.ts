@@ -5,13 +5,38 @@ export type ProductWithCategory = Tables<'products'> & {
   categories: Pick<Tables<'categories'>, 'id' | 'name' | 'color'> | null
 }
 
+/**
+ * Extra seleccionado en un ítem del carrito. `qty` es POR UNIDAD del producto:
+ * el total consumido de la línea es `qty × item.qty` (así lo descuenta la RPC).
+ * `price` y `name` son snapshots; `linked_product_id` decide si descuenta stock.
+ */
+export interface CartExtra {
+  extra_id: string
+  name: string
+  price: number
+  qty: number
+  linked_product_id: string | null
+}
+
 export interface CartItem {
+  id: string
   product: ProductWithCategory
   qty: number
   note: string
+  extras: CartExtra[]
 }
 
 export type DiscountType = 'pct' | 'fixed'
+
+/** Suma de extras de UNA unidad del ítem. */
+export function cartItemExtrasUnit(item: Pick<CartItem, 'extras'>): number {
+  return item.extras.reduce((a, e) => a + e.price * e.qty, 0)
+}
+
+/** Total de la línea: (precio producto + extras por unidad) × qty. */
+export function cartItemTotal(item: Pick<CartItem, 'product' | 'qty' | 'extras'>): number {
+  return (item.product.price + cartItemExtrasUnit(item)) * item.qty
+}
 
 /**
  * Venta pausada ("en espera"). Vive SOLO en memoria (Zustand); no se persiste
@@ -47,8 +72,10 @@ interface CartStore {
   discountType: DiscountType
   heldOrders: HeldOrder[]
   add: (product: ProductWithCategory) => void
+  addItem: (product: ProductWithCategory, extras: CartExtra[]) => void
   setQty: (index: number, qty: number) => void
   setNote: (index: number, note: string) => void
+  updateItemExtras: (id: string, extras: CartExtra[]) => void
   remove: (index: number) => void
   clear: () => void
   setDiscount: (discount: number, type?: DiscountType) => void
@@ -63,15 +90,36 @@ export const useCartStore = create<CartStore>((set) => ({
   discountType: 'pct',
   heldOrders: [],
 
+  // Alta rápida sin extras: fusiona con una línea existente del mismo producto
+  // que no tenga nota NI extras (comportamiento original).
   add: (product) =>
     set((state) => {
-      const idx = state.items.findIndex((x) => x.product.id === product.id && !x.note)
+      const idx = state.items.findIndex(
+        (x) => x.product.id === product.id && !x.note && x.extras.length === 0,
+      )
       if (idx >= 0) {
         const next = [...state.items]
         next[idx] = { ...next[idx], qty: next[idx].qty + 1 }
         return { items: next }
       }
-      return { items: [...state.items, { product, qty: 1, note: '' }] }
+      return { items: [...state.items, { id: genId(), product, qty: 1, note: '', extras: [] }] }
+    }),
+
+  // Alta con extras: siempre crea una línea nueva (no fusiona) para no mezclar
+  // configuraciones distintas del mismo producto.
+  addItem: (product, extras) =>
+    set((state) => {
+      if (extras.length === 0) {
+        const idx = state.items.findIndex(
+          (x) => x.product.id === product.id && !x.note && x.extras.length === 0,
+        )
+        if (idx >= 0) {
+          const next = [...state.items]
+          next[idx] = { ...next[idx], qty: next[idx].qty + 1 }
+          return { items: next }
+        }
+      }
+      return { items: [...state.items, { id: genId(), product, qty: 1, note: '', extras }] }
     }),
 
   setQty: (index, qty) =>
@@ -88,6 +136,11 @@ export const useCartStore = create<CartStore>((set) => ({
       next[index] = { ...next[index], note }
       return { items: next }
     }),
+
+  updateItemExtras: (id, extras) =>
+    set((state) => ({
+      items: state.items.map((x) => (x.id === id ? { ...x, extras } : x)),
+    })),
 
   remove: (index) =>
     set((state) => ({ items: state.items.filter((_, i) => i !== index) })),

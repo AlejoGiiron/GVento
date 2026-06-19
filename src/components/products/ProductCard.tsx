@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Pencil, Archive, ImageIcon, Package } from 'lucide-react'
+import { Pencil, Archive, ImageIcon, Package, AlertTriangle } from 'lucide-react'
 import type { ProductWithCategory } from '@/stores/cartStore'
 
 const formatCOP = (n: number) =>
@@ -60,17 +60,20 @@ export function ProductCard({ product, onEdit, onDeactivate }: ProductCardProps)
           background: color,
         }} />
 
-        {/* Stock badge */}
+        {/* Stock badge — rojo si hay sobreventa (negativo) */}
         {product.stock_tracking && (
-          <div style={{
-            position: 'absolute', top: 10, right: 8,
-            padding: '2px 7px', borderRadius: 8,
-            background: 'rgba(15,23,42,.65)',
-            fontSize: 10.5, fontWeight: 600,
-            color: '#fff', fontFamily: 'monospace',
-            display: 'flex', alignItems: 'center', gap: 4,
-          }}>
-            <Package size={10} />
+          <div
+            data-testid="stock-badge"
+            style={{
+              position: 'absolute', top: 10, right: 8,
+              padding: '2px 7px', borderRadius: 8,
+              background: (product.stock_qty ?? 0) < 0 ? '#dc2626' : 'rgba(15,23,42,.65)',
+              fontSize: 10.5, fontWeight: 700,
+              color: '#fff', fontFamily: 'monospace',
+              display: 'flex', alignItems: 'center', gap: 4,
+            }}
+          >
+            {(product.stock_qty ?? 0) < 0 ? <AlertTriangle size={10} /> : <Package size={10} />}
             {product.stock_qty ?? 0}
           </div>
         )}
@@ -118,6 +121,22 @@ export function ProductCard({ product, onEdit, onDeactivate }: ProductCardProps)
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}>
             {product.description}
+          </div>
+        )}
+
+        {/* Alerta de sobreventa: stock negativo = insumo a reponer */}
+        {product.stock_tracking && (product.stock_qty ?? 0) < 0 && (
+          <div
+            data-testid="oversold-alert"
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              padding: '3px 8px', borderRadius: 8,
+              background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c',
+              fontSize: 11, fontWeight: 600, width: 'fit-content', marginTop: 2,
+            }}
+          >
+            <AlertTriangle size={11} />
+            Sobreventa: reponer {Math.abs(product.stock_qty ?? 0)}
           </div>
         )}
 

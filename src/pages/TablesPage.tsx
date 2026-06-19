@@ -13,16 +13,19 @@ import { useCashShift } from '@/hooks/useCashShift'
 import { useTables } from '@/hooks/useTables'
 import { useProducts } from '@/hooks/useProducts'
 import { useCategories } from '@/hooks/useCategories'
+import { useProductsWithExtras } from '@/hooks/useProductsWithExtras'
 import {
   createTable, updateTable, deleteTable,
-  updateTableStatus, createOrder, addOrderItems,
+  updateTableStatus, createOrder, addOrderItemsWithExtras,
   updateOrderTotal, updateOrderStatus, createPayment,
   getTableActiveOrderCount, removeOrderItem, markItemsSentToKitchen,
 } from '@/lib/supabase-helpers'
 import { OpenShiftModal } from '@/components/shift/OpenShiftModal'
+import { ItemConfigModal } from '@/components/pos/ItemConfigModal'
 import { printComanda } from '@/lib/printer'
 import type { Enums } from '@/types/database.types'
-import type { ProductWithCategory } from '@/stores/cartStore'
+import type { ProductWithCategory, CartExtra } from '@/stores/cartStore'
+import { cartItemTotal } from '@/stores/cartStore'
 import type { TableRow, ActiveOrder, OrderItemRow } from '@/hooks/useTables'
 
 type TableStatus = TableRow['status']
@@ -35,6 +38,16 @@ const formatCOP = (n: number) =>
     style: 'currency', currency: 'COP',
     minimumFractionDigits: 0, maximumFractionDigits: 0,
   }).format(n)
+
+// Extras de una línea ya persistida: order_item_extras.qty es el TOTAL de la
+// línea (la RPC ya multiplicó por la qty del ítem).
+function orderItemExtrasTotal(item: OrderItemRow): number {
+  return item.order_item_extras.reduce((a, e) => a + e.unit_price * e.qty, 0)
+}
+
+function orderItemLineTotal(item: OrderItemRow): number {
+  return item.unit_price * item.qty + orderItemExtrasTotal(item)
+}
 
 function formatElapsed(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime()
@@ -298,7 +311,7 @@ function OpenTableModal({
 
 // ─── Product picker modal ─────────────────────────────────────────
 
-type PickerItem = { product: ProductWithCategory; qty: number; note: string }
+type PickerItem = { product: ProductWithCategory; qty: number; note: string; extras: CartExtra[] }
 
 function ProductPickerModal({
   orderId,
@@ -315,10 +328,12 @@ function ProductPickerModal({
   const [activeCat, setActiveCat] = useState<string | null>(null)
   const [selection, setSelection] = useState<PickerItem[]>([])
   const [submitting, setSubmitting] = useState(false)
+  const [configProduct, setConfigProduct] = useState<ProductWithCategory | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
 
   const { data: categories = [] } = useCategories()
   const { data: products = [] } = useProducts()
+  const productsWithExtras = useProductsWithExtras()
 
   useEffect(() => {
     if (!activeCat && categories.length > 0) setActiveCat(categories[0].id)
@@ -331,16 +346,24 @@ function ProductPickerModal({
     return products.filter((p) => p.category_id === activeCat)
   }, [products, activeCat, query])
 
+  // Producto sin extras → fusiona/incrementa. Con extras → abre el modal de config.
   const addProduct = (product: ProductWithCategory) => {
+    if (productsWithExtras.has(product.id)) { setConfigProduct(product); return }
     setSelection((prev) => {
-      const idx = prev.findIndex((x) => x.product.id === product.id)
+      const idx = prev.findIndex((x) => x.product.id === product.id && x.extras.length === 0)
       if (idx >= 0) {
         const next = [...prev]
         next[idx] = { ...next[idx], qty: next[idx].qty + 1 }
         return next
       }
-      return [...prev, { product, qty: 1, note: '' }]
+      return [...prev, { product, qty: 1, note: '', extras: [] }]
     })
+  }
+
+  // Confirmación del modal de extras → línea nueva con sus extras.
+  const addConfigured = (product: ProductWithCategory, extras: CartExtra[]) => {
+    setSelection((prev) => [...prev, { product, qty: 1, note: '', extras }])
+    setConfigProduct(null)
   }
 
   const setQty = (idx: number, qty: number) => {
@@ -356,7 +379,7 @@ function ProductPickerModal({
   }
 
   const addedTotal = useMemo(
-    () => selection.reduce((s, x) => s + x.product.price * x.qty, 0),
+    () => selection.reduce((s, x) => s + cartItemTotal(x), 0),
     [selection],
   )
 
@@ -364,13 +387,14 @@ function ProductPickerModal({
     if (selection.length === 0) return
     setSubmitting(true)
     try {
-      const { error: itemsErr } = await addOrderItems(
+      const { error: itemsErr } = await addOrderItemsWithExtras(
+        orderId,
         selection.map((x) => ({
-          order_id: orderId,
           product_id: x.product.id,
           qty: x.qty,
           unit_price: x.product.price,
           notes: x.note || null,
+          extras: x.extras.map((ex) => ({ extra_id: ex.extra_id, qty: ex.qty })),
         })),
       )
       if (itemsErr) throw itemsErr
@@ -493,7 +517,12 @@ function ProductPickerModal({
                   background: '#fff', border: '1px solid #e5e7eb',
                   borderRadius: 7, padding: '5px 8px',
                 }}>
-                  <span style={{ fontSize: 12, color: '#0f172a', fontWeight: 500 }}>{x.qty}× {x.product.name}</span>
+                  <span style={{ fontSize: 12, color: '#0f172a', fontWeight: 500 }}>
+                    {x.qty}× {x.product.name}
+                    {x.extras.length > 0 && (
+                      <span style={{ color: '#065f46' }}> · {x.extras.map((e) => `${e.name}×${e.qty}`).join(', ')}</span>
+                    )}
+                  </span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                     <button onClick={() => setQty(idx, x.qty - 1)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', display: 'grid', placeItems: 'center', padding: 2 }}>
                       <Minus size={11} />
@@ -527,6 +556,16 @@ function ProductPickerModal({
               </button>
             </div>
           </div>
+        )}
+
+        {/* Configurar extras del producto elegido */}
+        {configProduct && (
+          <ItemConfigModal
+            product={configProduct}
+            confirmLabel="Agregar a la selección"
+            onConfirm={(extras) => addConfigured(configProduct, extras)}
+            onClose={() => setConfigProduct(null)}
+          />
         )}
       </div>
     </div>
@@ -985,7 +1024,7 @@ function TableSidePanel({
     try {
       const { error: rmErr } = await removeOrderItem(item.id)
       if (rmErr) throw rmErr
-      const newTotal = Math.max(0, order.total - item.unit_price * item.qty)
+      const newTotal = Math.max(0, order.total - orderItemLineTotal(item))
       const { error: totalErr } = await updateOrderTotal(order.id, newTotal)
       if (totalErr) throw totalErr
       onRefresh()
@@ -1012,7 +1051,12 @@ function TableSidePanel({
         zone: table.zone,
         waiter: order.waiter_name,
         orderId: order.id,
-        items: unsentItems.map((i) => ({ qty: i.qty, name: i.products?.name ?? '—', notes: i.notes })),
+        items: unsentItems.map((i) => ({
+          qty: i.qty,
+          name: i.products?.name ?? '—',
+          notes: i.notes,
+          extras: i.order_item_extras.map((e) => ({ name: e.extras?.name ?? 'Extra', qty: e.qty })),
+        })),
       })
       toast.success('Comanda enviada a cocina')
       onRefresh()
@@ -1088,6 +1132,15 @@ function TableSidePanel({
                 <div style={{ fontSize: 13.5, fontWeight: 600, color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {item.products?.name ?? '—'}
                 </div>
+                {item.order_item_extras.length > 0 && (
+                  <div data-testid="table-item-extras" style={{ marginTop: 2 }}>
+                    {item.order_item_extras.map((ex) => (
+                      <div key={ex.id} style={{ fontSize: 11, color: '#065f46' }}>
+                        + {ex.extras?.name ?? 'Extra'} ×{ex.qty}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {item.notes && (
                   <div style={{ fontSize: 11, color: '#854d0e', marginTop: 2 }}>* {item.notes}</div>
                 )}
@@ -1098,7 +1151,7 @@ function TableSidePanel({
                 )}
               </div>
               <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', fontFamily: 'monospace', flexShrink: 0 }}>
-                {formatCOP(item.unit_price * item.qty)}
+                {formatCOP(orderItemLineTotal(item))}
               </div>
               <button
                 onClick={() => handleRemoveItem(item)}

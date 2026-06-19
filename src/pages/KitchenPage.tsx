@@ -17,6 +17,7 @@ type KDSOrderItem = {
   notes: string | null
   sent_to_kitchen: boolean
   products: { id: string; name: string } | null
+  order_item_extras: { id: string; qty: number; extras: { name: string } | null }[]
 }
 
 type KDSOrder = Tables<'orders'> & {
@@ -384,6 +385,11 @@ function OrderCard({
               <div style={{ fontSize: 15, fontWeight: 700, color: '#f1f5f9', lineHeight: 1.2 }}>
                 {item.products?.name ?? '—'}
               </div>
+              {item.order_item_extras.map((ex) => (
+                <div key={ex.id} style={{ fontSize: 13, color: '#6ee7b7', marginTop: 2, fontWeight: 600 }}>
+                  + {ex.extras?.name ?? 'Extra'} ×{ex.qty}
+                </div>
+              ))}
               {item.notes && (
                 <div style={{ fontSize: 12, color: '#fca5a5', marginTop: 3, fontWeight: 500 }}>
                   ⚠ {item.notes}
@@ -472,7 +478,7 @@ function KDSBoard({ restaurantId, onLogout }: { restaurantId: string; onLogout: 
   const fetchOrders = useCallback(async () => {
     const { data, error } = await supabase
       .from('orders')
-      .select('*, tables(id, name), order_items(id, qty, notes, sent_to_kitchen, products(id, name))')
+      .select('*, tables(id, name), order_items(id, qty, notes, sent_to_kitchen, products(id, name), order_item_extras(id, qty, extras(name)))')
       .eq('restaurant_id', restaurantId)
       .in('status', ['pending', 'preparing', 'ready'])
       .order('created_at', { ascending: true })
