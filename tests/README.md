@@ -3,18 +3,55 @@
 Pruebas end-to-end de los flujos críticos: gating RBAC, POS/carrito, venta en
 espera y kanban de delivery.
 
-## ⚠️ ADVERTENCIA: estos tests modifican datos reales
+## Laboratorio (org LAB) — dónde corren los tests
+
+El ambiente de pruebas es la **organización `LAB`**, NO un proyecto Supabase
+separado. Vive en el **mismo** Supabase que la app, aislado de los datos reales
+(org `G-10`) por la arquitectura multi-tenant: LAB tiene sus propias sedes,
+roles, usuarios y catálogo.
+
+- **Sedes:** `Sede Lab Norte` y `Sede Lab Sur`.
+- **Usuarios de prueba** (sede activa = Norte):
+  - `owner.test@gvento.com` → rol `owner` (acceso a Norte y Sur).
+  - `cajero.test@gvento.com` → rol `cajero` (acceso solo a Norte).
+- **Datos mínimos** en Norte: categorías Lab Cocteles/Lab Insumos, productos
+  Lab Cerveza/Lab Agua (simple, sin tracking), insumo Lab Vaso (con stock),
+  compuesto Lab Coctel (receta: 1 Lab Vaso) y extra Lab Doble; mesas y
+  `store_sequences` en 0.
+
+La semilla está en **`supabase/lab-seed.sql`** (idempotente: se puede re-aplicar
+sin duplicar). **Ventaja de usar una org en vez de un proyecto separado:** cada
+migración nueva se aplica a la misma BD, así que **LAB siempre está al día** con
+el esquema; no hay que mantener un segundo proyecto sincronizado.
+
+### Credenciales del laboratorio
+
+Las credenciales de `owner.test` / `cajero.test` van en `.env.test`
+(`E2E_OWNER_*` / `E2E_CASHIER_*`). Ver "Credenciales (NO hardcodear)" abajo.
+
+### Health check de organización (seguridad de datos)
+
+`tests/global-setup.ts` hace, antes de la suite, **login real con
+`E2E_OWNER_EMAIL`** y consulta su organización. Si **no es `LAB`** → **aborta**
+con un error claro:
+
+> `PELIGRO: las credenciales de prueba no son del laboratorio (org actual: X).`
+
+Esto evita correr la suite contra datos reales (org `G-10`) por un `.env.test`
+mal configurado.
+
+## ⚠️ ADVERTENCIA: estos tests modifican datos del backend
 
 Los tests corren contra el **backend real de Supabase** que use el `.env` del
 proyecto. No son inocuos:
 
 - `closeShiftIfOpen` **cierra el turno de caja activo** (declarando 0).
 - Los specs de **venta-espera** y **pos** pueden **crear datos de prueba**.
-- **NO ejecutar contra el Supabase de producción** mientras haya operación real
-  en curso: cerrarías la caja **en medio de una venta**.
-- **Idealmente:** usar un **proyecto Supabase de testing separado** — apuntar
-  `VITE_GVENTO_SUPABASE_URL` (y la anon key) del entorno a ese proyecto.
-- **Mínimo:** correr solo en **horarios sin operación**.
+- **NO ejecutar nunca contra datos reales (org `G-10`)**: el health check de
+  organización lo bloquea, pero la regla sigue siendo correr **solo con
+  credenciales de la org `LAB`**.
+- Producción quedó **limpia** (los usuarios de prueba fueron eliminados de ahí);
+  toda la verificación E2E se hace en **LAB**.
 
 ## ⚠️ Puerto dedicado — NO correr contra otra app
 
@@ -38,8 +75,10 @@ No hace falta tener un `pnpm dev` corriendo a mano: Playwright lo arranca en `51
 ## Requisitos
 
 - El `.env` del proyecto con `VITE_GVENTO_SUPABASE_URL` y `VITE_GVENTO_SUPABASE_ANON_KEY`
-  (los tests usan el backend real de Supabase contra la org de prueba).
-- Dos cuentas de prueba: un **owner** y un **cajero** (ver abajo).
+  (los tests usan el backend real de Supabase, contra la org **LAB**). El health
+  check de `global-setup.ts` también los lee para verificar la organización.
+- Las dos cuentas de prueba de la org LAB: **owner.test** y **cajero.test**
+  (ver "Laboratorio" arriba).
 - Navegadores de Playwright instalados una vez:
 
   ```bash
@@ -57,32 +96,31 @@ cp .env.test.example .env.test
 
 `.env.test` está en `.gitignore`. Variables:
 
-| Variable               | Cuenta              |
-|------------------------|---------------------|
-| `E2E_OWNER_EMAIL`      | owner de la org     |
-| `E2E_OWNER_PASSWORD`   |                     |
-| `E2E_CASHIER_EMAIL`    | cajero de la org    |
-| `E2E_CASHIER_PASSWORD` |                     |
+| Variable               | Cuenta (org LAB)              |
+|------------------------|-------------------------------|
+| `E2E_OWNER_EMAIL`      | `owner.test@gvento.com`       |
+| `E2E_OWNER_PASSWORD`   |                               |
+| `E2E_CASHIER_EMAIL`    | `cajero.test@gvento.com`      |
+| `E2E_CASHIER_PASSWORD` |                               |
 
-## Crear el usuario CAJERO de prueba en Supabase
+## Montar / sembrar el laboratorio
 
-El gating RBAC necesita una cuenta con rol **cajero** (sin acceso a Productos,
-Reportes ni Configuración). La forma más fiel es crearla desde la propia app:
+Las cuentas auth `owner.test@gvento.com` y `cajero.test@gvento.com` **ya existen
+en Auth**. Lo que faltaba eran sus `profiles` y el resto del ecosistema LAB, que
+crea la semilla:
 
-1. Entra como **owner** → **Configuración → Usuarios → Crear usuario**.
-2. Completa nombre y correo (ej. `cajero.e2e@tudominio.com`), genera/copia la
-   contraseña, y en **Rol** elige **cajero**.
-3. Guarda esas credenciales en `.env.test` (`E2E_CASHIER_EMAIL` / `_PASSWORD`).
+1. Aplica **`supabase/lab-seed.sql`** (Dashboard → SQL Editor). Es idempotente:
+   crea (o reconcilia) la org LAB, sus 2 sedes, los 4 roles de sistema, los
+   profiles de `owner.test`/`cajero.test`, sus `user_stores`, y los datos mínimos
+   de Sede Lab Norte. Al final imprime una verificación.
+2. Pon las contraseñas de ambas cuentas en `.env.test` (`E2E_OWNER_PASSWORD` /
+   `E2E_CASHIER_PASSWORD`). Si no recuerdas las contraseñas, resetéalas desde
+   Supabase Auth.
+3. Corre la suite: el health check de `global-setup.ts` confirma que las
+   credenciales son de la org `LAB` antes de empezar.
 
-> La Edge Function `create-user` crea el usuario con email ya confirmado, así que
-> puede iniciar sesión de inmediato. El rol RBAC (`role_id`) se asigna al crear.
-
-Alternativa manual (SQL/Studio): crear el usuario en Auth, dejar que el trigger
-`handle_new_user` cree el `profile`, y setear su `role_id` al id del rol `cajero`
-de la organización (`select id from roles where name = 'cajero'`).
-
-El **owner** ya existe (es la cuenta admin mapeada a `owner` en el seed de la
-Fase ARQ).
+> Si alguna vez necesitas cuentas de prueba nuevas, créalas en Auth (o desde la
+> app) y vuelve a ejecutar `lab-seed.sql` adaptando los UUIDs de la cabecera.
 
 ## Correr los tests
 
