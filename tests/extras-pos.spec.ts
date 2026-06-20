@@ -20,13 +20,14 @@ async function createProduct(page: Page, name: string, price: string, opts?: { s
   await page.getByRole('button', { name: 'Nuevo producto' }).click()
   await page.getByPlaceholder('Ej: Mojito Cubano').fill(name)
   await page.getByPlaceholder('0').first().fill(price)
-  await page.locator('select').selectOption({ label: CAT })
+  await page.locator('select').first().selectOption({ label: CAT })
   if (opts?.stock) {
-    await page.getByRole('switch').click() // Control de inventario
-    await page.getByRole('spinbutton').fill(opts.stock)
+    await page.getByRole('switch').click() // Control de inventario (kind simple)
   }
   await page.getByRole('button', { name: 'Crear producto' }).click()
   await expect(page.getByText(name)).toBeVisible()
+  // El stock ya no se edita en la ficha: arranca en 0 y se carga por ajuste.
+  if (opts?.stock) await setStock(page, name, opts.stock)
 }
 
 async function createExtra(page: Page, name: string, price: string, linkedProduct?: string) {
@@ -43,24 +44,30 @@ async function createExtra(page: Page, name: string, price: string, linkedProduc
   await expect(page.getByTestId('extra-row').filter({ hasText: name })).toBeVisible()
 }
 
-// Lee el stock declarado de un producto abriendo su ficha.
+// Lee el stock de un insumo desde la pestaña Niveles de Inventario.
 async function readStock(page: Page, productName: string): Promise<number> {
-  await page.goto('/productos')
-  await page.getByPlaceholder('Buscar producto...').fill(productName)
-  await page.getByTitle('Editar', { exact: true }).first().click()
-  const value = await page.getByRole('spinbutton').inputValue()
-  await page.getByRole('button', { name: 'Cancelar' }).click()
-  return Number(value)
+  await page.goto('/inventario')
+  await page.getByTestId('inventory-tab-levels').click()
+  await page.getByPlaceholder('Buscar insumo...').fill(productName)
+  const row = page.getByTestId('stock-level-row').filter({ hasText: productName })
+  await expect(row).toBeVisible()
+  return Number(await row.getByTestId('stock-level-qty').innerText())
 }
 
-// Fija el stock declarado de un producto.
+// Fija el stock a un valor absoluto vía ajuste manual (suma/resta el delta).
 async function setStock(page: Page, productName: string, value: string) {
-  await page.goto('/productos')
-  await page.getByPlaceholder('Buscar producto...').fill(productName)
-  await page.getByTitle('Editar', { exact: true }).first().click()
-  await page.getByRole('spinbutton').fill(value)
-  await page.getByRole('button', { name: 'Guardar cambios' }).click()
-  await expect(page.getByText(productName)).toBeVisible()
+  const target = Number(value)
+  const current = await readStock(page, productName)
+  const delta = target - current
+  if (delta === 0) return
+  await page.goto('/inventario')
+  await page.getByTestId('inventory-adjust-btn').click()
+  await page.getByTestId('adjust-product').selectOption({ label: productName })
+  await page.getByTestId(delta > 0 ? 'adjust-sign-in' : 'adjust-sign-out').click()
+  await page.getByTestId('adjust-amount').fill(String(Math.abs(delta)))
+  await page.getByTestId('adjust-reason').fill('ajuste test')
+  await page.getByTestId('adjust-confirm').click()
+  await expect(page.getByTestId('stock-adjust-modal')).toHaveCount(0)
 }
 
 // Vende P_BASE con `extraName` en cantidad `extraQty` por unidad. Deja el turno abierto.

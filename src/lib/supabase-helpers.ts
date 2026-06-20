@@ -150,6 +150,88 @@ export const addOrderItemsWithExtras = (orderId: string, items: OrderItemPayload
     p_items: items as unknown as Json,
   })
 
+// --- Inventario por recetas: product_components (receta / BOM) ---
+
+// Insumo de una receta, con datos del producto componente para mostrarlo.
+export type ProductComponentRow = Tables<'product_components'> & {
+  component: Pick<Tables<'products'>, 'id' | 'name' | 'stock_qty' | 'stock_tracking' | 'kind'> | null
+}
+
+export const getProductComponents = (parentId: string) =>
+  supabase
+    .from('product_components')
+    .select(
+      '*, component:products!product_components_component_id_fkey(id, name, stock_qty, stock_tracking, kind)',
+    )
+    .eq('parent_id', parentId)
+    .order('created_at')
+
+export const addProductComponent = (row: TablesInsert<'product_components'>) =>
+  supabase.from('product_components').insert(row).select().single()
+
+export const updateProductComponentQty = (id: string, qty: number) =>
+  supabase.from('product_components').update({ qty }).eq('id', id)
+
+export const removeProductComponent = (id: string) =>
+  supabase.from('product_components').delete().eq('id', id)
+
+// --- Inventario: ajuste manual de stock (RPC atómica SECURITY DEFINER) ---
+
+// qty CON SIGNO (+entrada / -salida). La RPC valida sede + permiso
+// productos.editar, actualiza stock e inserta el movimiento en una transacción.
+export const adjustStock = (productId: string, qty: number, reason: string) =>
+  supabase.rpc('adjust_stock', {
+    p_product_id: productId,
+    p_qty: qty,
+    p_reason: reason,
+  })
+
+// --- Inventario: movimientos de stock (auditoría append-only, paginada) ---
+
+export type StockMovementType = 'sale' | 'adjustment' | 'return'
+
+export interface StockMovementsFilters {
+  restaurantId: string
+  type?: StockMovementType | null
+  from?: string        // ISO inicio (createdAt >=)
+  to?: string          // ISO fin (createdAt <=)
+  page: number         // 0-based
+  pageSize: number
+}
+
+export interface StockMovementRow {
+  id: string
+  created_at: string
+  type: string
+  qty: number
+  reference_id: string | null
+  notes: string | null
+  product_id: string
+  products: { name: string } | null
+  profiles: { full_name: string | null } | null
+}
+
+export const getStockMovements = ({
+  restaurantId, type, from, to, page, pageSize,
+}: StockMovementsFilters) => {
+  let q = supabase
+    .from('stock_movements')
+    .select(
+      'id, created_at, type, qty, reference_id, notes, product_id, products(name), profiles(full_name)',
+      { count: 'exact' },
+    )
+    .eq('restaurant_id', restaurantId)
+
+  if (type) q = q.eq('type', type)
+  if (from) q = q.gte('created_at', from)
+  if (to) q = q.lte('created_at', to)
+
+  const fromIdx = page * pageSize
+  return q
+    .order('created_at', { ascending: false })
+    .range(fromIdx, fromIdx + pageSize - 1)
+}
+
 // --- Storage: product-images ---
 
 export const uploadProductImage = async (

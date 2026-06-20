@@ -3,7 +3,7 @@ import {
   Search, X, Plus, Trash, Minus, ShoppingCart, Percent,
   ChevronRight, Store, Bike, StickyNote,
   Banknote, CreditCard, Smartphone, Check, Building2, Printer,
-  Pause, Play, Clock,
+  Pause, Play, Clock, AlertTriangle,
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { useCartStore, cartItemTotal } from '@/stores/cartStore'
@@ -206,11 +206,18 @@ function ProductImage({ product, color = '#10b981' }: { product: ProductWithCate
 function ProductCard({ product, onAdd }: { product: ProductWithCategory; onAdd: () => void }) {
   const color = product.categories?.color ?? '#10b981'
 
+  // Indicador discreto de stock para productos simples con inventario en ≤ 0.
+  // NO bloquea la venta (stock negativo permitido); solo señala reponer.
+  const stockQty = product.stock_qty ?? 0
+  const lowStock = product.stock_tracking && product.kind === 'simple' && stockQty <= 0
+  const stockLabel = stockQty < 0 ? 'Reponer' : 'Sin stock'
+
   return (
     <button
       data-testid="product-card"
       onClick={onAdd}
       style={{
+        position: 'relative',
         background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14,
         padding: 0, cursor: 'pointer', textAlign: 'left',
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
@@ -228,6 +235,20 @@ function ProductCard({ product, onAdd }: { product: ProductWithCategory; onAdd: 
       }}
     >
       <ProductImage product={product} color={color} />
+      {lowStock && (
+        <span
+          data-testid="pos-stock-indicator"
+          style={{
+            position: 'absolute', top: 8, right: 8,
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+            padding: '2px 8px', borderRadius: 8,
+            background: stockQty < 0 ? '#dc2626' : 'rgba(15,23,42,.72)',
+            color: '#fff', fontSize: 10.5, fontWeight: 700,
+          }}
+        >
+          <AlertTriangle size={10} /> {stockLabel}
+        </span>
+      )}
       <div style={{ padding: '12px 14px 14px' }}>
         <div style={{ fontSize: 14.5, fontWeight: 600, color: '#0f172a', letterSpacing: -0.2, lineHeight: 1.25 }}>
           {product.name}

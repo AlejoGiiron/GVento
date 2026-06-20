@@ -11,6 +11,7 @@ import { TablesPage } from '@/pages/TablesPage'
 import { KitchenPage } from '@/pages/KitchenPage'
 import { DeliveryPage } from '@/pages/DeliveryPage'
 import { ProductsPage } from '@/pages/ProductsPage'
+import { InventoryPage } from '@/pages/InventoryPage'
 import { ReportsPage } from '@/pages/ReportsPage'
 import { SalesHistoryPage } from '@/pages/SalesHistoryPage'
 import { ConfigPage } from '@/pages/ConfigPage'
@@ -42,6 +43,7 @@ function App() {
               </Route>
               <Route element={<ProtectedRoute permission="productos.editar" />}>
                 <Route path="productos" element={<ProductsPage />} />
+                <Route path="inventario" element={<InventoryPage />} />
               </Route>
               <Route element={<ProtectedRoute permission="ventas.historial" />}>
                 <Route path="historial" element={<SalesHistoryPage />} />

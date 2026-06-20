@@ -1033,6 +1033,16 @@ function TableSidePanel({
     if (!order) return
     setDeletingItemId(item.id)
     try {
+      // TODO (inventario, pasada aparte): este ítem YA descontó stock al
+      // agregarse (addOrderItemsWithExtras descuenta producto/receta/extras al
+      // insertar la línea). Al borrarlo aquí NO se devuelve ese stock, así que
+      // el inventario queda subestimado por la cantidad del ítem.
+      // Pendiente: función SECURITY DEFINER return_stock_for_order_item(p_id)
+      // que emita stock_movements('return', +qty) por el producto (simple),
+      // sus insumos (composite vía product_components) y los insumos de los
+      // extras vinculados, ANTES de borrar la línea — reflejando la lógica de
+      // deducción. Caso borde a resolver: receta cambiada entre venta y borrado.
+      // Solo aplica a ítems no enviados a cocina (los únicos borrables hoy).
       const { error: rmErr } = await removeOrderItem(item.id)
       if (rmErr) throw rmErr
       const newTotal = Math.max(0, order.total - orderItemLineTotal(item))

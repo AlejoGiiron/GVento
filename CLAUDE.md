@@ -121,6 +121,21 @@ Resumen rápido:
     con carrito activo, descartar con confirmación.
 - **`pos.anular` aplicado a "Vaciar carrito"** en el POS (no hay botón "anular venta"
   dedicado). Revisar si el target es el correcto al construir la anulación de ventas.
+- **Devolver stock al borrar ítem de mesa (inventario):** al borrar un `order_item` ya
+  agregado (TODO en `TablesPage.tsx:1036`), NO se devuelve el stock que descontó al
+  agregarse → el inventario queda subestimado. Pendiente (pasada aparte): función SQL de
+  reverso `return_stock_for_order_item(p_id)` SECURITY DEFINER que emita
+  `stock_movements('return', +qty)` por producto (simple), insumos (composite vía
+  product_components) y los insumos de extras vinculados ANTES de borrar la línea,
+  reflejando la lógica de deducción. Caso borde: receta cambiada entre venta y borrado.
+  Solo aplica a ítems no enviados a cocina (los únicos borrables hoy).
+- **Disponibilidad derivada de productos compuestos en POS — OMITIDA por ahora:** el
+  indicador de stock del POS solo aplica a productos `simple` con tracking. Los compuestos
+  no muestran disponibilidad (exigiría cargar recetas en el POS y calcular el mínimo por
+  insumo). Pendiente si se requiere.
+- **BUG DE RAÍZ pendiente (observado, no exclusivo de G-Vento):** la caja debe ser POR SEDE
+  y hay que **validar que no exista un turno abierto antes de abrir otro** (evitar dos
+  turnos simultáneos). Revisar el flujo de apertura de caja con esta regla.
 ### Deuda de testing
 - **⚠️ NO correr E2E contra producción.** Los usuarios de prueba (owner.test,
   cajero.test) fueron ELIMINADOS de producción en la limpieza para el cliente.
@@ -131,6 +146,11 @@ Resumen rápido:
   stock negativo) está escrito y **compila** (`playwright test --list` lista los 59),
   pero NO se ejecutó contra producción. Igual `extras.spec.ts` (Parte 1) volverá a
   correrse en el laboratorio.
+- **Suite inventario.spec.ts (6 tests) PENDIENTE de correr en laboratorio.** Cubre
+  receta, ajuste manual +/−, venta de compuesto que descuenta el insumo + movimiento,
+  sobreventa negativa con alerta y limpieza. Compila (`--list` lista 71 en total);
+  NO ejecutado contra producción. Nota: extras-pos.spec.ts fue REESCRITO para leer/fijar
+  stock vía el flujo de Inventario (el stock dejó de editarse en la ficha del producto).
 - **TODO: montar Supabase de laboratorio** con un negocio + sedes de prueba y los
   usuarios owner.test/cajero.test recreados, para correr la suite de forma
   determinista (y sin `retries`). Esto reemplaza al "proyecto de testing separado"
@@ -157,14 +177,64 @@ Resumen rápido:
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: Ventas numeradas por sede + Historial de ventas (rama
-  feature/ventas-numeradas, sesión 2026-06-19) — migración APLICADA en producción y
-  database.types.ts regenerado con `supabase gen types` (PostgrestVersion 14.5,
+Última fase completada: Inventario por recetas COMPLETO (Parte 1 BD + Parte 2 UI)
+  (rama feature/inventario-recetas, sesión 2026-06-20) — las 3 migraciones APLICADAS en
+  producción (inventory-recipes.sql, order-items-stock-recipes.sql, inventory-min-stock.sql)
+  y database.types.ts regenerado con `supabase gen types` (PostgrestVersion 14.5,
   alias Views<> conservado)
 En progreso: —
-Siguiente: montar Supabase de laboratorio y correr la suite E2E (65 tests)
+Siguiente: montar Supabase de laboratorio y correr la suite E2E (71 tests)
 Pendiente de correr en laboratorio: tests/extras.spec.ts + tests/extras-pos.spec.ts +
-  tests/ventas-historial.spec.ts (NO contra producción — usuarios de prueba eliminados)
+  tests/ventas-historial.spec.ts + tests/inventario.spec.ts (NO contra producción —
+  usuarios de prueba eliminados)
+
+### Detalle Inventario por recetas (sesión 2026-06-20, rama feature/inventario-recetas)
+
+**Parte 1 — BD** (migraciones APLICADAS):
+- `supabase/inventory-recipes.sql`: `products.kind` text ('simple'|'composite', default
+  simple); tabla `stock_movements` (auditoría append-only, qty CON SIGNO, type
+  sale/adjustment/return, reference_id FK lógico a order_id, RLS solo SELECT por sede —
+  escritura solo vía funciones DEFINER); tabla `product_components` (receta BOM 1 nivel,
+  parent CASCADE / component RESTRICT, qty>0, unique(parent,component)); función
+  `adjust_stock(product_id, qty, reason)` SECURITY DEFINER (valida sede + permiso
+  productos.editar + kind=simple; UPDATE stock + INSERT movimiento ATÓMICO).
+- `supabase/order-items-stock-recipes.sql`: extiende `add_order_items_with_extras`
+  (create or replace, NO edita order-extras-rpc.sql) para descontar stock del producto al
+  vender, en la MISMA transacción que los extras: simple+tracking → −qty propio; composite
+  → explota product_components y descuenta qty_receta×qty por insumo (solo insumos con
+  stock_tracking); el compuesto NO descuenta de su propio stock. Cada salida → un
+  stock_movement('sale', −qty, reference_id=order_id). ENFOQUE INTEGRADO aprobado: NO hay
+  deduct_stock_for_order suelto; el movimiento de stock va atado a insertar la línea (una
+  vez por ítem en POS y Mesas). Stock NEGATIVO permitido (señal de reponer).
+- `supabase/inventory-min-stock.sql`: `products.min_stock` integer not null default 0
+  (umbral de alerta de stock bajo; solo aplica a simple+tracking).
+
+**Parte 2 — UI** (esta sesión):
+- ProductModal: selector Tipo (`product-kind-simple`/`-composite`); inventario solo para
+  simple; **Stock actual SOLO-LECTURA al editar** (`stock-current`) — al crear arranca en 0
+  y se carga por ajuste; **Stock mínimo** editable (`product-min-stock`). Al editar se
+  PRESERVA stock_qty (no se reescribe para no pisar descuentos concurrentes); solo se toca
+  al crear (0/null) o al apagar tracking (null).
+- `RecipeEditor` (components/products): arma la receta con productos simple+tracking
+  (≠ él mismo, no compuestos), qty entero >0; advertencia no bloqueante si vacío. Se
+  reconcilia (add/update/remove) tras guardar vía `useProductComponents` (patrón reconcile
+  con parentId explícito, soporta productos recién creados).
+- `InventoryPage` (/inventario, sidebar+ruta con permiso productos.editar — REUSADO, no se
+  creó inventario.ver): pestaña Niveles (4 KPIs: total/sin stock/bajo/negativo; tabla con
+  badge out/low/ok/negative, búsqueda + filtro por estado; botón Ajustar por fila) y
+  pestaña Movimientos (paginada 25, filtro tipo+rango fechas, fecha zona Bogotá, qty con
+  signo verde/rojo, referencia = order_id truncado o notas).
+- `StockAdjustModal` (components/inventory): selector producto + signo (+/−) + cantidad con
+  PREVIEW del stock resultante (rojo si negativo) + motivo obligatorio → RPC adjust_stock.
+- POS: indicador `pos-stock-indicator` ("Sin stock"/"Reponer") en card de simple+tracking
+  con stock ≤0; NO bloquea la venta (stock negativo permitido).
+- Hooks: `useProductComponents`, `useStockMovements` (keepPreviousData), `useInventory`
+  (adjust). Helpers: getProductComponents/add/update/remove, adjustStock, getStockMovements.
+- Tests: extras-pos.spec.ts REESCRITO (readStock/setStock/createProduct ahora pasan por el
+  flujo real de Inventario — el stock dejó de editarse en la ficha). tests/inventario.spec.ts
+  (6 tests: receta, ajuste +/−, venta de compuesto descuenta insumo + movimiento, sobreventa
+  negativa con alerta, limpieza). Suite total 71 (compila vía `--list`).
+- tsc 0 + build verde; database.types.ts regenerado tras aplicar inventory-min-stock.sql.
 
 ### Detalle Ventas numeradas + Historial (sesión 2026-06-19, rama feature/ventas-numeradas)
 - Migración `supabase/order-numbering.sql` (NUEVA, sin aplicar): columna
