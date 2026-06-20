@@ -1,12 +1,17 @@
 import { useState, useEffect, useId } from 'react'
 import { X, ChevronRight, Package, AlertTriangle } from 'lucide-react'
 import { ImageUpload } from './ImageUpload'
+import { RecipeEditor } from './RecipeEditor'
 import { useProductMutations } from '@/hooks/useProductMutations'
+import { useProducts } from '@/hooks/useProducts'
 import { useExtras } from '@/hooks/useExtras'
 import { useProductExtras } from '@/hooks/useProductExtras'
+import { useProductComponents, type RecipeRow } from '@/hooks/useProductComponents'
 import { useAuth } from '@/hooks/useAuth'
 import type { ProductWithCategory } from '@/stores/cartStore'
-import type { Tables } from '@/types/database.types'
+import type { Tables, TablesInsert } from '@/types/database.types'
+
+type ProductKind = 'simple' | 'composite'
 
 const formatCOP = (n: number) =>
   new Intl.NumberFormat('es-CO', {
@@ -23,8 +28,10 @@ interface ProductModalProps {
 export function ProductModal({ product, categories, onClose }: ProductModalProps) {
   const { profile } = useAuth()
   const { saveProduct, uploadImage, removeImage } = useProductMutations()
+  const { data: allProducts = [] } = useProducts()
   const { extras } = useExtras()
   const { assignedIds, reconcile } = useProductExtras(product?.id ?? null)
+  const { initialRows, reconcile: reconcileRecipe } = useProductComponents(product?.id ?? null)
   const formId = useId()
 
   const isEditing = !!product
@@ -57,9 +64,23 @@ export function ProductModal({ product, categories, onClose }: ProductModalProps
   const [categoryId, setCategoryId] = useState(product?.category_id ?? categories[0]?.id ?? '')
   const [imageUrl, setImageUrl] = useState<string | null>(product?.image_url ?? null)
   const [pendingFile, setPendingFile] = useState<File | null>(null)
+  const [kind, setKind] = useState<ProductKind>((product?.kind as ProductKind) ?? 'simple')
   const [stockTracking, setStockTracking] = useState(product?.stock_tracking ?? false)
-  const [stockQty, setStockQty] = useState(product?.stock_qty != null ? String(product.stock_qty) : '')
+  const [minStock, setMinStock] = useState(product?.min_stock != null ? String(product.min_stock) : '0')
   const [saving, setSaving] = useState(false)
+
+  // Receta (solo para compuestos). Se inicializa desde BD en modo edición.
+  const [recipeRows, setRecipeRows] = useState<RecipeRow[]>([])
+  const [recipeInit, setRecipeInit] = useState(false)
+  useEffect(() => {
+    if (!recipeInit && product && initialRows.length > 0) {
+      setRecipeRows(initialRows)
+      setRecipeInit(true)
+    }
+  }, [initialRows, product, recipeInit])
+
+  // Stock actual (persistido): solo lectura aquí — se mueve por ventas/ajustes.
+  const currentStock = product?.stock_qty ?? 0
 
   const priceNum = parseInt(price.replace(/\D/g, ''), 10) || 0
   const isValid = name.trim().length > 0 && priceNum > 0 && categoryId
@@ -104,7 +125,11 @@ export function ProductModal({ product, categories, onClose }: ProductModalProps
         finalImageUrl = null
       }
 
-      await saveProduct.mutateAsync({
+      // Un compuesto NO tiene stock propio: stock_tracking off, sin stock_qty.
+      const isComposite = kind === 'composite'
+      const tracking = isComposite ? false : stockTracking
+
+      const payload: TablesInsert<'products'> = {
         id: productId,
         name: name.trim(),
         description: description.trim() || null,
@@ -113,12 +138,28 @@ export function ProductModal({ product, categories, onClose }: ProductModalProps
         restaurant_id: profile.restaurant_id,
         image_url: finalImageUrl,
         is_active: true,
-        stock_tracking: stockTracking,
-        stock_qty: stockTracking ? (parseInt(stockQty) || 0) : null,
-      })
+        kind,
+        stock_tracking: tracking,
+        min_stock: tracking ? (parseInt(minStock, 10) || 0) : 0,
+      }
+      // El stock no se edita a mano: al CREAR arranca en 0 (o null sin tracking);
+      // al EDITAR se PRESERVA el valor de BD (se mueve por ventas/ajustes) — no
+      // se reescribe para no pisar un descuento concurrente. Si se apaga el
+      // tracking, se limpia a null.
+      if (!isEditing) payload.stock_qty = tracking ? 0 : null
+      else if (!tracking) payload.stock_qty = null
+
+      await saveProduct.mutateAsync(payload)
 
       // Sincroniza los extras asignados (product_extras) con la selección.
       await reconcile.mutateAsync({ productId, extraIds: [...selectedExtras] })
+
+      // Sincroniza la receta (product_components) si es compuesto; si pasó a
+      // simple, vacía la receta para no dejar insumos huérfanos.
+      await reconcileRecipe.mutateAsync({
+        parentId: productId,
+        rows: isComposite ? recipeRows : [],
+      })
 
       onClose()
     } finally {
@@ -270,72 +311,142 @@ export function ProductModal({ product, categories, onClose }: ProductModalProps
               </div>
             </div>
 
-            {/* Stock tracking */}
+            {/* Tipo de producto */}
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#334155' }}>Control de inventario</div>
-                  <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 2 }}>
-                    Lleva la cuenta de unidades disponibles
-                  </div>
-                </div>
-                {/* Toggle */}
-                <button
-                  type="button"
-                  onClick={() => setStockTracking(!stockTracking)}
-                  style={{
-                    width: 44, height: 24, borderRadius: 12,
-                    background: stockTracking ? '#10b981' : '#e2e8f0',
-                    border: 'none', cursor: 'pointer',
-                    position: 'relative', transition: 'background .15s', flexShrink: 0,
-                  }}
-                  aria-checked={stockTracking}
-                  role="switch"
-                >
-                  <span style={{
-                    position: 'absolute', top: 2,
-                    left: stockTracking ? 22 : 2,
-                    width: 20, height: 20, borderRadius: '50%',
-                    background: '#fff',
-                    boxShadow: '0 1px 3px rgba(0,0,0,.2)',
-                    transition: 'left .15s',
-                  }} />
-                </button>
-              </div>
-
-              {stockTracking && (
-                <div style={{ marginTop: 12 }}>
-                  <label style={fieldLabel}>Unidades disponibles</label>
-                  <input
-                    type="number"
-                    value={stockQty}
-                    onChange={(e) => setStockQty(e.target.value)}
-                    placeholder="0"
-                    style={{
-                      ...inputStyle, width: 140,
-                      borderColor: Number(stockQty) < 0 ? '#ef4444' : '#e5e7eb',
-                      color: Number(stockQty) < 0 ? '#b91c1c' : '#0f172a',
-                    }}
-                    onFocus={(e) => { e.currentTarget.style.borderColor = '#10b981' }}
-                    onBlur={(e) => { e.currentTarget.style.borderColor = Number(stockQty) < 0 ? '#ef4444' : '#e5e7eb' }}
-                  />
-                  {Number(stockQty) < 0 && (
-                    <div
-                      data-testid="oversold-alert"
+              <label style={fieldLabel}>Tipo de producto</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {([
+                  { value: 'simple' as const, title: 'Simple', desc: 'Tiene su propio stock' },
+                  { value: 'composite' as const, title: 'Compuesto', desc: 'Receta con insumos' },
+                ]).map(opt => {
+                  const active = kind === opt.value
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      data-testid={`product-kind-${opt.value}`}
+                      onClick={() => setKind(opt.value)}
                       style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 6,
-                        marginTop: 8, padding: '6px 10px', borderRadius: 8,
-                        background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c',
-                        fontSize: 12, fontWeight: 600,
+                        flex: 1, textAlign: 'left', cursor: 'pointer',
+                        border: `1.5px solid ${active ? '#10b981' : '#e5e7eb'}`,
+                        background: active ? '#ecfdf5' : '#fff',
+                        borderRadius: 9, padding: '10px 12px', transition: 'all .12s',
                       }}
                     >
-                      <AlertTriangle size={13} />
-                      Sobreventa: reponer {Math.abs(Number(stockQty))} unidades del insumo
-                    </div>
-                  )}
-                </div>
-              )}
+                      <div style={{ fontSize: 13.5, fontWeight: 700, color: active ? '#065f46' : '#0f172a' }}>{opt.title}</div>
+                      <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 2 }}>{opt.desc}</div>
+                    </button>
+                  )
+                })}
+              </div>
             </div>
+
+            {/* Inventario (solo producto simple) */}
+            {kind === 'simple' && (
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#334155' }}>Control de inventario</div>
+                    <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 2 }}>
+                      Lleva la cuenta de unidades disponibles
+                    </div>
+                  </div>
+                  {/* Toggle */}
+                  <button
+                    type="button"
+                    onClick={() => setStockTracking(!stockTracking)}
+                    style={{
+                      width: 44, height: 24, borderRadius: 12,
+                      background: stockTracking ? '#10b981' : '#e2e8f0',
+                      border: 'none', cursor: 'pointer',
+                      position: 'relative', transition: 'background .15s', flexShrink: 0,
+                    }}
+                    aria-checked={stockTracking}
+                    role="switch"
+                  >
+                    <span style={{
+                      position: 'absolute', top: 2,
+                      left: stockTracking ? 22 : 2,
+                      width: 20, height: 20, borderRadius: '50%',
+                      background: '#fff',
+                      boxShadow: '0 1px 3px rgba(0,0,0,.2)',
+                      transition: 'left .15s',
+                    }} />
+                  </button>
+                </div>
+
+                {stockTracking && (
+                  <div style={{ marginTop: 12, display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+                    {/* Stock actual — solo lectura (se mueve por ventas/ajustes) */}
+                    <div>
+                      <label style={fieldLabel}>Stock actual</label>
+                      {isEditing ? (
+                        <div
+                          data-testid="stock-current"
+                          style={{
+                            width: 120, padding: '10px 13px', borderRadius: 9,
+                            border: '1.5px solid #e5e7eb', background: '#f8fafc',
+                            fontSize: 14, fontWeight: 700, fontFamily: 'monospace',
+                            color: currentStock < 0 ? '#b91c1c' : '#0f172a',
+                          }}
+                        >
+                          {currentStock}
+                        </div>
+                      ) : (
+                        <div style={{
+                          width: 220, padding: '10px 13px', borderRadius: 9,
+                          border: '1px dashed #e2e8f0', background: '#f8fafc',
+                          fontSize: 12, color: '#94a3b8', lineHeight: 1.4,
+                        }}>
+                          Arranca en 0 — cárgalo desde <strong style={{ color: '#64748b' }}>Inventario → Ajuste manual</strong>.
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Stock mínimo — editable (umbral de alerta) */}
+                    <div>
+                      <label style={fieldLabel}>Stock mínimo</label>
+                      <input
+                        type="number"
+                        min={0}
+                        data-testid="product-min-stock"
+                        value={minStock}
+                        onChange={(e) => setMinStock(e.target.value)}
+                        placeholder="0"
+                        style={{ ...inputStyle, width: 120 }}
+                        onFocus={(e) => { e.currentTarget.style.borderColor = '#10b981' }}
+                        onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb' }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {isEditing && stockTracking && currentStock < 0 && (
+                  <div
+                    data-testid="oversold-alert"
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                      marginTop: 10, padding: '6px 10px', borderRadius: 8,
+                      background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c',
+                      fontSize: 12, fontWeight: 600,
+                    }}
+                  >
+                    <AlertTriangle size={13} />
+                    Sobreventa: reponer {Math.abs(currentStock)} unidades del insumo
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Receta (solo producto compuesto) */}
+            {kind === 'composite' && (
+              <RecipeEditor
+                selfId={product?.id ?? null}
+                products={allProducts}
+                rows={recipeRows}
+                onChange={setRecipeRows}
+              />
+            )}
 
             {/* Extras disponibles */}
             <div>

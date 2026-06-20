@@ -605,6 +605,7 @@ export type Database = {
           image_url: string | null
           is_active: boolean
           kind: string
+          min_stock: number
           name: string
           price: number
           restaurant_id: string
@@ -620,6 +621,7 @@ export type Database = {
           image_url?: string | null
           is_active?: boolean
           kind?: string
+          min_stock?: number
           name: string
           price: number
           restaurant_id: string
@@ -635,6 +637,7 @@ export type Database = {
           image_url?: string | null
           is_active?: boolean
           kind?: string
+          min_stock?: number
           name?: string
           price?: number
           restaurant_id?: string
