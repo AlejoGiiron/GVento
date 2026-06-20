@@ -511,6 +511,55 @@ export type Database = {
           },
         ]
       }
+      product_components: {
+        Row: {
+          component_id: string
+          created_at: string
+          id: string
+          parent_id: string
+          qty: number
+          restaurant_id: string
+        }
+        Insert: {
+          component_id: string
+          created_at?: string
+          id?: string
+          parent_id: string
+          qty: number
+          restaurant_id: string
+        }
+        Update: {
+          component_id?: string
+          created_at?: string
+          id?: string
+          parent_id?: string
+          qty?: number
+          restaurant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_components_component_id_fkey"
+            columns: ["component_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_components_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_components_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       product_extras: {
         Row: {
           created_at: string
@@ -555,6 +604,7 @@ export type Database = {
           id: string
           image_url: string | null
           is_active: boolean
+          kind: string
           name: string
           price: number
           restaurant_id: string
@@ -569,6 +619,7 @@ export type Database = {
           id?: string
           image_url?: string | null
           is_active?: boolean
+          kind?: string
           name: string
           price: number
           restaurant_id: string
@@ -583,6 +634,7 @@ export type Database = {
           id?: string
           image_url?: string | null
           is_active?: boolean
+          kind?: string
           name?: string
           price?: number
           restaurant_id?: string
@@ -753,6 +805,64 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      stock_movements: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          notes: string | null
+          product_id: string
+          qty: number
+          reference_id: string | null
+          restaurant_id: string
+          type: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          notes?: string | null
+          product_id: string
+          qty: number
+          reference_id?: string | null
+          restaurant_id: string
+          type: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          notes?: string | null
+          product_id?: string
+          qty?: number
+          reference_id?: string | null
+          restaurant_id?: string
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_movements_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_movements_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_movements_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants"
             referencedColumns: ["id"]
           },
         ]
@@ -956,6 +1066,10 @@ export type Database = {
     Functions: {
       add_order_items_with_extras: {
         Args: { p_items: Json; p_order_id: string }
+        Returns: undefined
+      }
+      adjust_stock: {
+        Args: { p_product_id: string; p_qty: number; p_reason: string }
         Returns: undefined
       }
       get_my_organization_id: { Args: never; Returns: string }
