@@ -434,7 +434,7 @@ function DeliveryCard({
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           <Package size={13} color={cfg.fg} />
           <span style={{ fontSize: 12, fontWeight: 700, color: cfg.fg, fontFamily: 'monospace' }}>
-            #{order.id.slice(-6).toUpperCase()}
+            {order.order_number != null ? `Venta #${order.order_number}` : `#${order.id.slice(-6).toUpperCase()}`}
           </span>
           {urgent && (
             <span style={{

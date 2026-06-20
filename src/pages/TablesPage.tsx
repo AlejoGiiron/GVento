@@ -19,6 +19,7 @@ import {
   updateTableStatus, createOrder, addOrderItemsWithExtras,
   updateOrderTotal, updateOrderStatus, createPayment,
   getTableActiveOrderCount, removeOrderItem, markItemsSentToKitchen,
+  assignOrderNumber,
 } from '@/lib/supabase-helpers'
 import { OpenShiftModal } from '@/components/shift/OpenShiftModal'
 import { ItemConfigModal } from '@/components/pos/ItemConfigModal'
@@ -591,6 +592,7 @@ function TableCheckoutModal({
   const [method, setMethod] = useState<PaymentMethodUI>('efectivo')
   const [received, setReceived] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [orderNumber, setOrderNumber] = useState<number | null>(null)
 
   const total = order.total
   const receivedNum = parseInt(received.replace(/\D/g, ''), 10) || 0
@@ -620,6 +622,11 @@ function TableCheckoutModal({
         restaurant_id: profile.restaurant_id,
       })
       if (payErr) throw payErr
+
+      // Numeración: la mesa ya está cobrada → asignar número correlativo.
+      // Si falla, no se tumba el cobro (la venta queda registrada igual).
+      const n = await assignOrderNumber(order.id, profile.restaurant_id)
+      setOrderNumber(n)
 
       refetchSales()
 
@@ -754,12 +761,16 @@ function TableCheckoutModal({
             <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#ecfdf5', display: 'grid', placeItems: 'center', margin: '0 auto 16px', color: '#10b981' }}>
               <Check size={32} strokeWidth={2.5} />
             </div>
-            <div style={{ fontSize: 20, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>¡Cobro exitoso!</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>
+              {orderNumber != null ? `¡Venta #${orderNumber} registrada!` : '¡Cobro exitoso!'}
+            </div>
             <div style={{ fontSize: 13, color: '#64748b', marginBottom: 4 }}>{table.name} · {formatCOP(total)} · {methodLabel}</div>
             {method === 'efectivo' && receivedNum > total && (
               <div style={{ fontSize: 12, color: '#10b981', fontWeight: 600, marginBottom: 4 }}>Vuelto: {formatCOP(receivedNum - total)}</div>
             )}
-            <div style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace', marginBottom: 24 }}>#{order.id.slice(-8).toUpperCase()}</div>
+            <div data-testid="success-order-number" style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace', marginBottom: 24 }}>
+              {orderNumber != null ? `Venta #${orderNumber}` : `#${order.id.slice(-8).toUpperCase()}`}
+            </div>
             <button
               onClick={onComplete}
               style={{ padding: '11px 28px', border: 'none', background: '#10b981', borderRadius: 9, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#fff', boxShadow: '0 6px 16px rgba(16,185,129,.35)' }}

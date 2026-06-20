@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import type { Json, Tables, TablesInsert, TablesUpdate } from '@/types/database.types'
+import type { Enums, Json, Tables, TablesInsert, TablesUpdate } from '@/types/database.types'
 
 // --- Profiles ---
 
@@ -265,6 +265,122 @@ export const updateOrderStatus = (orderId: string, status: Tables<'orders'>['sta
 
 export const updateOrderTotal = (orderId: string, total: number) =>
   supabase.from('orders').update({ total }).eq('id', orderId)
+
+// --- Numeración secuencial de ventas (por sede) ---
+
+// Devuelve el siguiente número correlativo de la sede (incremento atómico en
+// la BD). Solo debe llamarse para una venta YA cobrada.
+export const nextOrderNumber = (restaurantId: string) =>
+  supabase.rpc('next_order_number', { p_restaurant_id: restaurantId })
+
+// Graba el número correlativo en la orden ya cobrada.
+export const setOrderNumber = (orderId: string, orderNumber: number) =>
+  supabase.from('orders').update({ order_number: orderNumber }).eq('id', orderId)
+
+// Asigna el número correlativo a una venta completada: pide el siguiente número
+// a la sede y lo graba en la orden. Devuelve el número o null si algo falla
+// (no debe tumbar el cobro: la venta ya quedó registrada con su pago).
+export const assignOrderNumber = async (
+  orderId: string,
+  restaurantId: string,
+): Promise<number | null> => {
+  const { data, error } = await nextOrderNumber(restaurantId)
+  if (error || typeof data !== 'number') return null
+  const { error: setErr } = await setOrderNumber(orderId, data)
+  if (setErr) return null
+  return data
+}
+
+// --- Historial de ventas (ventas completadas, con número) ---
+
+export interface SalesHistoryFilters {
+  restaurantId: string
+  from?: string        // ISO inicio (createdAt >=)
+  to?: string          // ISO fin (createdAt <=)
+  method?: Enums<'payment_method'> | null
+  orderNumber?: number | null
+  page: number         // 0-based
+  pageSize: number
+}
+
+export interface SalesHistoryRow {
+  id: string
+  order_number: number | null
+  created_at: string
+  type: Enums<'order_type'>
+  customer_name: string | null
+  total: number
+  payments: { method: Enums<'payment_method'>; amount: number }[]
+  profiles: { full_name: string | null } | null
+}
+
+export const getSalesHistory = ({
+  restaurantId, from, to, method, orderNumber, page, pageSize,
+}: SalesHistoryFilters) => {
+  const paymentsSel = method ? 'payments!inner(method, amount)' : 'payments(method, amount)'
+  const select =
+    `id, order_number, created_at, type, customer_name, total, ` +
+    `${paymentsSel}, profiles!orders_created_by_fkey(full_name)`
+
+  let q = supabase
+    .from('orders')
+    .select(select, { count: 'exact' })
+    .eq('restaurant_id', restaurantId)
+    .not('order_number', 'is', null)
+
+  if (orderNumber != null) q = q.eq('order_number', orderNumber)
+  if (from) q = q.gte('created_at', from)
+  if (to) q = q.lte('created_at', to)
+  if (method) q = q.eq('payments.method', method)
+
+  const fromIdx = page * pageSize
+  return q
+    .order('order_number', { ascending: false })
+    .range(fromIdx, fromIdx + pageSize - 1)
+}
+
+export interface SaleDetailRow {
+  id: string
+  order_number: number | null
+  created_at: string
+  type: Enums<'order_type'>
+  customer_name: string | null
+  customer_phone: string | null
+  notes: string | null
+  waiter_name: string | null
+  total: number
+  payments: { method: Enums<'payment_method'>; amount: number }[]
+  profiles: { full_name: string | null } | null
+  order_items: {
+    id: string
+    qty: number
+    unit_price: number
+    notes: string | null
+    products: { name: string } | null
+    order_item_extras: {
+      id: string
+      qty: number
+      unit_price: number
+      extras: { name: string } | null
+    }[]
+  }[]
+}
+
+export const getSaleDetail = (orderId: string) =>
+  supabase
+    .from('orders')
+    .select(`
+      id, order_number, created_at, type, customer_name, customer_phone, notes, waiter_name, total,
+      payments(method, amount),
+      profiles!orders_created_by_fkey(full_name),
+      order_items(
+        id, qty, unit_price, notes,
+        products(name),
+        order_item_extras(id, qty, unit_price, extras(name))
+      )
+    `)
+    .eq('id', orderId)
+    .single()
 
 // --- Order Items ---
 

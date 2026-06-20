@@ -6,6 +6,7 @@ import {
   ChefHat,
   Package,
   BarChart3,
+  Receipt,
   Settings,
   LogOut,
   Truck,
@@ -39,6 +40,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/cocina', label: 'Cocina', icon: ChefHat, permission: 'cocina.acceder' },
   { to: '/delivery', label: 'Delivery', icon: Truck, permission: 'delivery.gestionar' },
   { to: '/productos', label: 'Productos', icon: Package, permission: 'productos.editar' },
+  { to: '/historial', label: 'Historial', icon: Receipt, permission: 'ventas.historial' },
   { to: '/reportes', label: 'Reportes', icon: BarChart3, permission: 'reportes.financiero' },
   { to: '/configuracion', label: 'Configuración', icon: Settings, permission: 'config.acceder' },
 ]

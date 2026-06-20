@@ -22,6 +22,7 @@ export type DeliveryItem = {
 
 export type DeliveryOrder = {
   id: string
+  order_number: number | null
   customer_name: string | null
   customer_phone: string | null
   delivery_address: string | null

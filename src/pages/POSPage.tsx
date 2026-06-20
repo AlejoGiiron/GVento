@@ -16,7 +16,7 @@ import { useRestaurantConfig } from '@/hooks/useRestaurantConfig'
 import { useCashShift } from '@/hooks/useCashShift'
 import { OpenShiftModal } from '@/components/shift/OpenShiftModal'
 import { ItemConfigModal } from '@/components/pos/ItemConfigModal'
-import { createOrder, addOrderItemsWithExtras, createPayment } from '@/lib/supabase-helpers'
+import { createOrder, addOrderItemsWithExtras, createPayment, assignOrderNumber } from '@/lib/supabase-helpers'
 import type { ProductWithCategory, CartItem, DiscountType, HeldOrder } from '@/stores/cartStore'
 import type { Enums } from '@/types/database.types'
 
@@ -76,6 +76,7 @@ function PrintTicket({
   method,
   orderType,
   orderId,
+  orderNumber,
   receivedAmt,
   restaurantName,
   restaurantAddress,
@@ -90,6 +91,7 @@ function PrintTicket({
   method: PaymentMethodUI
   orderType: OrderType
   orderId: string
+  orderNumber: number | null
   receivedAmt?: number
   restaurantName: string
   restaurantAddress?: string | null
@@ -103,7 +105,9 @@ function PrintTicket({
     hour: '2-digit', minute: '2-digit',
     timeZone: 'America/Bogota',
   })
-  const ref = orderId.slice(-8).toUpperCase()
+  const ventaLabel = orderNumber != null
+    ? `Venta #${orderNumber}`
+    : `#${orderId.slice(-8).toUpperCase()}`
   const orderTypeLabel = { dine_in: 'Mesa', takeaway: 'Para llevar', delivery: 'Delivery' }[orderType]
   const methodLabel = {
     efectivo: 'Efectivo', tarjeta: 'Tarjeta',
@@ -115,8 +119,8 @@ function PrintTicket({
       <div style={{ textAlign: 'center', marginBottom: 6 }}>
         <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: 3 }}>{restaurantName.toUpperCase()}</div>
         {restaurantAddress && <div style={{ fontSize: 11 }}>{restaurantAddress}</div>}
-        <div style={{ fontSize: 10, marginTop: 4 }}>{dateStr}  {timeStr}</div>
-        <div style={{ fontSize: 10 }}>#{ref} · {orderTypeLabel}</div>
+        <div style={{ fontSize: 13, fontWeight: 700, marginTop: 4 }}>{ventaLabel}</div>
+        <div style={{ fontSize: 10, marginTop: 2 }}>{dateStr}  {timeStr} · {orderTypeLabel}</div>
       </div>
 
       <div style={{ borderTop: '1px dashed #000', margin: '6px 0' }} />
@@ -752,6 +756,7 @@ function CheckoutModal({
   const [received, setReceived] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [orderId, setOrderId] = useState<string | null>(null)
+  const [orderNumber, setOrderNumber] = useState<number | null>(null)
 
   const receivedNum = parseInt(received.replace(/\D/g, ''), 10) || 0
   const change = receivedNum - total
@@ -804,6 +809,11 @@ function CheckoutModal({
         restaurant_id: profile.restaurant_id,
       })
       if (payErr) throw payErr
+
+      // Numeración: la venta ya está cobrada → asignar número correlativo.
+      // Si falla, no se tumba el cobro (la venta queda registrada igual).
+      const n = await assignOrderNumber(order.id, profile.restaurant_id)
+      setOrderNumber(n)
 
       refetchSales()
       setOrderId(order.id)
@@ -998,7 +1008,7 @@ function CheckoutModal({
               <Check size={32} strokeWidth={2.5} />
             </div>
             <div style={{ fontSize: 20, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>
-              ¡Cobro exitoso!
+              {orderNumber != null ? `¡Venta #${orderNumber} registrada!` : '¡Cobro exitoso!'}
             </div>
             <div style={{ fontSize: 13, color: '#64748b', marginBottom: 4 }}>
               {formatCOP(total)} · {methodLabel(method)}
@@ -1008,8 +1018,8 @@ function CheckoutModal({
                 Vuelto: {formatCOP(receivedNum - total)}
               </div>
             )}
-            <div style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace', marginBottom: 24 }}>
-              #{orderId.slice(-8).toUpperCase()}
+            <div data-testid="success-order-number" style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace', marginBottom: 24 }}>
+              {orderNumber != null ? `Venta #${orderNumber}` : `#${orderId.slice(-8).toUpperCase()}`}
             </div>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
               <button
@@ -1045,6 +1055,7 @@ function CheckoutModal({
               method={method}
               orderType={orderType}
               orderId={orderId}
+              orderNumber={orderNumber}
               receivedAmt={method === 'efectivo' ? receivedNum : undefined}
               restaurantName={restaurant?.name ?? 'G-Vento'}
               restaurantAddress={restaurant?.address}

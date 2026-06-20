@@ -364,6 +364,7 @@ export type Database = {
           estimated_delivery_minutes: number | null
           id: string
           notes: string | null
+          order_number: number | null
           restaurant_id: string
           status: Database["public"]["Enums"]["order_status"]
           table_id: string | null
@@ -382,6 +383,7 @@ export type Database = {
           estimated_delivery_minutes?: number | null
           id?: string
           notes?: string | null
+          order_number?: number | null
           restaurant_id: string
           status?: Database["public"]["Enums"]["order_status"]
           table_id?: string | null
@@ -400,6 +402,7 @@ export type Database = {
           estimated_delivery_minutes?: number | null
           id?: string
           notes?: string | null
+          order_number?: number | null
           restaurant_id?: string
           status?: Database["public"]["Enums"]["order_status"]
           table_id?: string | null
@@ -754,6 +757,29 @@ export type Database = {
           },
         ]
       }
+      store_sequences: {
+        Row: {
+          last_order_number: number
+          restaurant_id: string
+        }
+        Insert: {
+          last_order_number?: number
+          restaurant_id: string
+        }
+        Update: {
+          last_order_number?: number
+          restaurant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "store_sequences_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: true
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tables: {
         Row: {
           capacity: number | null
@@ -939,6 +965,7 @@ export type Database = {
         Returns: Database["public"]["Enums"]["user_role"]
       }
       has_permission: { Args: { perm: string }; Returns: boolean }
+      next_order_number: { Args: { p_restaurant_id: string }; Returns: number }
     }
     Enums: {
       movement_type: "in" | "out"

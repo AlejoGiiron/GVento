@@ -157,12 +157,48 @@ Resumen rápido:
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: Grupo B — Extras (Parte 1 catálogo/asignación + Parte 2 venta
-  en POS/Mesas con RPC atómica y stock negativo) (sesión 2026-06-19)
+Última fase completada: Ventas numeradas por sede + Historial de ventas (rama
+  feature/ventas-numeradas, sesión 2026-06-19) — migración APLICADA en producción y
+  database.types.ts regenerado con `supabase gen types` (PostgrestVersion 14.5,
+  alias Views<> conservado)
 En progreso: —
-Siguiente: montar Supabase de laboratorio y correr la suite E2E de extras (59 tests)
-Pendiente de correr en laboratorio: tests/extras.spec.ts + tests/extras-pos.spec.ts
-  (NO contra producción — usuarios de prueba eliminados)
+Siguiente: montar Supabase de laboratorio y correr la suite E2E (65 tests)
+Pendiente de correr en laboratorio: tests/extras.spec.ts + tests/extras-pos.spec.ts +
+  tests/ventas-historial.spec.ts (NO contra producción — usuarios de prueba eliminados)
+
+### Detalle Ventas numeradas + Historial (sesión 2026-06-19, rama feature/ventas-numeradas)
+- Migración `supabase/order-numbering.sql` (NUEVA, sin aplicar): columna
+  `orders.order_number int NULL` (solo ventas cobradas la reciben); tabla
+  `store_sequences` (contador por sede, 1 fila/sede sembrada en 0); función
+  `next_order_number(p_restaurant_id)` SECURITY DEFINER (valida sede activa,
+  incremento atómico INSERT ... ON CONFLICT ... RETURNING, revoke public/anon +
+  grant authenticated); NUMERACIÓN INDEPENDIENTE POR SEDE (cada una arranca en 1);
+  índice (restaurant_id, order_number desc); RLS en store_sequences solo SELECT de la
+  propia sede (escritura solo vía DEFINER). Permiso RBAC nuevo `ventas.historial`
+  sembrado en owner/admin/cajero (el cajero reimprime tickets del día; mozo NO).
+- Asignación del número AL COBRO EXITOSO (no antes): tras `createPayment` se llama
+  `assignOrderNumber(orderId, restaurantId)` (helper = next_order_number RPC + update).
+  Si falla, NO tumba el cobro (la venta queda registrada). Evita huecos por pagos
+  fallidos. Aplica en POS (CheckoutModal) y Mesas (TableCheckoutModal).
+- Visualización: PrintTicket (POS) y pantalla de éxito ("¡Venta #N registrada!",
+  data-testid `success-order-number`); `printSaleTicket` en printer.ts (recibo de venta
+  reutilizable para la reimpresión del historial, con "Venta #N"); tarjeta de Delivery
+  muestra "Venta #N" si ya tiene número.
+- Página `SalesHistoryPage` (ruta /historial, sidebar con permiso ventas.historial):
+  lista paginada (25/pág, server-side `.range`) por número desc; filtros rango de
+  fechas + método de pago (inner join cuando hay método) + búsqueda por número exacto;
+  click en fila → modal detalle con ítems, extras, subtotal/descuento derivado, quién
+  atendió, método; botón Reimprimir ticket. Hooks `useSalesHistory` (paginación/filtros,
+  keepPreviousData) y `useSaleDetail`. Helpers `getSalesHistory`/`getSaleDetail`/
+  `nextOrderNumber`/`setOrderNumber`/`assignOrderNumber` en supabase-helpers.
+- Nota descuento (DEUDA): orders no persiste el descuento; el detalle lo DERIVA como
+  max(0, suma_líneas − total). Es estimación, no dato de caja. MEJORA FUTURA: persistir
+  el discount real (monto y tipo pct/fixed) en orders al cobrar, y mostrarlo exacto en
+  el historial en vez de derivarlo.
+- tests/ventas-historial.spec.ts (6 tests): secuencia #N→#N+1, listado desc, búsqueda
+  por número, detalle con ítems+extras+reimpresión, setup/limpieza. Suite total: 65
+  (compila vía `--list`); PENDIENTE de correr en laboratorio.
+- tsc 0 + build verde; database.types.ts regenerado tras aplicar la migración.
 
 ### Detalle Grupo B - Extras / subproductos reutilizables (sesión 2026-06-19)
 
