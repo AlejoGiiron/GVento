@@ -296,6 +296,7 @@ export function ProductModal({ product, categories, onClose }: ProductModalProps
               <div>
                 <label style={fieldLabel}>Categoría <span style={{ color: '#dc2626' }}>*</span></label>
                 <select
+                  data-testid="product-category-select"
                   value={categoryId}
                   onChange={(e) => setCategoryId(e.target.value)}
                   required

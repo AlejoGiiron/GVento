@@ -20,7 +20,7 @@ async function createProduct(page: Page, name: string, price: string, opts?: { s
   await page.getByRole('button', { name: 'Nuevo producto' }).click()
   await page.getByPlaceholder('Ej: Mojito Cubano').fill(name)
   await page.getByPlaceholder('0').first().fill(price)
-  await page.locator('select').first().selectOption({ label: CAT })
+  await page.getByTestId('product-category-select').selectOption({ label: CAT })
   if (opts?.stock) {
     await page.getByRole('switch').click() // Control de inventario (kind simple)
   }

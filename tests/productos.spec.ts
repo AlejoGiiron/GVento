@@ -27,7 +27,7 @@ test.describe.serial('Productos', () => {
     await page.getByRole('button', { name: 'Nuevo producto' }).click()
     await page.getByPlaceholder('Ej: Mojito Cubano').fill(PROD)
     await page.getByPlaceholder('0').fill('12000')
-    await page.locator('select').selectOption({ label: CAT })
+    await page.getByTestId('product-category-select').selectOption({ label: CAT })
     await page.getByRole('button', { name: 'Crear producto' }).click()
 
     await expect(page.getByText(PROD)).toBeVisible()

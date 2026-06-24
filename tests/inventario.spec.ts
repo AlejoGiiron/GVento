@@ -14,7 +14,7 @@ async function createSimpleTracked(page: Page, name: string, price: string) {
   await page.getByRole('button', { name: 'Nuevo producto' }).click()
   await page.getByPlaceholder('Ej: Mojito Cubano').fill(name)
   await page.getByPlaceholder('0').first().fill(price)
-  await page.locator('select').first().selectOption({ label: CAT })
+  await page.getByTestId('product-category-select').selectOption({ label: CAT })
   // kind 'simple' es el default; activar control de inventario.
   await page.getByRole('switch').click()
   await page.getByRole('button', { name: 'Crear producto' }).click()
@@ -26,7 +26,7 @@ async function createComposite(page: Page, name: string, price: string, insumo: 
   await page.getByRole('button', { name: 'Nuevo producto' }).click()
   await page.getByPlaceholder('Ej: Mojito Cubano').fill(name)
   await page.getByPlaceholder('0').first().fill(price)
-  await page.locator('select').first().selectOption({ label: CAT })
+  await page.getByTestId('product-category-select').selectOption({ label: CAT })
   await page.getByTestId('product-kind-composite').click()
   // Agregar el insumo a la receta.
   await page.getByTestId('recipe-add-product').selectOption({ label: insumo })
