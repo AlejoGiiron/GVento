@@ -95,9 +95,15 @@ export function useCashShift() {
   })
 
   const closeShiftMutation = useMutation({
-    mutationFn: async (closingAmount: number) => {
+    mutationFn: async (params: {
+      closingAmount: number
+      expectedAmount: number
+      difference: number
+    }) => {
       const { error } = await closeShiftHelper(currentShift!.id, {
-        closing_amount: closingAmount,
+        closing_amount: params.closingAmount,
+        expected_amount: params.expectedAmount,
+        difference: params.difference,
         closed_by: profile!.id,
         closed_at: new Date().toISOString(),
       })

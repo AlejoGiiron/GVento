@@ -1,6 +1,10 @@
 import { useState } from 'react'
-import { X, ArrowDownLeft, ArrowUpRight, DollarSign } from 'lucide-react'
+import { X, ArrowDownLeft, ArrowUpRight, DollarSign, AlertTriangle } from 'lucide-react'
 import { useCashShift } from '@/hooks/useCashShift'
+import { useRestaurantConfig } from '@/hooks/useRestaurantConfig'
+import { availableCash } from '@/lib/shiftCalc'
+
+const OTHER_REASON = 'Otro'
 
 const formatCOP = (n: number) =>
   new Intl.NumberFormat('es-CO', {
@@ -19,22 +23,64 @@ interface MovementsModalProps {
 }
 
 export function MovementsModal({ onClose }: MovementsModalProps) {
-  const { movements, addMovement, isAddingMovement } = useCashShift()
+  const { currentShift, salesSummary, movements, addMovement, isAddingMovement } = useCashShift()
+  const { config } = useRestaurantConfig()
 
   const [type, setType] = useState<'in' | 'out'>('in')
   const [rawAmount, setRawAmount] = useState('')
-  const [reason, setReason] = useState('')
+  const [reason, setReason] = useState('')           // ingresos (texto libre)
+  const [outReason, setOutReason] = useState('')      // egresos (motivo de la lista)
+  const [customReason, setCustomReason] = useState('') // egresos: fallback "Otro"
+  const [overdraftPending, setOverdraftPending] = useState(false)
+
+  // Motivos de egreso configurables; siempre garantizamos la opción "Otro".
+  const configuredReasons = config.cash_out_reasons ?? []
+  const outReasonOptions = configuredReasons.includes(OTHER_REASON)
+    ? configuredReasons
+    : [...configuredReasons, OTHER_REASON]
 
   const amount = parseInt(rawAmount.replace(/\D/g, ''), 10) || 0
-  const isValid = amount > 0 && reason.trim().length > 0
+
+  // Motivo efectivo según el tipo de movimiento.
+  const effectiveReason =
+    type === 'in'
+      ? reason.trim()
+      : outReason === OTHER_REASON
+        ? customReason.trim()
+        : outReason.trim()
+
+  const isValid = amount > 0 && effectiveReason.length > 0
+
+  // Efectivo disponible actual (apertura + ventas efectivo + ingresos − egresos previos).
+  const movementsIn = movements.filter(m => m.type === 'in').reduce((s, m) => s + m.amount, 0)
+  const movementsOut = movements.filter(m => m.type === 'out').reduce((s, m) => s + m.amount, 0)
+  const cashOnHand = availableCash({
+    openingAmount: currentShift?.opening_amount ?? 0,
+    cashSales: salesSummary?.cash ?? 0,
+    movementsIn,
+    movementsOut,
+  })
+  const wouldOverdraft = type === 'out' && amount > cashOnHand
+
+  const resetForm = () => {
+    setRawAmount('')
+    setReason('')
+    setOutReason('')
+    setCustomReason('')
+    setOverdraftPending(false)
+  }
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!isValid || isAddingMovement) return
+    // Sobregiro: advertir y exigir confirmación antes de registrar (no bloquea).
+    if (wouldOverdraft && !overdraftPending) {
+      setOverdraftPending(true)
+      return
+    }
     try {
-      await addMovement({ type, amount, reason: reason.trim() })
-      setRawAmount('')
-      setReason('')
+      await addMovement({ type, amount, reason: effectiveReason })
+      resetForm()
     } catch {
       // error toast handled in hook
     }
@@ -105,7 +151,7 @@ export function MovementsModal({ onClose }: MovementsModalProps) {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               <button
                 type="button"
-                onClick={() => setType('in')}
+                onClick={() => { setType('in'); setOverdraftPending(false) }}
                 style={{
                   padding: '10px 12px', border: `2px solid ${type === 'in' ? '#10b981' : '#e5e7eb'}`,
                   borderRadius: 9, background: type === 'in' ? '#ecfdf5' : '#fff',
@@ -120,7 +166,7 @@ export function MovementsModal({ onClose }: MovementsModalProps) {
               </button>
               <button
                 type="button"
-                onClick={() => setType('out')}
+                onClick={() => { setType('out'); setOverdraftPending(false) }}
                 style={{
                   padding: '10px 12px', border: `2px solid ${type === 'out' ? '#dc2626' : '#e5e7eb'}`,
                   borderRadius: 9, background: type === 'out' ? '#fef2f2' : '#fff',
@@ -152,7 +198,7 @@ export function MovementsModal({ onClose }: MovementsModalProps) {
                   inputMode="numeric"
                   data-testid="movement-amount"
                   value={rawAmount ? formatCOP(amount).replace('$', '').trim() : ''}
-                  onChange={(e) => setRawAmount(e.target.value.replace(/\D/g, ''))}
+                  onChange={(e) => { setRawAmount(e.target.value.replace(/\D/g, '')); setOverdraftPending(false) }}
                   placeholder="0"
                   style={{ ...inputStyle, paddingLeft: 30, fontFamily: 'monospace', fontSize: 15, fontWeight: 600 }}
                   onFocus={(e) => { e.currentTarget.style.borderColor = '#10b981' }}
@@ -166,19 +212,77 @@ export function MovementsModal({ onClose }: MovementsModalProps) {
               <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
                 Motivo <span style={{ color: '#dc2626' }}>*</span>
               </label>
-              <input
-                type="text"
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder={type === 'in' ? 'Ej: Venta externa, cambio de billetes...' : 'Ej: Compra de insumos, pago a proveedor...'}
-                style={inputStyle}
-                onFocus={(e) => { e.currentTarget.style.borderColor = '#10b981' }}
-                onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb' }}
-              />
+              {type === 'in' ? (
+                <input
+                  type="text"
+                  data-testid="movement-reason-in"
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  placeholder="Ej: Venta externa, cambio de billetes..."
+                  style={inputStyle}
+                  onFocus={(e) => { e.currentTarget.style.borderColor = '#10b981' }}
+                  onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb' }}
+                />
+              ) : (
+                <>
+                  <select
+                    data-testid="movement-reason-out"
+                    value={outReason}
+                    onChange={(e) => setOutReason(e.target.value)}
+                    style={{ ...inputStyle, cursor: 'pointer', appearance: 'auto' }}
+                    onFocus={(e) => { e.currentTarget.style.borderColor = '#10b981' }}
+                    onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb' }}
+                  >
+                    <option value="" disabled>Selecciona un motivo...</option>
+                    {outReasonOptions.map((r) => (
+                      <option key={r} value={r}>{r}</option>
+                    ))}
+                  </select>
+                  {outReason === OTHER_REASON && (
+                    <input
+                      type="text"
+                      data-testid="movement-reason-custom"
+                      value={customReason}
+                      onChange={(e) => setCustomReason(e.target.value)}
+                      placeholder="Especifica el motivo..."
+                      style={{ ...inputStyle, marginTop: 8 }}
+                      autoFocus
+                      onFocus={(e) => { e.currentTarget.style.borderColor = '#10b981' }}
+                      onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb' }}
+                    />
+                  )}
+                </>
+              )}
             </div>
+
+            {/* Overdraft warning + confirmación (no bloquea) */}
+            {overdraftPending && wouldOverdraft && (
+              <div
+                data-testid="overdraft-warning"
+                style={{
+                  padding: '12px 14px', borderRadius: 9,
+                  background: '#fef2f2', border: '1px solid #fecaca',
+                  display: 'flex', alignItems: 'flex-start', gap: 9,
+                }}
+              >
+                <AlertTriangle size={16} color="#dc2626" style={{ flexShrink: 0, marginTop: 1 }} />
+                <div>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: '#991b1b' }}>
+                    Este egreso supera el efectivo disponible
+                  </div>
+                  <div style={{ fontSize: 11.5, color: '#b91c1c', marginTop: 2, lineHeight: 1.5 }}>
+                    Disponible en caja: <strong>{formatCOP(cashOnHand)}</strong>. La caja quedará en{' '}
+                    <strong data-testid="overdraft-amount">{formatCOP(cashOnHand - amount)}</strong>{' '}
+                    (sobregiro de {formatCOP(amount - cashOnHand)}). Vuelve a presionar para
+                    registrarlo de todos modos.
+                  </div>
+                </div>
+              </div>
+            )}
 
             <button
               type="submit"
+              data-testid="movement-submit"
               disabled={!isValid || isAddingMovement}
               style={{
                 padding: '10px 16px', border: 'none', borderRadius: 9,
@@ -194,7 +298,11 @@ export function MovementsModal({ onClose }: MovementsModalProps) {
                 transition: 'all .15s',
               }}
             >
-              {isAddingMovement ? 'Registrando...' : type === 'in' ? '+ Registrar ingreso' : '− Registrar egreso'}
+              {isAddingMovement
+                ? 'Registrando...'
+                : overdraftPending && wouldOverdraft
+                  ? 'Registrar de todos modos'
+                  : type === 'in' ? '+ Registrar ingreso' : '− Registrar egreso'}
             </button>
           </form>
 
