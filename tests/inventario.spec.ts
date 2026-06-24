@@ -7,6 +7,11 @@ const CAT = `E2E Inv ${SUFFIX}`
 const INSUMO = `E2E Vaso ${SUFFIX}`     // producto simple con inventario
 const COCTEL = `E2E Coctel ${SUFFIX}`   // producto compuesto (receta: 1 vaso)
 
+// Par FRESCO y aislado para el test de venta del compuesto: no lo tocan los
+// tests de ajuste (+20/−5) sobre INSUMO, así el before/after es determinista.
+const INSUMO_VENTA = `E2E VasoVenta ${SUFFIX}`
+const COCTEL_VENTA = `E2E CoctelVenta ${SUFFIX}`
+
 // ── Helpers ───────────────────────────────────────────────────────
 
 async function createSimpleTracked(page: Page, name: string, price: string) {
@@ -70,7 +75,9 @@ async function sellCash(page: Page, name: string) {
   await page.getByRole('button', { name: /Continuar/ }).click()
   await page.getByTestId('checkout-received').fill('200000')
   await page.getByRole('button', { name: /Confirmar cobro/ }).click()
-  await expect(page.getByText('¡Cobro exitoso!')).toBeVisible({ timeout: 15_000 })
+  await expect(
+    page.getByText('¡Cobro exitoso!').or(page.getByText(/¡Venta #\d+ registrada!/)),
+  ).toBeVisible({ timeout: 15_000 })
   await page.getByRole('button', { name: 'Nueva venta' }).click()
 }
 
@@ -114,14 +121,25 @@ test.describe.serial('Inventario por recetas', () => {
 
   test('vender un compuesto descuenta su insumo y deja movimiento de venta', async ({ page }) => {
     await loginAsOwner(page)
-    const before = await readStock(page, INSUMO)
-    await sellCash(page, COCTEL)
-    expect(await readStock(page, INSUMO)).toBe(before - 1)
+
+    // Par FRESCO, aislado de los ajustes (+20/−5) que otros tests aplican sobre
+    // INSUMO. Stock conocido vía UN único ajuste de entrada, y before capturado
+    // justo antes de la venta (sin ajustes intermedios) → determinista.
+    await createSimpleTracked(page, INSUMO_VENTA, '1000')
+    await createComposite(page, COCTEL_VENTA, '15000', INSUMO_VENTA, 1)
+
+    await adjustStock(page, INSUMO_VENTA, '+', 10, 'stock inicial para venta')
+    const before = await readStock(page, INSUMO_VENTA)
+    expect(before).toBe(10)
+
+    // Vender 1 compuesto descuenta exactamente 1 unidad del insumo.
+    await sellCash(page, COCTEL_VENTA)
+    expect(await readStock(page, INSUMO_VENTA)).toBe(before - 1)
 
     // El descuento queda auditado como movimiento de venta del insumo.
     await page.goto('/inventario')
     await page.getByTestId('inventory-tab-movements').click()
-    const row = page.getByTestId('stock-movement-row').filter({ hasText: INSUMO }).first()
+    const row = page.getByTestId('stock-movement-row').filter({ hasText: INSUMO_VENTA }).first()
     await expect(row).toContainText('Venta')
     await expect(row.getByTestId('stock-movement-qty')).toContainText('−1')
   })
@@ -158,8 +176,8 @@ test.describe.serial('Inventario por recetas', () => {
     await page.goto('/ventas')
     await closeShiftIfOpen(page)
 
-    // Desactivar el compuesto primero (libera la receta), luego el insumo.
-    for (const name of [COCTEL, INSUMO]) {
+    // Desactivar los compuestos primero (liberan la receta), luego los insumos.
+    for (const name of [COCTEL, COCTEL_VENTA, INSUMO, INSUMO_VENTA]) {
       await page.goto('/productos')
       await page.getByPlaceholder('Buscar producto...').fill(name)
       await page.getByTitle('Desactivar', { exact: true }).first().click()

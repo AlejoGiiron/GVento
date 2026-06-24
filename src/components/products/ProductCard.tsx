@@ -19,7 +19,9 @@ export function ProductCard({ product, onEdit, onDeactivate }: ProductCardProps)
   const color = product.categories?.color ?? '#94a3b8'
 
   return (
-    <div style={{
+    <div
+      data-testid="product-grid-card"
+      style={{
       background: '#fff',
       border: '1px solid #e5e7eb',
       borderRadius: 14,

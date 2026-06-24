@@ -89,7 +89,9 @@ async function sellBaseWithExtra(page: Page, extraName: string, extraQty: number
   await page.getByRole('button', { name: /Continuar/ }).click()
   await page.getByTestId('checkout-received').fill('200000')
   await page.getByRole('button', { name: /Confirmar cobro/ }).click()
-  await expect(page.getByText('¡Cobro exitoso!')).toBeVisible({ timeout: 15_000 })
+  await expect(
+    page.getByText('¡Cobro exitoso!').or(page.getByText(/¡Venta #\d+ registrada!/)),
+  ).toBeVisible({ timeout: 15_000 })
   await page.getByRole('button', { name: 'Nueva venta' }).click()
 }
 
@@ -122,7 +124,7 @@ test.describe.serial('Extras en POS', () => {
     await page.getByTestId('product-extra-option').filter({ hasText: E_FREE }).click()
     await page.getByTestId('product-extra-option').filter({ hasText: E_LINKED }).click()
     await page.getByRole('button', { name: 'Guardar cambios' }).click()
-    await expect(page.getByText(P_BASE)).toBeVisible()
+    await expect(page.getByTestId('product-grid-card').filter({ hasText: P_BASE })).toBeVisible()
   })
 
   test('agregar producto con extra → el total incluye el extra', async ({ page }) => {
