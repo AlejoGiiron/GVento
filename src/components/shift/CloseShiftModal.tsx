@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { X, DollarSign, TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { X, DollarSign, TrendingUp, TrendingDown, Minus, AlertTriangle } from 'lucide-react'
 import { useCashShift } from '@/hooks/useCashShift'
+import { calcShiftBalance } from '@/lib/shiftCalc'
 
 const formatCOP = (n: number) =>
   new Intl.NumberFormat('es-CO', {
@@ -28,15 +29,21 @@ export function CloseShiftModal({ onClose }: CloseShiftModalProps) {
   const cashSales = salesSummary?.cash ?? 0
   const movementsIn = movements.filter(m => m.type === 'in').reduce((s, m) => s + m.amount, 0)
   const movementsOut = movements.filter(m => m.type === 'out').reduce((s, m) => s + m.amount, 0)
-  const expectedCash = (currentShift?.opening_amount ?? 0) + cashSales + movementsIn - movementsOut
-  const difference = declared - expectedCash
+
+  const { expectedCash, difference, isOverdraft } = calcShiftBalance({
+    openingAmount: currentShift?.opening_amount ?? 0,
+    cashSales,
+    movementsIn,
+    movementsOut,
+    declared,
+  })
 
   const canClose = rawAmount.length > 0
 
   const handleClose = async () => {
     if (!canClose || isClosingShift) return
     try {
-      await closeShift(declared)
+      await closeShift({ closingAmount: declared, expectedAmount: expectedCash, difference })
       onClose()
     } catch {
       // error toast handled in hook
@@ -167,9 +174,34 @@ export function CloseShiftModal({ onClose }: CloseShiftModalProps) {
               )}
               <div style={totalRowStyle}>
                 <span>Efectivo esperado</span>
-                <span style={{ fontFamily: 'monospace' }}>{formatCOP(expectedCash)}</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {isOverdraft && (
+                    <span
+                      data-testid="overdraft-badge"
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 4,
+                        padding: '2px 8px', borderRadius: 6,
+                        background: '#fef2f2', border: '1px solid #fecaca',
+                        color: '#b91c1c', fontSize: 10.5, fontWeight: 700,
+                        textTransform: 'uppercase', letterSpacing: 0.5,
+                      }}
+                    >
+                      <AlertTriangle size={11} />
+                      Sobregiro
+                    </span>
+                  )}
+                  <span style={{ fontFamily: 'monospace', color: isOverdraft ? '#dc2626' : undefined }}>
+                    {formatCOP(expectedCash)}
+                  </span>
+                </span>
               </div>
             </div>
+            {isOverdraft && (
+              <p style={{ fontSize: 11.5, color: '#b91c1c', marginTop: 8, lineHeight: 1.4 }}>
+                Los egresos superaron el efectivo disponible (apertura + ventas en efectivo +
+                ingresos). El esperado quedó negativo.
+              </p>
+            )}
           </div>
 
           {/* Declared amount input */}

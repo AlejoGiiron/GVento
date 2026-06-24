@@ -517,7 +517,10 @@ export const openShift = (shift: TablesInsert<'cash_shifts'>) =>
 
 export const closeShift = (
   shiftId: string,
-  data: Pick<TablesUpdate<'cash_shifts'>, 'closing_amount' | 'closed_by' | 'closed_at'>,
+  data: Pick<
+    TablesUpdate<'cash_shifts'>,
+    'closing_amount' | 'closed_by' | 'closed_at' | 'expected_amount' | 'difference'
+  >,
 ) => supabase.from('cash_shifts').update(data).eq('id', shiftId).select().single()
 
 // --- Couriers ---
