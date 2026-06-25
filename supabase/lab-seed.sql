@@ -86,19 +86,17 @@ begin
   end if;
 
   -- ========================================================
-  -- c) 4 roles de sistema para LAB — MISMO catálogo de permisos que
-  --    sembró multi-tenant-rbac.sql para G-10 (copiado de ahí, no inventado).
-  --    Upsert: si el rol ya existe, se reescriben permisos (mantiene LAB al día).
+  -- c) 4 roles de sistema para LAB — fiel al estado de G-10 tras las migraciones
+  --    aplicadas. Upsert: si el rol ya existe, se reescriben permisos (mantiene
+  --    LAB al día). ⚠️ MANTENER SINCRONIZADO con las migraciones de permisos:
+  --      - owner usa el comodín "*" (owner-wildcard-permission.sql): hereda TODO
+  --        permiso, presente y futuro, sin reseed. NO volver a enumerarlo aquí.
+  --      - admin/cajero/mozo son explícitos: al agregar un permiso nuevo a un rol
+  --        en una migración (p. ej. compras.gestionar en admin), reflejarlo aquí
+  --        o el reseed lo borra de LAB.
   -- ========================================================
   insert into public.roles (organization_id, name, is_system, permissions) values
-    (v_org, 'owner', true, '[
-      "pos.vender","pos.descuento","pos.anular",
-      "caja.abrir","caja.cerrar","caja.movimientos",
-      "mesas.gestionar","mesas.cobrar","cocina.acceder","delivery.gestionar",
-      "productos.ver","productos.editar",
-      "reportes.financiero","reportes.stock","reportes.consolidado",
-      "config.acceder","usuarios.gestionar","sedes.gestionar","roles.gestionar"
-    ]'::jsonb)
+    (v_org, 'owner', true, '["*"]'::jsonb)
   on conflict (organization_id, name)
     do update set permissions = excluded.permissions, is_system = true
   returning id into v_role_owner;
@@ -110,7 +108,7 @@ begin
       "mesas.gestionar","mesas.cobrar","cocina.acceder","delivery.gestionar",
       "productos.ver","productos.editar",
       "reportes.financiero","reportes.stock",
-      "config.acceder","usuarios.gestionar"
+      "config.acceder","usuarios.gestionar","compras.gestionar"
     ]'::jsonb)
   on conflict (organization_id, name)
     do update set permissions = excluded.permissions, is_system = true

@@ -1542,7 +1542,11 @@ function SectionRoles() {
       <div style={{ border: '1px solid #e2e8f0', borderRadius: 12, overflow: 'hidden' }}>
         {roles.map((role, idx) => {
           const count = roleCounts[role.id] ?? 0
-          const permCount = rolePermissions(role).length
+          const perms = rolePermissions(role)
+          const hasWildcard = perms.includes('*')
+          const permLabel = hasWildcard
+            ? 'Todos los permisos'
+            : `${perms.length} ${perms.length === 1 ? 'permiso' : 'permisos'}`
           return (
             <div key={role.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: idx < roles.length - 1 ? '1px solid #f1f5f9' : 'none' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -1553,9 +1557,14 @@ function SectionRoles() {
                       <Lock size={9} /> Sistema
                     </span>
                   )}
+                  {hasWildcard && (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10.5, fontWeight: 600, color: '#047857', background: '#ecfdf5', border: '1px solid #a7f3d0', padding: '2px 7px', borderRadius: 20 }}>
+                      <Shield size={9} /> Acceso total
+                    </span>
+                  )}
                 </div>
                 <p style={{ fontSize: 12, color: '#64748b', margin: '2px 0 0' }}>
-                  {permCount} {permCount === 1 ? 'permiso' : 'permisos'} · {count} {count === 1 ? 'usuario' : 'usuarios'}
+                  {permLabel} · {count} {count === 1 ? 'usuario' : 'usuarios'}
                 </p>
               </div>
               {role.is_system ? (

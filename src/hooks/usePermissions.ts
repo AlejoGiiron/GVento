@@ -37,8 +37,11 @@ export function usePermissions() {
     return Array.isArray(p) ? (p as string[]) : []
   }, [role])
 
+  // El comodín "*" (solo el rol owner) concede cualquier permiso: así el owner
+  // hereda automáticamente los permisos nuevos sin sembrarlos en cada org.
   const can = useCallback(
-    (permission: string) => permissions.includes(permission),
+    (permission: string) =>
+      permissions.includes(permission) || permissions.includes('*'),
     [permissions],
   )
 
@@ -48,7 +51,7 @@ export function usePermissions() {
 
   return {
     can,
-    isOwner: role?.name === 'owner',
+    isOwner: permissions.includes('*'),
     roleName: role?.name ?? null,
     permissions,
     isLoading,

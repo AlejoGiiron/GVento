@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import {
   Search, X, Plus, Boxes, PackageX, AlertTriangle, TrendingDown,
-  ChevronLeft, ChevronRight, ArrowDownCircle, RotateCcw, SlidersHorizontal,
+  ChevronLeft, ChevronRight, ArrowDownCircle, ArrowUpCircle, RotateCcw, SlidersHorizontal,
 } from 'lucide-react'
 import { useProducts } from '@/hooks/useProducts'
 import { useStockMovements } from '@/hooks/useStockMovements'
@@ -186,6 +186,7 @@ const MOV_META: Record<string, { bg: string; fg: string; label: string; icon: Re
   sale: { bg: '#eff6ff', fg: '#1e40af', label: 'Venta', icon: <ArrowDownCircle size={12} /> },
   adjustment: { bg: '#f5f3ff', fg: '#6d28d9', label: 'Ajuste', icon: <SlidersHorizontal size={12} /> },
   return: { bg: '#ecfdf5', fg: '#065f46', label: 'Devolución', icon: <RotateCcw size={12} /> },
+  purchase: { bg: '#ecfdf5', fg: '#047857', label: 'Compra', icon: <ArrowUpCircle size={12} /> },
 }
 
 function MovementsTab() {
@@ -209,6 +210,7 @@ function MovementsTab() {
   const TYPES: { value: StockMovementType | null; label: string }[] = [
     { value: null, label: 'Todos' },
     { value: 'sale', label: 'Ventas' },
+    { value: 'purchase', label: 'Compras' },
     { value: 'adjustment', label: 'Ajustes' },
     { value: 'return', label: 'Devoluciones' },
   ]
@@ -264,7 +266,7 @@ function MovementsTab() {
               <tr><td colSpan={6} style={{ padding: '40px 16px', textAlign: 'center', color: '#94a3b8' }}>Sin movimientos en el período</td></tr>
             ) : rows.map(m => {
               const meta = MOV_META[m.type] ?? { bg: '#f1f5f9', fg: '#64748b', label: m.type, icon: null }
-              const ref = m.type === 'sale' && m.reference_id
+              const ref = (m.type === 'sale' || m.type === 'purchase') && m.reference_id
                 ? `#${m.reference_id.slice(0, 8)}`
                 : (m.notes ?? '—')
               return (
