@@ -188,7 +188,7 @@ export const adjustStock = (productId: string, qty: number, reason: string) =>
 
 // --- Inventario: movimientos de stock (auditoría append-only, paginada) ---
 
-export type StockMovementType = 'sale' | 'adjustment' | 'return'
+export type StockMovementType = 'sale' | 'adjustment' | 'return' | 'purchase'
 
 export interface StockMovementsFilters {
   restaurantId: string
@@ -630,3 +630,123 @@ export const uploadNequiQR = async (
     .getPublicUrl(data.path)
   return publicUrl
 }
+
+// --- Compras / Proveedores (F5) ---
+
+export type Supplier = Tables<'suppliers'>
+
+// Proveedores ACTIVOS de la sede (borrado = soft-deactivate, ver deleteSupplier).
+export const getSuppliers = (restaurantId: string) =>
+  supabase
+    .from('suppliers')
+    .select('*')
+    .eq('restaurant_id', restaurantId)
+    .eq('is_active', true)
+    .order('name')
+
+export const upsertSupplier = (data: TablesInsert<'suppliers'>) =>
+  supabase.from('suppliers').upsert(data).select().single()
+
+// Soft delete: purchase_invoices.supplier_id es ON DELETE RESTRICT, así que un
+// proveedor con facturas no se puede borrar. Se desactiva (patrón couriers).
+export const deleteSupplier = (supplierId: string) =>
+  supabase.from('suppliers').update({ is_active: false }).eq('id', supplierId)
+
+// Payload de la compra. La RPC register_purchase DERIVA total/subtotales y el
+// restaurant_id; del cliente solo se usan estos campos (unit_cost es el costo
+// capturado del documento físico).
+export type PurchaseInvoicePayload = {
+  supplier_id: string
+  invoice_number: string | null
+  payment_method: string            // 'cash' | 'card' | 'transfer' | 'nequi'
+  notes: string | null
+}
+
+export type PurchaseItemPayload = {
+  product_id: string
+  qty: number
+  unit_cost: number
+}
+
+// Resultado de register_purchase (el jsonb que retorna la RPC).
+export interface RegisterPurchaseResult {
+  invoice_id: string
+  total: number
+  cash_movement_created: boolean
+  shift_open: boolean
+}
+
+// Registra la compra de forma atómica (sube stock, actualiza cost_price y, si
+// es efectivo con turno abierto, genera el egreso de caja). SECURITY DEFINER.
+export const registerPurchase = (
+  invoice: PurchaseInvoicePayload,
+  items: PurchaseItemPayload[],
+) =>
+  supabase.rpc('register_purchase', {
+    p_invoice: invoice as unknown as Json,
+    p_items: items as unknown as Json,
+  })
+
+// Historial de compras (cabeceras), paginado y ordenado por fecha desc.
+export interface PurchaseInvoicesFilters {
+  restaurantId: string
+  page: number
+  pageSize: number
+}
+
+export interface PurchaseInvoiceListRow {
+  id: string
+  created_at: string
+  invoice_number: string | null
+  total: number
+  payment_method: string
+  suppliers: { name: string } | null
+  profiles: { full_name: string | null } | null
+}
+
+export const getPurchaseInvoices = ({
+  restaurantId, page, pageSize,
+}: PurchaseInvoicesFilters) => {
+  const fromIdx = page * pageSize
+  return supabase
+    .from('purchase_invoices')
+    .select(
+      'id, created_at, invoice_number, total, payment_method, ' +
+        'suppliers(name), profiles!purchase_invoices_created_by_fkey(full_name)',
+      { count: 'exact' },
+    )
+    .eq('restaurant_id', restaurantId)
+    .order('created_at', { ascending: false })
+    .range(fromIdx, fromIdx + pageSize - 1)
+}
+
+// Detalle de una factura: cabecera + ítems con nombre de producto.
+export interface PurchaseInvoiceDetailRow {
+  id: string
+  created_at: string
+  invoice_number: string | null
+  total: number
+  payment_method: string
+  notes: string | null
+  suppliers: { name: string; contact_name: string | null; phone: string | null } | null
+  profiles: { full_name: string | null } | null
+  purchase_invoice_items: {
+    id: string
+    qty: number
+    unit_cost: number
+    subtotal: number
+    products: { name: string } | null
+  }[]
+}
+
+export const getPurchaseInvoiceDetail = (invoiceId: string) =>
+  supabase
+    .from('purchase_invoices')
+    .select(
+      'id, created_at, invoice_number, total, payment_method, notes, ' +
+        'suppliers(name, contact_name, phone), ' +
+        'profiles!purchase_invoices_created_by_fkey(full_name), ' +
+        'purchase_invoice_items(id, qty, unit_cost, subtotal, products(name))',
+    )
+    .eq('id', invoiceId)
+    .single()

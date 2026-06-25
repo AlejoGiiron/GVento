@@ -177,12 +177,44 @@ Resumen rápido:
   owner-wildcard-permission.sql APLICADA y verificada (owner de G-10 y LAB en ["*"],
   nadie más con comodín); has_permission reconoce "*"; usePermissions (can/isOwner) y
   ConfigPage Roles actualizados. rbac.spec 5/5 verde contra el laboratorio.
-En progreso: Compras / Proveedores (F5) — Parte 1 BD escrita SIN aplicar
-  (supabase/compras-proveedores.sql: suppliers, purchase_invoices(_items), cost_price,
-  stock_movements.type+='purchase', permiso compras.gestionar, RPC register_purchase).
-  Pendiente: ajuste del punto 6 (siembra de compras.gestionar — el owner ya lo hereda
-  por comodín; revisar si solo aporta a admin), aplicar migración + regenerar tipos.
-Siguiente: cerrar Parte 1 de compras y seguir con la UI (prompt 2).
+En progreso: Compras / Proveedores (F5) — Parte 1 BD APLICADA + Parte 2 UI escrita,
+  PENDIENTE de revisión del usuario (sin commit). database.types.ts regenerado
+  (suppliers, purchase_invoices(_items), cost_price, register_purchase). tsc 0 + build verde.
+Siguiente: revisión del usuario → correr compras.spec.ts en el lab → commit.
+
+### Detalle Compras / Proveedores (F5, sesión 2026-06-24, rama feature/compras-proveedores)
+
+**Parte 1 — BD** (`supabase/compras-proveedores.sql`, APLICADA + verificada):
+- Tablas `suppliers`, `purchase_invoices`, `purchase_invoice_items` (RLS por sede /
+  has_permission('compras.gestionar'); items heredan RLS vía la factura padre).
+- `products.cost_price numeric nullable` (último costo conocido). `stock_movements.type`
+  ahora acepta `'purchase'` (4 tipos). Permiso `compras.gestionar`: admin explícito,
+  owner vía comodín "*" (la siembra del punto 6 quedó solo `where name='admin'`).
+- RPC `register_purchase(p_invoice jsonb, p_items jsonb) → jsonb` SECURITY DEFINER:
+  crea factura + ítems, sube stock (solo stock_tracking) + `stock_movement('purchase',+qty)`,
+  actualiza `cost_price`, y si es efectivo CON turno abierto inserta `cash_movement('out')`.
+  Deriva total/subtotales/restaurant_id (no confía en el JSON). Retorna
+  `{invoice_id, total, cash_movement_created, shift_open}`.
+
+**Parte 2 — UI** (esta sesión, PENDIENTE de revisión):
+- Helpers (supabase-helpers): getSuppliers/upsertSupplier/deleteSupplier(soft),
+  registerPurchase, getPurchaseInvoices(paginado), getPurchaseInvoiceDetail.
+- Hooks: `useSuppliers` (CRUD), `usePurchases` (`usePurchaseInvoices`,
+  `usePurchaseInvoiceDetail`, `useRegisterPurchase`). El registro invalida
+  ['products'] + ['stock_movements'] + ['purchase_invoices'] + ['cash_movements'] +
+  ['shift_payments'] (inventario + caja se refrescan solos).
+- Toast inequívoco cuando efectivo + sin turno: "Compra registrada y stock actualizado.
+  El pago en efectivo no se registró en caja (sin turno abierto)." (no parece fallo).
+- `PurchasesPage` (/compras, sidebar+ruta con permiso compras.gestionar) con 2 pestañas
+  Compras (historial paginado + detalle) y Proveedores (CRUD). Modales:
+  `NewInvoiceModal` (proveedor + método + líneas producto/cantidad/costo con subtotal y
+  total en vivo; prefill de costo con cost_price), `SupplierFormModal`, `PurchaseDetailModal`.
+  Helper compartido `paymentMethods.ts`.
+- InventoryPage: 'purchase' mapeado como "Compra" (badge + filtro + referencia a factura).
+- tests/compras.spec.ts (6 tests, lab): crear proveedor, compra que sube stock + movimiento
+  'purchase', compra efectivo con turno → egreso, compra efectivo sin turno → advertencia,
+  gating del cajero, limpieza. Suite total: 79 (compila vía --list). PENDIENTE de correr.
+- tsc 0 + build verde.
 
 ### RBAC — permiso comodín "*" (sesión 2026-06-24)
 - El rol **owner** usa `permissions = ["*"]` en vez de enumerar los permisos; hereda

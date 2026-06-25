@@ -605,6 +605,7 @@ export type Database = {
       products: {
         Row: {
           category_id: string
+          cost_price: number | null
           created_at: string
           description: string | null
           id: string
@@ -621,6 +622,7 @@ export type Database = {
         }
         Insert: {
           category_id: string
+          cost_price?: number | null
           created_at?: string
           description?: string | null
           id?: string
@@ -637,6 +639,7 @@ export type Database = {
         }
         Update: {
           category_id?: string
+          cost_price?: number | null
           created_at?: string
           description?: string | null
           id?: string
@@ -732,6 +735,109 @@ export type Database = {
             columns: ["role_id"]
             isOneToOne: false
             referencedRelation: "roles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      purchase_invoice_items: {
+        Row: {
+          created_at: string
+          id: string
+          invoice_id: string
+          product_id: string
+          qty: number
+          subtotal: number
+          unit_cost: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          invoice_id: string
+          product_id: string
+          qty: number
+          subtotal: number
+          unit_cost: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          invoice_id?: string
+          product_id?: string
+          qty?: number
+          subtotal?: number
+          unit_cost?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "purchase_invoice_items_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_invoice_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      purchase_invoices: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          invoice_number: string | null
+          notes: string | null
+          payment_method: string
+          restaurant_id: string
+          supplier_id: string
+          total: number
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          invoice_number?: string | null
+          notes?: string | null
+          payment_method: string
+          restaurant_id: string
+          supplier_id: string
+          total?: number
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          invoice_number?: string | null
+          notes?: string | null
+          payment_method?: string
+          restaurant_id?: string
+          supplier_id?: string
+          total?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "purchase_invoices_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_invoices_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_invoices_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
             referencedColumns: ["id"]
           },
         ]
@@ -894,6 +1000,53 @@ export type Database = {
             foreignKeyName: "store_sequences_restaurant_id_fkey"
             columns: ["restaurant_id"]
             isOneToOne: true
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      suppliers: {
+        Row: {
+          contact_name: string | null
+          created_at: string
+          document: string | null
+          id: string
+          is_active: boolean
+          name: string
+          notes: string | null
+          phone: string | null
+          restaurant_id: string
+          updated_at: string
+        }
+        Insert: {
+          contact_name?: string | null
+          created_at?: string
+          document?: string | null
+          id?: string
+          is_active?: boolean
+          name: string
+          notes?: string | null
+          phone?: string | null
+          restaurant_id: string
+          updated_at?: string
+        }
+        Update: {
+          contact_name?: string | null
+          created_at?: string
+          document?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          notes?: string | null
+          phone?: string | null
+          restaurant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "suppliers_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
             referencedRelation: "restaurants"
             referencedColumns: ["id"]
           },
@@ -1089,6 +1242,10 @@ export type Database = {
       }
       has_permission: { Args: { perm: string }; Returns: boolean }
       next_order_number: { Args: { p_restaurant_id: string }; Returns: number }
+      register_purchase: {
+        Args: { p_invoice: Json; p_items: Json }
+        Returns: Json
+      }
     }
     Enums: {
       movement_type: "in" | "out"
