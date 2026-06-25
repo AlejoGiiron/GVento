@@ -29,14 +29,16 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   fullyParallel: false, // los flujos comparten sesión/estado del backend
   workers: 1,
-  // Backend real compartido (turno de caja, datos): algunos flujos son
-  // inherentemente sensibles a timing/estado. Reintentos para absorber esa
-  // flakiness sin enmascarar fallos de lógica (un test roto falla las 3 veces).
-  retries: 2,
+  // Laboratorio determinista (org LAB aislada): SIN retries por defecto. Los
+  // retries enmascaran problemas y, con describe.serial, duplican datos al
+  // reintentar. Un fallo es un fallo limpio que se investiga, no se reintenta.
+  // Override puntual con E2E_RETRIES=N (p. ej. backend compartido legacy).
+  retries: Number(process.env.E2E_RETRIES ?? 0),
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
     baseURL: BASE_URL,
-    trace: 'on-first-retry',
+    // Con retries:0 no hay "first retry": capturar trace en cualquier fallo.
+    trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
   },
