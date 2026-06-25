@@ -69,6 +69,17 @@ function paymentMethodOf(row: { payments: { method: PayMethod }[] }): PayMethod 
   return row.payments[0]?.method ?? null
 }
 
+// Etiqueta de método para la lista/detalle. Una venta a fiado NO tiene fila en
+// `payments` (la liquidación vive en debt_payments), así que se deriva del
+// payment_status para que no aparezca como venta sin método.
+function methodDisplay(row: { payment_status: string; payments: { method: PayMethod }[] }): string {
+  const m = row.payments[0]?.method
+  if (m) return METHOD_LABEL[m]
+  if (row.payment_status === 'paid') return 'Fiado (saldado)'
+  if (row.payment_status === 'partial') return 'Fiado (parcial)'
+  return 'Fiado'
+}
+
 // ─── Detalle de venta (modal) ─────────────────────────────────────
 
 function SaleDetailModal({ orderId, onClose }: { orderId: string; onClose: () => void }) {
@@ -152,7 +163,7 @@ function SaleDetailModal({ orderId, onClose }: { orderId: string; onClose: () =>
                 {sale.customer_name && <div>Cliente: <span style={{ fontWeight: 600, color: '#0f172a' }}>{sale.customer_name}</span>{sale.customer_phone ? ` · ${sale.customer_phone}` : ''}</div>}
                 {sale.waiter_name && <div>Responsable: <span style={{ fontWeight: 600, color: '#0f172a' }}>{sale.waiter_name}</span></div>}
                 <div>Atendió: <span style={{ fontWeight: 600, color: '#0f172a' }}>{sale.profiles?.full_name ?? '—'}</span></div>
-                {method && <div>Pago: <span style={{ fontWeight: 600, color: '#0f172a' }}>{METHOD_LABEL[method]}</span></div>}
+                <div>Pago: <span style={{ fontWeight: 600, color: '#0f172a' }}>{methodDisplay(sale)}</span></div>
               </div>
 
               {/* Items */}
@@ -356,7 +367,6 @@ export function SalesHistoryPage() {
             {/* Rows */}
             {rows.map((row: SalesHistoryRow) => {
               const ot = ORDER_TYPE[row.type as OrderType]
-              const m = paymentMethodOf(row)
               return (
                 <button
                   key={row.id}
@@ -389,8 +399,8 @@ export function SalesHistoryPage() {
                       {ot.icon} {ot.label}
                     </span>
                   </span>
-                  <span style={{ fontSize: 12.5, color: '#475569' }}>
-                    {m ? METHOD_LABEL[m] : '—'}
+                  <span data-testid="sale-row-method" style={{ fontSize: 12.5, color: '#475569' }}>
+                    {methodDisplay(row)}
                   </span>
                   <span style={{ textAlign: 'right', fontSize: 14, fontWeight: 700, color: '#0f172a', fontFamily: 'monospace' }}>
                     {formatCOP(row.total)}
