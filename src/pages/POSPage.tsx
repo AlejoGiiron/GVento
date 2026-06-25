@@ -3,9 +3,10 @@ import {
   Search, X, Plus, Trash, Minus, ShoppingCart, Percent,
   ChevronRight, Store, Bike, StickyNote,
   Banknote, CreditCard, Smartphone, Check, Building2, Printer,
-  Pause, Play, Clock, AlertTriangle,
+  Pause, Play, Clock, AlertTriangle, HandCoins,
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
+import { useQueryClient } from '@tanstack/react-query'
 import { useCartStore, cartItemTotal } from '@/stores/cartStore'
 import { useProducts } from '@/hooks/useProducts'
 import { useCategories } from '@/hooks/useCategories'
@@ -17,12 +18,13 @@ import { useCashShift } from '@/hooks/useCashShift'
 import { OpenShiftModal } from '@/components/shift/OpenShiftModal'
 import { ItemConfigModal } from '@/components/pos/ItemConfigModal'
 import { createOrder, addOrderItemsWithExtras, createPayment, assignOrderNumber } from '@/lib/supabase-helpers'
+import { CustomerPicker } from '@/components/fiado/CustomerPicker'
 import { cashQuickAmounts } from '@/lib/cashRounding'
 import type { ProductWithCategory, CartItem, DiscountType, HeldOrder } from '@/stores/cartStore'
 import type { Enums } from '@/types/database.types'
 
 type OrderType = 'dine_in' | 'takeaway' | 'delivery'
-type PaymentMethodUI = 'efectivo' | 'tarjeta' | 'transferencia' | 'nequi'
+type PaymentMethodUI = 'efectivo' | 'tarjeta' | 'transferencia' | 'nequi' | 'fiado'
 
 const formatCOP = (n: number) =>
   new Intl.NumberFormat('es-CO', {
@@ -112,7 +114,7 @@ function PrintTicket({
   const orderTypeLabel = { dine_in: 'Mesa', takeaway: 'Para llevar', delivery: 'Delivery' }[orderType]
   const methodLabel = {
     efectivo: 'Efectivo', tarjeta: 'Tarjeta',
-    transferencia: 'Transferencia', nequi: 'Nequi',
+    transferencia: 'Transferencia', nequi: 'Nequi', fiado: 'Fiado',
   }[method]
 
   return (
@@ -771,15 +773,21 @@ function CheckoutModal({
   onComplete: () => void
 }) {
   const { profile } = useAuth()
+  const { can } = usePermissions()
   const { restaurant } = useRestaurantConfig()
   const { refetchSales } = useCashShift()
+  const queryClient = useQueryClient()
   const [step, setStep] = useState<'method' | 'amount' | 'success'>('method')
   const [method, setMethod] = useState<PaymentMethodUI>('efectivo')
   const [received, setReceived] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [orderId, setOrderId] = useState<string | null>(null)
   const [orderNumber, setOrderNumber] = useState<number | null>(null)
+  // Fiado: cliente seleccionado (solo aplica si method === 'fiado').
+  const [customerId, setCustomerId] = useState<string | null>(null)
+  const [customerName, setCustomerName] = useState<string>('')
 
+  const canFiado = can('fiado.gestionar')
   const receivedNum = parseInt(received.replace(/\D/g, ''), 10) || 0
   const change = receivedNum - total
 
@@ -788,27 +796,38 @@ function CheckoutModal({
     { id: 'tarjeta',       label: 'Tarjeta',       icon: <CreditCard size={22} /> },
     { id: 'transferencia', label: 'Transferencia', icon: <Building2 size={22} /> },
     { id: 'nequi',         label: 'Nequi / QR',   icon: <Smartphone size={22} /> },
+    ...(canFiado ? [{ id: 'fiado' as const, label: 'Fiado', icon: <HandCoins size={22} /> }] : []),
   ]
 
   const quickAmounts = cashQuickAmounts(total)
 
-  const methodMap: Record<PaymentMethodUI, Enums<'payment_method'>> = {
+  const methodMap: Record<Exclude<PaymentMethodUI, 'fiado'>, Enums<'payment_method'>> = {
     efectivo:      'cash',
     tarjeta:       'card',
     transferencia: 'transfer',
     nequi:         'nequi',
   }
 
+  const isFiado = method === 'fiado'
+
   const handleConfirm = async () => {
     if (!profile) return
+    if (isFiado && !customerId) { toast.error('Selecciona un cliente para la venta a fiado'); return }
     setSubmitting(true)
     try {
+      // Venta a fiado: la orden se crea como pendiente de pago y ligada al
+      // cliente; NO entra dinero (no toca caja) y NO se registra payment.
+      // El stock SÍ se descuenta igual (la mercancía salió). Copiamos el nombre
+      // del cliente a customer_name para que tickets/historial sigan leyéndolo.
       const { data: order, error: orderErr } = await createOrder({
         type: orderType,
         status: 'pending',
         total,
         restaurant_id: profile.restaurant_id,
         created_by: profile.id,
+        ...(isFiado
+          ? { payment_status: 'pending', customer_id: customerId, customer_name: customerName }
+          : {}),
       })
       if (orderErr || !order) throw orderErr ?? new Error('Error al crear orden')
 
@@ -824,19 +843,22 @@ function CheckoutModal({
       )
       if (itemsErr) throw itemsErr
 
-      const { error: payErr } = await createPayment({
-        order_id: order.id,
-        method: methodMap[method],
-        amount: total,
-        restaurant_id: profile.restaurant_id,
-      })
-      if (payErr) throw payErr
+      if (!isFiado) {
+        const { error: payErr } = await createPayment({
+          order_id: order.id,
+          method: methodMap[method],
+          amount: total,
+          restaurant_id: profile.restaurant_id,
+        })
+        if (payErr) throw payErr
+      }
 
-      // Numeración: la venta ya está cobrada → asignar número correlativo.
-      // Si falla, no se tumba el cobro (la venta queda registrada igual).
+      // Numeración: es una venta real (cobrada o a fiado) → asignar número
+      // correlativo. Si falla, no se tumba la venta (queda registrada igual).
       const n = await assignOrderNumber(order.id, profile.restaurant_id)
       setOrderNumber(n)
 
+      if (isFiado) queryClient.invalidateQueries({ queryKey: ['debts'] })
       refetchSales()
       setOrderId(order.id)
       setStep('success')
@@ -850,7 +872,7 @@ function CheckoutModal({
   }
 
   const methodLabel = (m: PaymentMethodUI) =>
-    ({ efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Transferencia', nequi: 'Nequi / QR' })[m]
+    ({ efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Transferencia', nequi: 'Nequi / QR', fiado: 'Fiado' })[m]
 
   return (
     <div style={{
@@ -896,6 +918,7 @@ function CheckoutModal({
                 {paymentMethods.map((m) => (
                   <button
                     key={m.id}
+                    data-testid={`pay-method-${m.id}`}
                     onClick={() => setMethod(m.id)}
                     style={{
                       padding: '16px 8px',
@@ -914,6 +937,23 @@ function CheckoutModal({
                   </button>
                 ))}
               </div>
+
+              {/* Fiado: selección de cliente obligatoria */}
+              {isFiado && (
+                <div style={{ marginTop: 16 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
+                    Cliente <span style={{ color: '#dc2626' }}>*</span>
+                  </div>
+                  <CustomerPicker
+                    value={customerId}
+                    onChange={(id, name) => { setCustomerId(id); setCustomerName(name) }}
+                  />
+                  <div style={{ marginTop: 8, fontSize: 11.5, color: '#854d0e', background: '#fef3c7', borderRadius: 8, padding: '8px 11px' }}>
+                    La venta a fiado queda pendiente de pago. No entra dinero a la caja; los abonos se registran en Fiado → Cuentas por cobrar.
+                  </div>
+                </div>
+              )}
+
               <div style={{ marginTop: 18, display: 'flex', gap: 10 }}>
                 <button
                   onClick={onClose}
@@ -922,19 +962,22 @@ function CheckoutModal({
                   Cancelar
                 </button>
                 <button
-                  disabled={submitting}
+                  data-testid="checkout-continue"
+                  disabled={submitting || (isFiado && !customerId)}
                   onClick={() => method === 'efectivo' ? setStep('amount') : handleConfirm()}
                   style={{
                     flex: 2, padding: '12px', border: 'none',
-                    background: submitting ? '#cbd5e1' : '#10b981',
-                    borderRadius: 9, cursor: submitting ? 'not-allowed' : 'pointer',
+                    background: submitting || (isFiado && !customerId) ? '#cbd5e1' : '#10b981',
+                    borderRadius: 9, cursor: submitting || (isFiado && !customerId) ? 'not-allowed' : 'pointer',
                     fontSize: 13.5, fontWeight: 600, color: '#fff',
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                   }}
                 >
                   {submitting
                     ? 'Procesando...'
-                    : <><span>Continuar</span><ChevronRight size={15} /></>}
+                    : isFiado
+                      ? <><HandCoins size={15} /><span>Registrar fiado</span></>
+                      : <><span>Continuar</span><ChevronRight size={15} /></>}
                 </button>
               </div>
             </div>

@@ -13,6 +13,7 @@ import { DeliveryPage } from '@/pages/DeliveryPage'
 import { ProductsPage } from '@/pages/ProductsPage'
 import { InventoryPage } from '@/pages/InventoryPage'
 import { PurchasesPage } from '@/pages/PurchasesPage'
+import { FiadoPage } from '@/pages/FiadoPage'
 import { ReportsPage } from '@/pages/ReportsPage'
 import { SalesHistoryPage } from '@/pages/SalesHistoryPage'
 import { ConfigPage } from '@/pages/ConfigPage'
@@ -48,6 +49,9 @@ function App() {
               </Route>
               <Route element={<ProtectedRoute permission="compras.gestionar" />}>
                 <Route path="compras" element={<PurchasesPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission="fiado.gestionar" />}>
+                <Route path="fiado" element={<FiadoPage />} />
               </Route>
               <Route element={<ProtectedRoute permission="ventas.historial" />}>
                 <Route path="historial" element={<SalesHistoryPage />} />

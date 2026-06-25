@@ -108,7 +108,7 @@ begin
       "mesas.gestionar","mesas.cobrar","cocina.acceder","delivery.gestionar",
       "productos.ver","productos.editar",
       "reportes.financiero","reportes.stock",
-      "config.acceder","usuarios.gestionar","compras.gestionar"
+      "config.acceder","usuarios.gestionar","compras.gestionar","fiado.gestionar"
     ]'::jsonb)
   on conflict (organization_id, name)
     do update set permissions = excluded.permissions, is_system = true
@@ -118,7 +118,7 @@ begin
     (v_org, 'cajero', true, '[
       "pos.vender","pos.descuento","pos.anular",
       "caja.abrir","caja.cerrar","caja.movimientos",
-      "mesas.cobrar","delivery.gestionar"
+      "mesas.cobrar","delivery.gestionar","fiado.gestionar"
     ]'::jsonb)
   on conflict (organization_id, name)
     do update set permissions = excluded.permissions, is_system = true

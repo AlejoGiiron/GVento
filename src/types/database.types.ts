@@ -215,6 +215,112 @@ export type Database = {
           },
         ]
       }
+      customers: {
+        Row: {
+          created_at: string
+          document: string | null
+          id: string
+          is_active: boolean
+          name: string
+          notes: string | null
+          phone: string | null
+          restaurant_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          document?: string | null
+          id?: string
+          is_active?: boolean
+          name: string
+          notes?: string | null
+          phone?: string | null
+          restaurant_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          document?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          notes?: string | null
+          phone?: string | null
+          restaurant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customers_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      debt_payments: {
+        Row: {
+          amount: number
+          cash_movement_id: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          order_id: string
+          payment_method: string
+          restaurant_id: string
+        }
+        Insert: {
+          amount: number
+          cash_movement_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          order_id: string
+          payment_method: string
+          restaurant_id: string
+        }
+        Update: {
+          amount?: number
+          cash_movement_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          order_id?: string
+          payment_method?: string
+          restaurant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "debt_payments_cash_movement_id_fkey"
+            columns: ["cash_movement_id"]
+            isOneToOne: false
+            referencedRelation: "cash_movements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "debt_payments_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "debt_payments_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "debt_payments_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       extras: {
         Row: {
           created_at: string
@@ -364,6 +470,7 @@ export type Database = {
           courier_id: string | null
           created_at: string
           created_by: string
+          customer_id: string | null
           customer_name: string | null
           customer_phone: string | null
           delivery_address: string | null
@@ -371,6 +478,7 @@ export type Database = {
           id: string
           notes: string | null
           order_number: number | null
+          payment_status: string
           restaurant_id: string
           status: Database["public"]["Enums"]["order_status"]
           table_id: string | null
@@ -383,6 +491,7 @@ export type Database = {
           courier_id?: string | null
           created_at?: string
           created_by: string
+          customer_id?: string | null
           customer_name?: string | null
           customer_phone?: string | null
           delivery_address?: string | null
@@ -390,6 +499,7 @@ export type Database = {
           id?: string
           notes?: string | null
           order_number?: number | null
+          payment_status?: string
           restaurant_id: string
           status?: Database["public"]["Enums"]["order_status"]
           table_id?: string | null
@@ -402,6 +512,7 @@ export type Database = {
           courier_id?: string | null
           created_at?: string
           created_by?: string
+          customer_id?: string | null
           customer_name?: string | null
           customer_phone?: string | null
           delivery_address?: string | null
@@ -409,6 +520,7 @@ export type Database = {
           id?: string
           notes?: string | null
           order_number?: number | null
+          payment_status?: string
           restaurant_id?: string
           status?: Database["public"]["Enums"]["order_status"]
           table_id?: string | null
@@ -430,6 +542,13 @@ export type Database = {
             columns: ["created_by"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "orders_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
             referencedColumns: ["id"]
           },
           {
@@ -1242,6 +1361,10 @@ export type Database = {
       }
       has_permission: { Args: { perm: string }; Returns: boolean }
       next_order_number: { Args: { p_restaurant_id: string }; Returns: number }
+      register_debt_payment: {
+        Args: { p_amount: number; p_order_id: string; p_payment_method: string }
+        Returns: Json
+      }
       register_purchase: {
         Args: { p_invoice: Json; p_items: Json }
         Returns: Json
