@@ -136,34 +136,29 @@ Resumen rápido:
 - **BUG DE RAÍZ pendiente (observado, no exclusivo de G-Vento):** la caja debe ser POR SEDE
   y hay que **validar que no exista un turno abierto antes de abrir otro** (evitar dos
   turnos simultáneos). Revisar el flujo de apertura de caja con esta regla.
-### Deuda de testing
-- **⚠️ NO correr E2E contra producción.** Los usuarios de prueba (owner.test,
-  cajero.test) fueron ELIMINADOS de producción en la limpieza para el cliente.
-  Producción quedó limpia y NO se vuelve a tocar con tests. La verificación E2E
-  se hace en el **laboratorio (Supabase separado)** cuando se monte.
-- **Suite E2E de extras (59 tests total) PENDIENTE de correr en laboratorio.** El
-  spec `tests/extras-pos.spec.ts` (8 tests, incluye el caso de sobreventa con
-  stock negativo) está escrito y **compila** (`playwright test --list` lista los 59),
-  pero NO se ejecutó contra producción. Igual `extras.spec.ts` (Parte 1) volverá a
-  correrse en el laboratorio.
-- **Suite inventario.spec.ts (6 tests) PENDIENTE de correr en laboratorio.** Cubre
-  receta, ajuste manual +/−, venta de compuesto que descuenta el insumo + movimiento,
-  sobreventa negativa con alerta y limpieza. Compila (`--list` lista 71 en total);
-  NO ejecutado contra producción. Nota: extras-pos.spec.ts fue REESCRITO para leer/fijar
-  stock vía el flujo de Inventario (el stock dejó de editarse en la ficha del producto).
-- **TODO: montar Supabase de laboratorio** con un negocio + sedes de prueba y los
-  usuarios owner.test/cajero.test recreados, para correr la suite de forma
-  determinista (y sin `retries`). Esto reemplaza al "proyecto de testing separado"
-  que ya se venía señalando como prioritario.
-- **Tests E2E corren contra el mismo Supabase que la app** (cuando se corren) —
-  `closeShiftIfOpen` cierra la caja real; los specs pueden crear datos. Ver
-  tests/README.md.
-- **`pos-vuelto` es flaky** (pasa en retry) por estado compartido del backend; se
-  estabilizará con el Supabase de laboratorio.
-- **`retries: 2`** absorbe la flakiness inherente al backend compartido; **no es solución
-  de fondo** (un test roto falla las 3 veces; uno flaky pasa).
-- **Los flujos de caja y mesas mutan estado compartido** — pueden acumular datos
-  residuales entre corridas (p. ej. mesas ocupadas).
+### Testing — laboratorio (LAB) MONTADO
+- **✅ Laboratorio listo.** Existe la organización **LAB** (Supabase separado de
+  producción) con **2 sedes**, los usuarios **owner.test** (rol owner) y
+  **cajero.test** (rol cajero) con sus profiles, y productos de prueba. La suite
+  E2E corre contra LAB de forma determinista. **NUNCA correr E2E contra producción**
+  (org G-10): los health checks lo impiden.
+- **Credenciales en `.env.test`** (gitignored): `E2E_OWNER_EMAIL/PASSWORD` y
+  `E2E_CASHIER_EMAIL/PASSWORD`. El backend (`VITE_GVENTO_*`) apunta al Supabase del
+  lab. Ver `.env.test.example`.
+- **Doble health check en `tests/global-setup.ts`** (defensa en profundidad):
+  (1) la app servida en el puerto dedicado **5180** es G-Vento (no otra app);
+  (2) **las credenciales pertenecen a la org LAB** — hace login real, consulta
+  `organizations` (RLS solo deja ver la propia) y ABORTA la suite si no es LAB.
+  Esto evita correr tests (que mutan estado) contra datos reales.
+- **`retries: 0` por defecto** (lab determinista; un fallo es un fallo limpio que se
+  investiga). Override puntual con `E2E_RETRIES=N`.
+- **Suites pendientes de correr en el lab:** `tests/extras.spec.ts`,
+  `tests/extras-pos.spec.ts` (incl. sobreventa con stock negativo),
+  `tests/ventas-historial.spec.ts`, `tests/inventario.spec.ts`. Compilan
+  (`playwright test --list` lista 71). `rbac.spec.ts` ya se corre verde contra el lab.
+- **Los flujos de caja y mesas mutan estado** — los specs limpian tras de sí, pero
+  pueden acumular residuos entre corridas (p. ej. mesas ocupadas). `closeShiftIfOpen`
+  cierra la caja del lab. Ver tests/README.md.
 
 ## Política de testing (obligatoria)
 - Todo módulo o funcionalidad nueva **DEBE** incluir su spec E2E en `tests/` antes de
@@ -177,16 +172,28 @@ Resumen rápido:
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: Inventario por recetas COMPLETO (Parte 1 BD + Parte 2 UI)
-  (rama feature/inventario-recetas, sesión 2026-06-20) — las 3 migraciones APLICADAS en
-  producción (inventory-recipes.sql, order-items-stock-recipes.sql, inventory-min-stock.sql)
-  y database.types.ts regenerado con `supabase gen types` (PostgrestVersion 14.5,
-  alias Views<> conservado)
-En progreso: —
-Siguiente: montar Supabase de laboratorio y correr la suite E2E (71 tests)
-Pendiente de correr en laboratorio: tests/extras.spec.ts + tests/extras-pos.spec.ts +
-  tests/ventas-historial.spec.ts + tests/inventario.spec.ts (NO contra producción —
-  usuarios de prueba eliminados)
+Última fase completada: Refactor RBAC — permiso comodín "*" para el rol owner
+  (rama feature/compras-proveedores, sesión 2026-06-24) — migración
+  owner-wildcard-permission.sql APLICADA y verificada (owner de G-10 y LAB en ["*"],
+  nadie más con comodín); has_permission reconoce "*"; usePermissions (can/isOwner) y
+  ConfigPage Roles actualizados. rbac.spec 5/5 verde contra el laboratorio.
+En progreso: Compras / Proveedores (F5) — Parte 1 BD escrita SIN aplicar
+  (supabase/compras-proveedores.sql: suppliers, purchase_invoices(_items), cost_price,
+  stock_movements.type+='purchase', permiso compras.gestionar, RPC register_purchase).
+  Pendiente: ajuste del punto 6 (siembra de compras.gestionar — el owner ya lo hereda
+  por comodín; revisar si solo aporta a admin), aplicar migración + regenerar tipos.
+Siguiente: cerrar Parte 1 de compras y seguir con la UI (prompt 2).
+
+### RBAC — permiso comodín "*" (sesión 2026-06-24)
+- El rol **owner** usa `permissions = ["*"]` en vez de enumerar los permisos; hereda
+  automáticamente cualquier permiso nuevo sin sembrarlo por organización.
+- `has_permission(perm)` → true si el rol tiene `perm` O tiene `"*"`. SOLO el owner
+  (name=owner, is_system) usa el comodín; admin/cajero/mozo y roles custom siguen con
+  permisos explícitos (la UI nunca asigna el comodín a un rol custom).
+- Frontend: `usePermissions.can` contempla `"*"`; `isOwner = permissions.includes("*")`.
+  ConfigPage Roles muestra "Todos los permisos" + badge "Acceso total" para el owner.
+- `enumFromRoleName` (ConfigPage) sigue usando el string 'owner' para mapear al enum
+  legacy de la Edge Function create-user — NO es gating, no se tocó.
 
 ### Detalle Inventario por recetas (sesión 2026-06-20, rama feature/inventario-recetas)
 
