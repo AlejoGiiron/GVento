@@ -70,4 +70,52 @@ test.describe('POS — venta y carrito', () => {
     await page.goto('/ventas')
     await closeShiftIfOpen(page)
   })
+
+  test('cobro en efectivo con chip "Exacto" → vuelto 0', async ({ page }) => {
+    await loginAsOwner(page)
+    await page.getByTestId('product-card').first().click()
+    await openShiftIfClosed(page, 0)
+
+    await page.getByRole('button', { name: 'Cobrar' }).click()
+    await page.getByText('Efectivo', { exact: true }).click()
+    await page.getByRole('button', { name: /Continuar/ }).click()
+
+    // Pago justo: el chip "Exacto" rellena el monto = total → vuelto 0.
+    await page.getByTestId('quick-amount-exact').click()
+    await expect(page.getByText('Vuelto', { exact: true })).toBeVisible()
+    expect(parseCOP(await page.getByTestId('checkout-change').innerText())).toBe(0)
+
+    await page.getByRole('button', { name: /Confirmar cobro/ }).click()
+    await expect(page.getByText(/registrada|Cobro exitoso/)).toBeVisible()
+
+    // Limpieza: cerrar el turno abierto para el setup.
+    await page.goto('/ventas')
+    await closeShiftIfOpen(page)
+  })
+
+  test('cobro en efectivo con chip de round-up → vuelto correcto', async ({ page }) => {
+    await loginAsOwner(page)
+    await page.getByTestId('product-card').first().click()
+    await openShiftIfClosed(page, 0)
+
+    const total = parseCOP(await page.getByTestId('cart-total').innerText())
+
+    await page.getByRole('button', { name: 'Cobrar' }).click()
+    await page.getByText('Efectivo', { exact: true }).click()
+    await page.getByRole('button', { name: /Continuar/ }).click()
+
+    // Primer chip de round-up: monto redondo por encima del total → vuelto = monto − total.
+    const chip = page.getByTestId('quick-amount-chip').first()
+    const chipAmount = parseCOP(await chip.innerText())
+    expect(chipAmount).toBeGreaterThan(total)
+    await chip.click()
+
+    expect(parseCOP(await page.getByTestId('checkout-change').innerText())).toBe(chipAmount - total)
+
+    await page.getByRole('button', { name: /Confirmar cobro/ }).click()
+    await expect(page.getByText(/registrada|Cobro exitoso/)).toBeVisible()
+
+    await page.goto('/ventas')
+    await closeShiftIfOpen(page)
+  })
 })
