@@ -17,6 +17,7 @@ import { useCashShift } from '@/hooks/useCashShift'
 import { OpenShiftModal } from '@/components/shift/OpenShiftModal'
 import { ItemConfigModal } from '@/components/pos/ItemConfigModal'
 import { createOrder, addOrderItemsWithExtras, createPayment, assignOrderNumber } from '@/lib/supabase-helpers'
+import { cashQuickAmounts } from '@/lib/cashRounding'
 import type { ProductWithCategory, CartItem, DiscountType, HeldOrder } from '@/stores/cartStore'
 import type { Enums } from '@/types/database.types'
 
@@ -789,7 +790,7 @@ function CheckoutModal({
     { id: 'nequi',         label: 'Nequi / QR',   icon: <Smartphone size={22} /> },
   ]
 
-  const quickAmounts = [...new Set([total, 50000, 100000, 200000])].filter((a) => a >= total || a === total)
+  const quickAmounts = cashQuickAmounts(total)
 
   const methodMap: Record<PaymentMethodUI, Enums<'payment_method'>> = {
     efectivo:      'cash',
@@ -960,20 +961,30 @@ function CheckoutModal({
                   boxSizing: 'border-box',
                 }}
               />
-              <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
-                {quickAmounts.map((a, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setReceived(String(a))}
-                    style={{
-                      padding: '6px 10px', border: '1px solid #e5e7eb', background: '#f8fafc',
-                      borderRadius: 6, fontSize: 11.5, fontWeight: 600, color: '#334155',
-                      fontFamily: 'monospace', cursor: 'pointer',
-                    }}
-                  >
-                    {formatCOP(a)}
-                  </button>
-                ))}
+              <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                {quickAmounts.map((chip) => {
+                  const active = receivedNum === chip.amount && received !== ''
+                  return (
+                    <button
+                      key={chip.exact ? 'exact' : chip.amount}
+                      data-testid={chip.exact ? 'quick-amount-exact' : 'quick-amount-chip'}
+                      onClick={() => setReceived(String(chip.amount))}
+                      style={{
+                        padding: '6px 12px',
+                        border: chip.exact
+                          ? `1.5px solid ${active ? '#10b981' : '#a7f3d0'}`
+                          : `1px solid ${active ? '#10b981' : '#e5e7eb'}`,
+                        background: chip.exact ? '#ecfdf5' : active ? '#ecfdf5' : '#f8fafc',
+                        borderRadius: 6, fontSize: 11.5, fontWeight: chip.exact ? 700 : 600,
+                        color: chip.exact ? '#065f46' : '#334155',
+                        fontFamily: 'monospace', cursor: 'pointer',
+                        transition: 'all .12s',
+                      }}
+                    >
+                      {chip.exact ? `Exacto · ${formatCOP(chip.amount)}` : formatCOP(chip.amount)}
+                    </button>
+                  )
+                })}
               </div>
             </div>
             <div style={{ padding: 22 }}>
@@ -990,7 +1001,7 @@ function CheckoutModal({
                 <span style={{ fontSize: 12.5, fontWeight: 600, color: change >= 0 ? '#065f46' : '#991b1b' }}>
                   {change >= 0 ? 'Vuelto' : 'Falta'}
                 </span>
-                <span style={{ fontSize: 22, fontWeight: 700, fontFamily: 'monospace', color: change >= 0 ? '#065f46' : '#991b1b' }}>
+                <span data-testid="checkout-change" style={{ fontSize: 22, fontWeight: 700, fontFamily: 'monospace', color: change >= 0 ? '#065f46' : '#991b1b' }}>
                   {formatCOP(Math.abs(change))}
                 </span>
               </div>
