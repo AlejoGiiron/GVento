@@ -392,6 +392,7 @@ export interface SalesHistoryRow {
   type: Enums<'order_type'>
   customer_name: string | null
   total: number
+  payment_status: string   // 'paid' | 'pending' | 'partial' — el fiado no tiene fila en payments
   payments: { method: Enums<'payment_method'>; amount: number }[]
   profiles: { full_name: string | null } | null
 }
@@ -401,7 +402,7 @@ export const getSalesHistory = ({
 }: SalesHistoryFilters) => {
   const paymentsSel = method ? 'payments!inner(method, amount)' : 'payments(method, amount)'
   const select =
-    `id, order_number, created_at, type, customer_name, total, ` +
+    `id, order_number, created_at, type, customer_name, total, payment_status, ` +
     `${paymentsSel}, profiles!orders_created_by_fkey(full_name)`
 
   let q = supabase
@@ -431,6 +432,7 @@ export interface SaleDetailRow {
   notes: string | null
   waiter_name: string | null
   total: number
+  payment_status: string
   payments: { method: Enums<'payment_method'>; amount: number }[]
   profiles: { full_name: string | null } | null
   order_items: {
@@ -452,7 +454,7 @@ export const getSaleDetail = (orderId: string) =>
   supabase
     .from('orders')
     .select(`
-      id, order_number, created_at, type, customer_name, customer_phone, notes, waiter_name, total,
+      id, order_number, created_at, type, customer_name, customer_phone, notes, waiter_name, total, payment_status,
       payments(method, amount),
       profiles!orders_created_by_fkey(full_name),
       order_items(
@@ -750,3 +752,104 @@ export const getPurchaseInvoiceDetail = (invoiceId: string) =>
     )
     .eq('id', invoiceId)
     .single()
+
+// --- Fiado / Clientes (CRM) ---
+
+export type Customer = Tables<'customers'>
+
+// Clientes ACTIVOS de la sede (borrado = soft-deactivate, patrón suppliers).
+export const getCustomers = (restaurantId: string) =>
+  supabase
+    .from('customers')
+    .select('*')
+    .eq('restaurant_id', restaurantId)
+    .eq('is_active', true)
+    .order('name')
+
+export const upsertCustomer = (data: TablesInsert<'customers'>) =>
+  supabase.from('customers').upsert(data).select().single()
+
+// Soft delete: orders.customer_id es ON DELETE SET NULL, pero conservamos el
+// cliente para no perder la trazabilidad de la deuda. Se desactiva.
+export const deleteCustomer = (customerId: string) =>
+  supabase.from('customers').update({ is_active: false }).eq('id', customerId)
+
+// Marca una orden EXISTENTE como venta a fiado (usado en el cobro de mesa, donde
+// la orden ya existe con sus ítems y el stock ya descontado). El POS no lo usa:
+// crea la orden directamente con estos campos.
+export const setOrderFiado = (
+  orderId: string,
+  customerId: string,
+  customerName: string | null,
+) =>
+  supabase
+    .from('orders')
+    .update({ payment_status: 'pending', customer_id: customerId, customer_name: customerName })
+    .eq('id', orderId)
+    .select()
+    .single()
+
+// --- Cuentas por cobrar (deudas a fiado) ---
+
+// Una orden a fiado con sus abonos (para derivar el saldo en el cliente).
+export interface DebtRow {
+  id: string
+  order_number: number | null
+  created_at: string
+  total: number
+  payment_status: string             // 'pending' | 'partial'
+  customer_name: string | null
+  customers: { name: string } | null
+  debt_payments: { amount: number }[]
+}
+
+// Órdenes a fiado pendientes/parciales de la sede, con sus abonos. El saldo se
+// deriva en el cliente: total − suma(debt_payments.amount).
+export const getDebts = (restaurantId: string) =>
+  supabase
+    .from('orders')
+    .select(
+      'id, order_number, created_at, total, payment_status, customer_name, ' +
+        'customers(name), debt_payments(amount)',
+    )
+    .eq('restaurant_id', restaurantId)
+    .in('payment_status', ['pending', 'partial'])
+    .order('created_at', { ascending: false })
+
+// Historial de abonos de una orden (mayor append-only), más reciente primero.
+export interface DebtPaymentRow {
+  id: string
+  amount: number
+  payment_method: string
+  cash_movement_id: string | null
+  created_at: string
+  profiles: { full_name: string | null } | null
+}
+
+export const getDebtPayments = (orderId: string) =>
+  supabase
+    .from('debt_payments')
+    .select('id, amount, payment_method, cash_movement_id, created_at, profiles!debt_payments_created_by_fkey(full_name)')
+    .eq('order_id', orderId)
+    .order('created_at', { ascending: false })
+
+// Resultado de register_debt_payment (el jsonb que retorna la RPC).
+export interface RegisterDebtPaymentResult {
+  new_status: string                 // 'paid' | 'partial'
+  saldo_restante: number
+  cash_movement_created: boolean
+  shift_open: boolean
+}
+
+// Registra un abono de forma atómica (valida saldo, y si es efectivo con turno
+// abierto genera el ingreso de caja). SECURITY DEFINER.
+export const registerDebtPayment = (
+  orderId: string,
+  amount: number,
+  paymentMethod: string,
+) =>
+  supabase.rpc('register_debt_payment', {
+    p_order_id: orderId,
+    p_amount: amount,
+    p_payment_method: paymentMethod,
+  })

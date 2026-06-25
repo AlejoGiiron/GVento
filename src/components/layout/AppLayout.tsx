@@ -13,6 +13,7 @@ import {
   Truck,
   Wallet,
   ShoppingBag,
+  HandCoins,
   X,
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
@@ -44,6 +45,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/productos', label: 'Productos', icon: Package, permission: 'productos.editar' },
   { to: '/inventario', label: 'Inventario', icon: Boxes, permission: 'productos.editar' },
   { to: '/compras', label: 'Compras', icon: ShoppingBag, permission: 'compras.gestionar' },
+  { to: '/fiado', label: 'Fiado', icon: HandCoins, permission: 'fiado.gestionar' },
   { to: '/historial', label: 'Historial', icon: Receipt, permission: 'ventas.historial' },
   { to: '/reportes', label: 'Reportes', icon: BarChart3, permission: 'reportes.financiero' },
   { to: '/configuracion', label: 'Configuración', icon: Settings, permission: 'config.acceder' },
