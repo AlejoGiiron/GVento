@@ -863,7 +863,7 @@ function SectionCaja() {
 // ─── Section 4: Cocina ────────────────────────────────────────────
 
 function SectionCocina() {
-  const { config, isLoading, updateConfig, isSaving } = useRestaurantConfig()
+  const { restaurant, config, isLoading, updateConfig, updateRestaurant, isSaving } = useRestaurantConfig()
 
   const [pin, setPin] = useState('')
   const [stations, setStations] = useState<string[]>([])
@@ -881,10 +881,62 @@ function SectionCocina() {
 
   if (isLoading) return <Skeleton />
 
+  // uses_kitchen vive en la fila restaurants. Se guarda al instante (no espera al
+  // SaveButton del KDS) para que el sidebar, el botón de Mesas y el checkbox del
+  // ProductModal reaccionen de inmediato al invalidar el cache ['restaurant'].
+  const usesKitchen = restaurant?.uses_kitchen ?? true
+  const toggleUsesKitchen = () => updateRestaurant({ uses_kitchen: !usesKitchen })
+
   return (
     <div>
       <SectionTitle>Cocina</SectionTitle>
 
+      {/* Toggle: ¿esta sede usa cocina? — gobierna el resto de la sección */}
+      <div style={{ marginBottom: 28 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', maxWidth: 560 }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>Esta sede usa cocina</div>
+            <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
+              Si se desactiva, no se envían comandas ni hay KDS en esta sede.
+            </div>
+          </div>
+          <button
+            type="button"
+            data-testid="config-uses-kitchen"
+            onClick={toggleUsesKitchen}
+            disabled={isSaving}
+            aria-checked={usesKitchen}
+            role="switch"
+            style={{
+              width: 44, height: 24, borderRadius: 12,
+              background: usesKitchen ? '#10b981' : '#e2e8f0',
+              border: 'none', cursor: isSaving ? 'not-allowed' : 'pointer',
+              position: 'relative', transition: 'background .15s', flexShrink: 0,
+            }}
+          >
+            <span style={{
+              position: 'absolute', top: 2,
+              left: usesKitchen ? 22 : 2,
+              width: 20, height: 20, borderRadius: '50%',
+              background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,.2)',
+              transition: 'left .15s',
+            }} />
+          </button>
+        </div>
+      </div>
+
+      {!usesKitchen && (
+        <div style={{
+          fontSize: 13, color: '#64748b', lineHeight: 1.5,
+          border: '1px dashed #e2e8f0', borderRadius: 9, padding: '14px 16px', maxWidth: 560,
+        }}>
+          Esta sede no usa cocina. El KDS y las comandas están desactivados, y los
+          productos no muestran la opción “Va a cocina”. Activa el interruptor para
+          configurar PIN, estaciones y tiempos del semáforo.
+        </div>
+      )}
+
+      {usesKitchen && <>
       {/* PIN */}
       <div style={{ marginBottom: 28 }}>
         <FieldLabel>PIN de acceso al KDS (4 dígitos)</FieldLabel>
@@ -988,6 +1040,7 @@ function SectionCocina() {
         }
         loading={isSaving}
       />
+      </>}
     </div>
   )
 }

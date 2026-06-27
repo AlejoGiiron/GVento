@@ -22,7 +22,7 @@ export type OrderItemRow = {
   unit_price: number
   notes: string | null
   sent_to_kitchen: boolean
-  products: { id: string; name: string; price: number } | null
+  products: { id: string; name: string; price: number; routes_to_kitchen: boolean } | null
   order_item_extras: OrderItemExtraRow[]
 }
 

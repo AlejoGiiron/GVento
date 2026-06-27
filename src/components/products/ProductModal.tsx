@@ -8,6 +8,7 @@ import { useExtras } from '@/hooks/useExtras'
 import { useProductExtras } from '@/hooks/useProductExtras'
 import { useProductComponents, type RecipeRow } from '@/hooks/useProductComponents'
 import { useAuth } from '@/hooks/useAuth'
+import { useRestaurantConfig } from '@/hooks/useRestaurantConfig'
 import type { ProductWithCategory } from '@/stores/cartStore'
 import type { Tables, TablesInsert } from '@/types/database.types'
 
@@ -27,6 +28,7 @@ interface ProductModalProps {
 
 export function ProductModal({ product, categories, onClose }: ProductModalProps) {
   const { profile } = useAuth()
+  const { restaurant } = useRestaurantConfig()
   const { saveProduct, uploadImage, removeImage } = useProductMutations()
   const { data: allProducts = [] } = useProducts()
   const { extras } = useExtras()
@@ -67,7 +69,12 @@ export function ProductModal({ product, categories, onClose }: ProductModalProps
   const [kind, setKind] = useState<ProductKind>((product?.kind as ProductKind) ?? 'simple')
   const [stockTracking, setStockTracking] = useState(product?.stock_tracking ?? false)
   const [minStock, setMinStock] = useState(product?.min_stock != null ? String(product.min_stock) : '0')
+  const [routesToKitchen, setRoutesToKitchen] = useState(product?.routes_to_kitchen ?? true)
   const [saving, setSaving] = useState(false)
+
+  // El control "Va a cocina" solo aplica si la sede usa cocina. Default true
+  // mientras carga el restaurant (no condiciona el guardado, solo el render).
+  const sedeUsesKitchen = restaurant?.uses_kitchen ?? true
 
   // Receta (solo para compuestos). Se inicializa desde BD en modo edición.
   const [recipeRows, setRecipeRows] = useState<RecipeRow[]>([])
@@ -141,6 +148,9 @@ export function ProductModal({ product, categories, onClose }: ProductModalProps
         kind,
         stock_tracking: tracking,
         min_stock: tracking ? (parseInt(minStock, 10) || 0) : 0,
+        // Si la sede no usa cocina el control no se muestra; persistimos true
+        // (neutro: solo importa cuando la sede tiene cocina).
+        routes_to_kitchen: sedeUsesKitchen ? routesToKitchen : true,
       }
       // El stock no se edita a mano: al CREAR arranca en 0 (o null sin tracking);
       // al EDITAR se PRESERVA el valor de BD (se mueve por ventas/ajustes) — no
@@ -341,6 +351,39 @@ export function ProductModal({ product, categories, onClose }: ProductModalProps
                 })}
               </div>
             </div>
+
+            {/* Va a cocina — solo si la sede usa cocina */}
+            {sedeUsesKitchen && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#334155' }}>Va a cocina</div>
+                  <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 2 }}>
+                    Al enviar la comanda desde una mesa, este producto pasa al KDS
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  data-testid="product-routes-to-kitchen"
+                  onClick={() => setRoutesToKitchen(!routesToKitchen)}
+                  aria-checked={routesToKitchen}
+                  role="switch"
+                  style={{
+                    width: 44, height: 24, borderRadius: 12,
+                    background: routesToKitchen ? '#10b981' : '#e2e8f0',
+                    border: 'none', cursor: 'pointer',
+                    position: 'relative', transition: 'background .15s', flexShrink: 0,
+                  }}
+                >
+                  <span style={{
+                    position: 'absolute', top: 2,
+                    left: routesToKitchen ? 22 : 2,
+                    width: 20, height: 20, borderRadius: '50%',
+                    background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,.2)',
+                    transition: 'left .15s',
+                  }} />
+                </button>
+              </div>
+            )}
 
             {/* Inventario (solo producto simple) */}
             {kind === 'simple' && (

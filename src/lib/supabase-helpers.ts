@@ -288,7 +288,7 @@ export const getTableActiveOrderCount = (tableId: string) =>
 
 const ORDER_ITEMS_WITH_EXTRAS = `
   id, qty, unit_price, notes, sent_to_kitchen,
-  products(id, name, price),
+  products(id, name, price, routes_to_kitchen),
   order_item_extras(id, qty, unit_price, extras(id, name))
 ` as const
 

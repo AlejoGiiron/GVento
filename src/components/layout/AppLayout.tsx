@@ -80,8 +80,12 @@ export function AppLayout() {
     navigate('/login', { replace: true })
   }
 
+  // Cocina depende de la sede: además del permiso, exige que la sede use cocina.
+  // Default true mientras carga el restaurant (evita que el item parpadee).
+  const sedeUsesKitchen = restaurant?.uses_kitchen ?? true
   const visibleItems = NAV_ITEMS.filter(
-    item => !item.permission || can(item.permission),
+    item => (!item.permission || can(item.permission))
+      && (item.to !== '/cocina' || sedeUsesKitchen),
   )
 
   const initials = profile?.full_name

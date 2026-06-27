@@ -38,6 +38,7 @@ declare
   v_org         uuid;
   v_norte       uuid;
   v_sur         uuid;
+  v_nokitchen   uuid;  -- sede dedicada con uses_kitchen=false (test de cocina OFF)
 
   v_role_owner  uuid;
   v_role_admin  uuid;
@@ -84,6 +85,22 @@ begin
     values (v_org, 'Sede Lab Sur', 'Calle Lab Sur 2', '0000000002')
     returning id into v_sur;
   end if;
+
+  -- Sede dedicada SIN cocina (uses_kitchen=false) — aísla el test de cocina OFF
+  -- sin tocar Norte/Sur (las sedes de trabajo del resto de specs).
+  select id into v_nokitchen
+    from public.restaurants
+   where organization_id = v_org and name = 'Sede Lab Sin Cocina' limit 1;
+  if v_nokitchen is null then
+    insert into public.restaurants (organization_id, name, address, phone)
+    values (v_org, 'Sede Lab Sin Cocina', 'Calle Lab Sin Cocina 3', '0000000003')
+    returning id into v_nokitchen;
+  end if;
+
+  -- Baseline defensivo de uses_kitchen: Norte/Sur CON cocina, la dedicada SIN.
+  -- Se reescribe en cada corrida → un re-seed resetea cualquier deriva de tests.
+  update public.restaurants set uses_kitchen = true  where id in (v_norte, v_sur);
+  update public.restaurants set uses_kitchen = false where id = v_nokitchen;
 
   -- ========================================================
   -- c) 4 roles de sistema para LAB — fiel al estado de G-10 tras las migraciones
@@ -170,12 +187,13 @@ begin
 
   -- ========================================================
   -- e) user_stores (acceso N:M a sedes)
-  --    owner.test  → Norte + Sur
+  --    owner.test  → Norte + Sur + Sin Cocina (para el test de cocina OFF)
   --    cajero.test → solo Norte
   -- ========================================================
   insert into public.user_stores (user_id, restaurant_id) values
     (c_owner_uid,  v_norte),
     (c_owner_uid,  v_sur),
+    (c_owner_uid,  v_nokitchen),
     (c_cajero_uid, v_norte)
   on conflict (user_id, restaurant_id) do nothing;
 
@@ -253,6 +271,13 @@ begin
   values (v_norte, v_p_coctel, v_p_vaso, 1)
   on conflict (parent_id, component_id) do update set qty = excluded.qty;
 
+  -- Baseline de routes_to_kitchen (cocina por producto): "Lab Agua" NO va a
+  -- cocina (bebida), el resto SÍ. Se reescribe en cada corrida → determinista
+  -- para el test que verifica que el contador "Cocina (N)" cuenta solo lo que
+  -- enruta y que el agua no se envía.
+  update public.products set routes_to_kitchen = false where id = v_p_agua;
+  update public.products set routes_to_kitchen = true  where id in (v_p_cerveza, v_p_coctel);
+
   -- Extra "Lab Doble" (sin linked_product) -----------------
   select id into v_extra_doble
     from public.extras where restaurant_id = v_norte and name = 'Lab Doble' limit 1;
@@ -299,6 +324,15 @@ begin
       values (v_sur, 'Mesa ' || i, 4);
     end if;
   end loop;
+
+  -- 1 mesa en la sede sin cocina (para abrir el panel y comprobar que el botón
+  -- "Cocina" NO aparece cuando uses_kitchen=false).
+  if not exists (
+    select 1 from public.tables where restaurant_id = v_nokitchen and name = 'Mesa 1'
+  ) then
+    insert into public.tables (restaurant_id, name, capacity)
+    values (v_nokitchen, 'Mesa 1', 4);
+  end if;
 end $$;
 
 
@@ -399,8 +433,9 @@ update public.tables set status = 'free'
 -- VERIFICACIÓN (read-only) — corre dentro de la misma transacción.
 -- ============================================================
 
--- Organización LAB y sus sedes
-select 'org + sedes' as check, o.name as org, r.name as sede, r.id as restaurant_id
+-- Organización LAB y sus sedes (con flag de cocina)
+select 'org + sedes' as check, o.name as org, r.name as sede,
+       r.uses_kitchen, r.id as restaurant_id
   from public.organizations o
   join public.restaurants r on r.organization_id = o.id
  where o.name = 'LAB'
@@ -435,7 +470,7 @@ select 'user_stores' as check, p.email, r.name as sede_con_acceso
 
 -- Datos mínimos en Sede Lab Norte: productos, receta y extra
 select 'productos norte' as check, pr.name, pr.kind, pr.price,
-       pr.stock_tracking, pr.stock_qty, pr.min_stock, c.name as categoria
+       pr.stock_tracking, pr.stock_qty, pr.min_stock, pr.routes_to_kitchen, c.name as categoria
   from public.products pr
   join public.restaurants r on r.id = pr.restaurant_id
   join public.organizations o on o.id = r.organization_id
