@@ -60,6 +60,7 @@ export function StoreSelector() {
     >
       <Store size={14} color="#64748b" />
       <select
+        data-testid="store-selector"
         value={profile?.restaurant_id ?? ''}
         onChange={(e) => handleChange(e.target.value)}
         className="bg-transparent text-sm font-medium text-slate-700 outline-none cursor-pointer"

@@ -22,7 +22,7 @@ async function createProduct(page: Page, name: string, price: string, opts?: { s
   await page.getByPlaceholder('0').first().fill(price)
   await page.getByTestId('product-category-select').selectOption({ label: CAT })
   if (opts?.stock) {
-    await page.getByRole('switch').click() // Control de inventario (kind simple)
+    await page.getByTestId('product-stock-tracking').click() // Control de inventario (kind simple)
   }
   await page.getByRole('button', { name: 'Crear producto' }).click()
   await expect(page.getByText(name)).toBeVisible()

@@ -1050,6 +1050,13 @@ function TableSidePanel({
   const cfg = STATUS_CONFIG[table.status]
 
   const unsentItems = order?.order_items.filter((i) => !i.sent_to_kitchen) ?? []
+  // Cocina por sede + por producto: solo van a cocina los ítems no enviados
+  // cuyo producto enruta a cocina, y solo si la sede usa cocina. Default true
+  // mientras carga el restaurant (preserva el comportamiento previo).
+  const sedeUsesKitchen = restaurant?.uses_kitchen ?? true
+  const itemsForKitchen = sedeUsesKitchen
+    ? unsentItems.filter((i) => i.products?.routes_to_kitchen)
+    : []
   const isEmptyOrder = !!order && order.order_items.length === 0
 
   // Fix 4 — Cerrar mesa sin consumo: cancela la orden vacía y libera la mesa.
@@ -1102,10 +1109,12 @@ function TableSidePanel({
   }
 
   const handleSendToKitchen = async () => {
-    if (!order || unsentItems.length === 0) return
+    // Defensa: una sede sin cocina nunca envía comanda (la UI ocultará el botón).
+    if (restaurant && !restaurant.uses_kitchen) return
+    if (!order || itemsForKitchen.length === 0) return
     setSendingToKitchen(true)
     try {
-      const { error } = await markItemsSentToKitchen(unsentItems.map((i) => i.id))
+      const { error } = await markItemsSentToKitchen(itemsForKitchen.map((i) => i.id))
       if (error) throw error
       if (order.status === 'pending') {
         await updateOrderStatus(order.id, 'preparing')
@@ -1116,7 +1125,7 @@ function TableSidePanel({
         zone: table.zone,
         waiter: order.waiter_name,
         orderId: order.id,
-        items: unsentItems.map((i) => ({
+        items: itemsForKitchen.map((i) => ({
           qty: i.qty,
           name: i.products?.name ?? '—',
           notes: i.notes,
@@ -1178,7 +1187,7 @@ function TableSidePanel({
           </div>
         ) : (
           order.order_items.map((item) => (
-            <div key={item.id} style={{
+            <div key={item.id} data-testid="table-item" style={{
               padding: '12px 18px', borderBottom: '1px solid #f8fafc',
               display: 'flex', alignItems: 'center', gap: 10,
               opacity: item.sent_to_kitchen ? 0.6 : 1,
@@ -1254,24 +1263,26 @@ function TableSidePanel({
         </button>
 
         <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            disabled={sendingToKitchen || unsentItems.length === 0}
-            onClick={handleSendToKitchen}
-            style={{
-              flex: 1, padding: '10px',
-              border: unsentItems.length === 0 ? '1.5px solid #e5e7eb' : '1.5px solid #7c3aed',
-              background: unsentItems.length === 0 ? '#f8fafc' : '#f5f3ff',
-              borderRadius: 9,
-              cursor: sendingToKitchen || unsentItems.length === 0 ? 'not-allowed' : 'pointer',
-              fontSize: 12.5, fontWeight: 600,
-              color: unsentItems.length === 0 ? '#94a3b8' : '#7c3aed',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-              opacity: sendingToKitchen ? 0.6 : 1,
-            }}
-          >
-            <ChefHat size={14} />
-            {unsentItems.length > 0 ? `Cocina (${unsentItems.length})` : 'Cocina'}
-          </button>
+          {sedeUsesKitchen && (
+            <button
+              disabled={sendingToKitchen || itemsForKitchen.length === 0}
+              onClick={handleSendToKitchen}
+              style={{
+                flex: 1, padding: '10px',
+                border: itemsForKitchen.length === 0 ? '1.5px solid #e5e7eb' : '1.5px solid #7c3aed',
+                background: itemsForKitchen.length === 0 ? '#f8fafc' : '#f5f3ff',
+                borderRadius: 9,
+                cursor: sendingToKitchen || itemsForKitchen.length === 0 ? 'not-allowed' : 'pointer',
+                fontSize: 12.5, fontWeight: 600,
+                color: itemsForKitchen.length === 0 ? '#94a3b8' : '#7c3aed',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                opacity: sendingToKitchen ? 0.6 : 1,
+              }}
+            >
+              <ChefHat size={14} />
+              {itemsForKitchen.length > 0 ? `Cocina (${itemsForKitchen.length})` : 'Cocina'}
+            </button>
+          )}
           {table.status === 'occupied' && (
             <button
               onClick={onRequestBill}

@@ -735,6 +735,7 @@ export type Database = {
           name: string
           price: number
           restaurant_id: string
+          routes_to_kitchen: boolean
           stock_qty: number | null
           stock_tracking: boolean
           updated_at: string
@@ -752,6 +753,7 @@ export type Database = {
           name: string
           price: number
           restaurant_id: string
+          routes_to_kitchen?: boolean
           stock_qty?: number | null
           stock_tracking?: boolean
           updated_at?: string
@@ -769,6 +771,7 @@ export type Database = {
           name?: string
           price?: number
           restaurant_id?: string
+          routes_to_kitchen?: boolean
           stock_qty?: number | null
           stock_tracking?: boolean
           updated_at?: string
@@ -972,6 +975,7 @@ export type Database = {
           organization_id: string
           phone: string | null
           updated_at: string
+          uses_kitchen: boolean
         }
         Insert: {
           address?: string | null
@@ -983,6 +987,7 @@ export type Database = {
           organization_id: string
           phone?: string | null
           updated_at?: string
+          uses_kitchen?: boolean
         }
         Update: {
           address?: string | null
@@ -994,6 +999,7 @@ export type Database = {
           organization_id?: string
           phone?: string | null
           updated_at?: string
+          uses_kitchen?: boolean
         }
         Relationships: [
           {
@@ -1422,6 +1428,33 @@ export type Tables<
       : never
     : never
 
+// Helper para tipar filas de vistas (reportes). Adición manual preservada
+// entre regeneraciones de `supabase gen types` (la CLI no emite este alias).
+export type Views<
+  PublicViewNameOrOptions extends
+    | keyof DefaultSchema["Views"]
+    | { schema: keyof DatabaseWithoutInternals },
+  ViewName extends PublicViewNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[PublicViewNameOrOptions["schema"]]["Views"]
+    : never = never,
+> = PublicViewNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[PublicViewNameOrOptions["schema"]]["Views"][ViewName] extends {
+      Row: infer R
+    }
+    ? R
+    : never
+  : PublicViewNameOrOptions extends keyof DefaultSchema["Views"]
+    ? DefaultSchema["Views"][PublicViewNameOrOptions] extends {
+        Row: infer R
+      }
+      ? R
+      : never
+    : never
+
 export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
@@ -1518,9 +1551,3 @@ export const Constants = {
     },
   },
 } as const
-
-// Convenience alias usado en el proyecto para las vistas (security_invoker).
-// El helper generado `Tables<>` también resuelve vistas, pero el código
-// importa `Views<>` explícitamente en los hooks de reportes.
-export type Views<T extends keyof DefaultSchema["Views"]> =
-  DefaultSchema["Views"][T]["Row"]
