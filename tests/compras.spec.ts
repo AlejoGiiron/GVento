@@ -16,7 +16,7 @@ async function createSimpleTracked(page: Page, name: string, price: string) {
   await page.getByPlaceholder('0').first().fill(price)
   await page.getByTestId('product-category-select').selectOption({ label: CAT })
   // kind 'simple' es el default; activar control de inventario.
-  await page.getByRole('switch').click()
+  await page.getByTestId('product-stock-tracking').click()
   await page.getByRole('button', { name: 'Crear producto' }).click()
   await expect(page.getByText(name)).toBeVisible()
 }

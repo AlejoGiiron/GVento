@@ -398,6 +398,7 @@ export function ProductModal({ product, categories, onClose }: ProductModalProps
                   {/* Toggle */}
                   <button
                     type="button"
+                    data-testid="product-stock-tracking"
                     onClick={() => setStockTracking(!stockTracking)}
                     style={{
                       width: 44, height: 24, borderRadius: 12,
