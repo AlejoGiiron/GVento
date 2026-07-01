@@ -31,6 +31,7 @@ import { useUsers } from '@/hooks/useUsers'
 import { useAuth } from '@/hooks/useAuth'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useRoles, rolePermissions, type RoleRow } from '@/hooks/useRoles'
+import { PERMISSION_GROUPS, RECOVERY_PERMISSIONS } from '@/lib/permissions'
 import { useStores, type StoreRow } from '@/hooks/useStores'
 import { useExtras } from '@/hooks/useExtras'
 import { useProducts } from '@/hooks/useProducts'
@@ -60,45 +61,6 @@ const SECTIONS: { id: SectionId; label: string; icon: LucideIcon; permission?: s
   { id: 'cocina', label: 'Cocina', icon: ChefHat },
   { id: 'delivery', label: 'Delivery', icon: Truck },
   { id: 'notificaciones', label: 'Notificaciones', icon: Bell },
-]
-
-// Catálogo de permisos agrupado por módulo (para la matriz de roles).
-const PERMISSION_GROUPS: { module: string; perms: { key: string; label: string }[] }[] = [
-  { module: 'POS', perms: [
-    { key: 'pos.vender', label: 'Vender' },
-    { key: 'pos.descuento', label: 'Descuento' },
-    { key: 'pos.anular', label: 'Anular' },
-  ] },
-  { module: 'Caja', perms: [
-    { key: 'caja.abrir', label: 'Abrir turno' },
-    { key: 'caja.cerrar', label: 'Cerrar turno' },
-    { key: 'caja.movimientos', label: 'Movimientos' },
-  ] },
-  { module: 'Mesas', perms: [
-    { key: 'mesas.gestionar', label: 'Gestionar' },
-    { key: 'mesas.cobrar', label: 'Cobrar' },
-  ] },
-  { module: 'Cocina', perms: [
-    { key: 'cocina.acceder', label: 'Acceder' },
-  ] },
-  { module: 'Delivery', perms: [
-    { key: 'delivery.gestionar', label: 'Gestionar' },
-  ] },
-  { module: 'Productos', perms: [
-    { key: 'productos.ver', label: 'Ver' },
-    { key: 'productos.editar', label: 'Editar' },
-  ] },
-  { module: 'Reportes', perms: [
-    { key: 'reportes.financiero', label: 'Financiero' },
-    { key: 'reportes.stock', label: 'Stock' },
-    { key: 'reportes.consolidado', label: 'Consolidado' },
-  ] },
-  { module: 'Configuración', perms: [
-    { key: 'config.acceder', label: 'Acceder' },
-    { key: 'usuarios.gestionar', label: 'Usuarios' },
-    { key: 'sedes.gestionar', label: 'Sedes' },
-    { key: 'roles.gestionar', label: 'Roles' },
-  ] },
 ]
 
 const DEFAULT_CASH_OUT_REASONS = ['Mercado', 'Domicilio', 'Servicios', 'Otro']
@@ -1506,7 +1468,11 @@ function SectionSedes() {
 
 function RoleModal({ role, onClose }: { role: RoleRow | 'new'; onClose: () => void }) {
   const { createRole, updateRole, isMutating } = useRoles()
+  const { profile } = useAuth()
   const isNew = role === 'new'
+  // Roles de sistema (admin/cajero/mozo): permisos editables, nombre bloqueado
+  // (el nombre es la clave de upsert de los seeds; renombrarlo los duplicaría).
+  const isSystem = !isNew && role.is_system
   const [name, setName] = useState(isNew ? '' : role.name)
   const [perms, setPerms] = useState<string[]>(isNew ? [] : rolePermissions(role))
 
@@ -1515,6 +1481,19 @@ function RoleModal({ role, onClose }: { role: RoleRow | 'new'; onClose: () => vo
 
   const handleSave = async () => {
     if (!name.trim()) { toast.error('Ingresa un nombre para el rol'); return }
+    // Aviso de auto-bloqueo (no bloquea): si edito MI propio rol y me quito un
+    // permiso de recuperación, advertir. El owner con '*' siempre puede reparar.
+    if (!isNew && role.id === profile?.role_id) {
+      const original = rolePermissions(role)
+      const removed = RECOVERY_PERMISSIONS.filter(p => original.includes(p) && !perms.includes(p))
+      if (removed.length > 0 &&
+          !window.confirm(
+            `Estás quitando "${removed.join(', ')}" de tu propio rol. ` +
+            `Podrías perder acceso a esta sección. ¿Continuar?`,
+          )) {
+        return
+      }
+    }
     if (isNew) await createRole({ name: name.trim(), permissions: perms })
     else await updateRole({ id: role.id, name: name.trim(), permissions: perms })
     onClose()
@@ -1525,7 +1504,7 @@ function RoleModal({ role, onClose }: { role: RoleRow | 'new'; onClose: () => vo
       style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.55)', display: 'grid', placeItems: 'center', zIndex: 50 }}
       onClick={e => e.target === e.currentTarget && onClose()}
     >
-      <div style={{ background: '#fff', borderRadius: 14, width: 560, maxWidth: '94%', maxHeight: '88vh', boxShadow: '0 25px 50px -12px rgba(0,0,0,.25)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <div data-testid="role-modal" style={{ background: '#fff', borderRadius: 14, width: 560, maxWidth: '94%', maxHeight: '88vh', boxShadow: '0 25px 50px -12px rgba(0,0,0,.25)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '18px 22px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
           <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', margin: 0 }}>{isNew ? 'Nuevo rol' : `Editar rol · ${role.name}`}</h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}><X size={18} /></button>
@@ -1533,7 +1512,18 @@ function RoleModal({ role, onClose }: { role: RoleRow | 'new'; onClose: () => vo
         <div style={{ padding: 22, overflowY: 'auto' }}>
           <div style={{ marginBottom: 20 }}>
             <FieldLabel>Nombre del rol</FieldLabel>
-            <TextInput value={name} onChange={setName} placeholder="Ej: Supervisor" />
+            {isSystem ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ padding: '10px 13px', borderRadius: 8, border: '1.5px solid #e2e8f0', background: '#f8fafc', color: '#334155', fontSize: 14, fontWeight: 600, textTransform: 'capitalize', flex: 1 }}>
+                  {name}
+                </div>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#64748b' }}>
+                  <Lock size={11} /> Rol de sistema
+                </span>
+              </div>
+            ) : (
+              <TextInput value={name} onChange={setName} placeholder="Ej: Supervisor" />
+            )}
           </div>
           <FieldLabel>Permisos</FieldLabel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 6 }}>
@@ -1542,7 +1532,7 @@ function RoleModal({ role, onClose }: { role: RoleRow | 'new'; onClose: () => vo
                 <p style={{ fontSize: 12, fontWeight: 700, color: '#0f172a', margin: '0 0 8px' }}>{group.module}</p>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 18px' }}>
                   {group.perms.map(perm => (
-                    <label key={perm.key} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13, color: '#334155', cursor: 'pointer' }}>
+                    <label key={perm.key} data-testid={`perm-${perm.key}`} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13, color: '#334155', cursor: 'pointer' }}>
                       <input type="checkbox" checked={perms.includes(perm.key)} onChange={() => toggle(perm.key)} style={{ width: 15, height: 15, accentColor: '#10b981', cursor: 'pointer' }} />
                       {perm.label}
                     </label>
@@ -1601,7 +1591,7 @@ function SectionRoles() {
             ? 'Todos los permisos'
             : `${perms.length} ${perms.length === 1 ? 'permiso' : 'permisos'}`
           return (
-            <div key={role.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: idx < roles.length - 1 ? '1px solid #f1f5f9' : 'none' }}>
+            <div key={role.id} data-testid="role-row" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: idx < roles.length - 1 ? '1px solid #f1f5f9' : 'none' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ fontSize: 14, fontWeight: 600, color: '#0f172a', textTransform: 'capitalize' }}>{role.name}</span>
@@ -1620,12 +1610,17 @@ function SectionRoles() {
                   {permLabel} · {count} {count === 1 ? 'usuario' : 'usuarios'}
                 </p>
               </div>
-              {role.is_system ? (
-                <span style={{ fontSize: 12, color: '#94a3b8' }}>No editable</span>
+              {hasWildcard ? (
+                // owner: inmutable (protegido además por trigger en BD)
+                <span data-testid="role-not-editable" style={{ fontSize: 12, color: '#94a3b8' }}>No editable</span>
               ) : (
                 <div style={{ display: 'flex', gap: 6 }}>
-                  <button onClick={() => setEditRole(role)} title="Editar" style={{ width: 30, height: 30, border: '1px solid #e2e8f0', background: '#fff', borderRadius: 7, cursor: 'pointer', color: '#64748b', display: 'grid', placeItems: 'center' }}><Pencil size={13} /></button>
-                  <button onClick={() => handleDelete(role)} disabled={count > 0 || isMutating} title={count > 0 ? 'Tiene usuarios asignados' : 'Eliminar'} style={{ width: 30, height: 30, border: '1px solid #fecaca', background: '#fef2f2', borderRadius: 7, cursor: count > 0 ? 'not-allowed' : 'pointer', color: '#dc2626', display: 'grid', placeItems: 'center', opacity: count > 0 ? 0.4 : 1 }}><Trash2 size={13} /></button>
+                  {/* Sistema (admin/cajero/mozo) y custom: editables */}
+                  <button data-testid="role-edit" onClick={() => setEditRole(role)} title="Editar" style={{ width: 30, height: 30, border: '1px solid #e2e8f0', background: '#fff', borderRadius: 7, cursor: 'pointer', color: '#64748b', display: 'grid', placeItems: 'center' }}><Pencil size={13} /></button>
+                  {/* Eliminar: SOLO roles custom (los de sistema son plantillas base) */}
+                  {!role.is_system && (
+                    <button data-testid="role-delete" onClick={() => handleDelete(role)} disabled={count > 0 || isMutating} title={count > 0 ? 'Tiene usuarios asignados' : 'Eliminar'} style={{ width: 30, height: 30, border: '1px solid #fecaca', background: '#fef2f2', borderRadius: 7, cursor: count > 0 ? 'not-allowed' : 'pointer', color: '#dc2626', display: 'grid', placeItems: 'center', opacity: count > 0 ? 0.4 : 1 }}><Trash2 size={13} /></button>
+                  )}
                 </div>
               )}
             </div>
