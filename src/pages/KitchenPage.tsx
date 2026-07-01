@@ -476,33 +476,37 @@ function KDSBoard({ restaurantId, onLogout }: { restaurantId: string; onLogout: 
   }, [])
 
   const fetchOrders = useCallback(async () => {
-    const { data, error } = await supabase
-      .from('orders')
-      .select('*, tables(id, name), order_items(id, qty, notes, sent_to_kitchen, products(id, name), order_item_extras(id, qty, extras(name)))')
-      .eq('restaurant_id', restaurantId)
-      .in('status', ['pending', 'preparing', 'ready'])
-      .order('created_at', { ascending: true })
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*, tables(id, name), order_items(id, qty, notes, sent_to_kitchen, products(id, name), order_item_extras(id, qty, extras(name)))')
+        .eq('restaurant_id', restaurantId)
+        .in('status', ['pending', 'preparing', 'ready'])
+        .order('created_at', { ascending: true })
 
-    if (error) { toast.error('Error cargando pedidos'); return }
+      if (error) { toast.error('Error cargando pedidos'); return }
 
-    const all = (data ?? []) as KDSOrder[]
-    const kitchen = all.filter((o) => o.order_items.some((i) => i.sent_to_kitchen))
-    const newIds  = new Set(kitchen.map((o) => o.id))
+      const all = (data ?? []) as KDSOrder[]
+      const kitchen = all.filter((o) => o.order_items.some((i) => i.sent_to_kitchen))
+      const newIds  = new Set(kitchen.map((o) => o.id))
 
-    // Play alert only after first load, and only for genuinely new orders
-    if (firstLoadRef.current) {
-      for (const id of newIds) {
-        if (!prevOrderIdsRef.current.has(id)) {
-          playNewOrderAlert()
-          break
+      // Play alert only after first load, and only for genuinely new orders
+      if (firstLoadRef.current) {
+        for (const id of newIds) {
+          if (!prevOrderIdsRef.current.has(id)) {
+            playNewOrderAlert()
+            break
+          }
         }
       }
-    }
-    firstLoadRef.current    = true
-    prevOrderIdsRef.current = newIds
+      firstLoadRef.current    = true
+      prevOrderIdsRef.current = newIds
 
-    setOrders(all)
-    setLoading(false)
+      setOrders(all)
+    } finally {
+      // El KDS nunca debe quedar colgado en "Cargando…" ante un error de red.
+      setLoading(false)
+    }
   }, [restaurantId])
 
   useEffect(() => { fetchOrders() }, [fetchOrders])
