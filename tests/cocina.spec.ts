@@ -25,7 +25,14 @@ async function stubPrint(page: Page) {
 
 // Selecciona un producto del ProductPickerModal (Cerveza/Agua no tienen extras,
 // así que se agregan directo sin ItemConfigModal).
+//
+// Busca por TEXTO en el input del picker en vez de depender de la categoría
+// activa (categories[0]): el filtro por query tiene prioridad sobre la categoría
+// en el picker, así que el producto aparece sin importar el orden de categorías
+// ni el residuo E2E acumulado en el lab. `fill` reemplaza la búsqueda previa, así
+// que llamadas consecutivas (Cerveza, luego Agua) no interfieren entre sí.
 async function pickProduct(page: Page, name: string) {
+  await page.getByPlaceholder('Buscar producto...').fill(name)
   await page
     .getByRole('button')
     .filter({ has: page.getByText(name, { exact: true }) })

@@ -103,6 +103,30 @@ begin
   update public.restaurants set uses_kitchen = false where id = v_nokitchen;
 
   -- ========================================================
+  -- b.2) Purga de RESIDUO E2E — higiene del lab entre corridas
+  --   Specs previos (extras/compras/historial/inventario) crean categorías y
+  --   productos con prefijo "E2E <timestamp>" y no siempre los limpian. Se van
+  --   acumulando y, como quedan con sort_order=0, una categoría E2E puede
+  --   terminar como categories[0] y contaminar el default del ProductPicker.
+  --
+  --   Se DESACTIVAN (is_active=false), NO se borran: el hard-delete chocaría con
+  --   las FK de order_items/… de corridas pasadas y, al ser este seed atómico,
+  --   abortaría TODO el reset. La UI filtra is_active=true (getCategories/
+  --   getProducts), así que desactivar los saca del picker igual. Idempotente.
+  -- ========================================================
+  update public.categories
+     set is_active = false
+   where is_active = true
+     and name like 'E2E %'
+     and restaurant_id in (select id from public.restaurants where organization_id = v_org);
+
+  update public.products
+     set is_active = false
+   where is_active = true
+     and name like 'E2E %'
+     and restaurant_id in (select id from public.restaurants where organization_id = v_org);
+
+  -- ========================================================
   -- c) 4 roles de sistema para LAB — fiel al estado de G-10 tras las migraciones
   --    aplicadas. Upsert: si el rol ya existe, se reescriben permisos (mantiene
   --    LAB al día). ⚠️ MANTENER SINCRONIZADO con las migraciones de permisos:
