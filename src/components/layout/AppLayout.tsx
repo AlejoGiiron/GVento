@@ -14,6 +14,8 @@ import {
   Wallet,
   ShoppingBag,
   HandCoins,
+  ClipboardList,
+  Banknote,
   ChevronDown,
   X,
 } from 'lucide-react'
@@ -73,6 +75,8 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/fiado', label: 'Fiado', icon: HandCoins, permission: 'fiado.gestionar' },
       { to: '/historial', label: 'Historial', icon: Receipt, permission: 'ventas.historial' },
+      { to: '/historial-turnos', label: 'Turnos', icon: ClipboardList, permission: 'caja.cerrar' },
+      { to: '/historial-gastos', label: 'Gastos', icon: Banknote, permission: 'caja.movimientos' },
     ],
   },
   {

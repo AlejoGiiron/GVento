@@ -14,6 +14,9 @@
 -- CONTEXTO: las cuentas auth ya existen en auth.users SIN profile (huérfanas):
 --   owner.test@gvento.com   170af71e-a1fa-42e4-8565-5a9fa396bbb8
 --   cajero.test@gvento.com  0fc72dc6-5c73-49e4-9054-ac971c07a95c
+--   mozo.test@gvento.com    (OPCIONAL — UID auto-descubierto por email; rol
+--                            restringido para probar gating negativo. Si no
+--                            existe la cuenta, su bloque se omite. Ver bloque f.)
 -- Este script les crea profile dentro de la organización LAB. NO crea cuentas
 -- auth (eso se hace por el panel/Admin API de Supabase).
 --
@@ -34,6 +37,10 @@ declare
   -- UUIDs reales de las cuentas auth (huérfanas) — ver cabecera.
   c_owner_uid  constant uuid := '170af71e-a1fa-42e4-8565-5a9fa396bbb8';
   c_cajero_uid constant uuid := '0fc72dc6-5c73-49e4-9054-ac971c07a95c';
+  -- mozo.test: su UID NO se hardcodea; se auto-descubre por email desde
+  -- auth.users (ver bloque f). Si la cuenta auth aún no existe, se OMITE sin
+  -- romper el seed. Rol restringido (mozo) para probar gating NEGATIVO.
+  c_mozo_uid   uuid;
 
   v_org         uuid;
   v_norte       uuid;
@@ -220,6 +227,45 @@ begin
     (c_owner_uid,  v_nokitchen),
     (c_cajero_uid, v_norte)
   on conflict (user_id, restaurant_id) do nothing;
+
+  -- ========================================================
+  -- f) mozo.test — usuario de rol RESTRINGIDO (mozo) para probar gating
+  --    NEGATIVO (no ve caja.*, fiado, historiales, etc.). Resuelve una
+  --    carencia estructural del lab: no había rol limitado con el que
+  --    verificar que las rutas/nav gateadas SÍ se ocultan.
+  --
+  --    El seed NO crea cuentas auth. El UID se AUTO-DESCUBRE por email desde
+  --    auth.users (este script corre como postgres en el SQL Editor). Si la
+  --    cuenta mozo.test@gvento.com aún no existe, se OMITE el bloque sin
+  --    romper el seed (idempotente). Para habilitarla:
+  --      1) crear el usuario mozo.test@gvento.com en Auth (panel Supabase),
+  --      2) re-correr este seed (descubrirá el UID y creará profile+user_stores),
+  --      3) poner E2E_WAITER_EMAIL/PASSWORD en .env.test.
+  -- ========================================================
+  select id into c_mozo_uid from auth.users where email = 'mozo.test@gvento.com' limit 1;
+  if c_mozo_uid is not null then
+    insert into public.profiles
+      (id, email, full_name, role, role_id, organization_id, restaurant_id, is_active)
+    values
+      (c_mozo_uid, 'mozo.test@gvento.com', 'Mozo Lab',
+       'waiter'::public.user_role, v_role_mozo, v_org, v_norte, true)
+    on conflict (id) do update set
+      email           = excluded.email,
+      full_name       = excluded.full_name,
+      role            = excluded.role,
+      role_id         = excluded.role_id,
+      organization_id = excluded.organization_id,
+      restaurant_id   = excluded.restaurant_id,
+      is_active       = true;
+
+    insert into public.user_stores (user_id, restaurant_id) values
+      (c_mozo_uid, v_norte)
+    on conflict (user_id, restaurant_id) do nothing;
+
+    raise notice 'mozo.test sembrado (UID %): rol mozo, sede Norte.', c_mozo_uid;
+  else
+    raise notice 'mozo.test@gvento.com no existe en auth.users → se omite (crea la cuenta y re-corre el seed).';
+  end if;
 
   -- ========================================================
   -- f) Datos mínimos de prueba en Sede Lab Norte

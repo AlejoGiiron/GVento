@@ -16,6 +16,14 @@ function readCreds(emailVar: string, pwdVar: string): Creds {
 
 export const ownerCreds = () => readCreds('E2E_OWNER_EMAIL', 'E2E_OWNER_PASSWORD')
 export const cashierCreds = () => readCreds('E2E_CASHIER_EMAIL', 'E2E_CASHIER_PASSWORD')
+export const waiterCreds = () => readCreds('E2E_WAITER_EMAIL', 'E2E_WAITER_PASSWORD')
+
+/** true si hay credenciales de mozo en el entorno (para gating negativo). El
+ *  mozo.test es opcional: si la cuenta no se creó, los tests que lo usan hacen
+ *  skip en vez de fallar. Ver lab-seed.sql (bloque f). */
+export function hasWaiterCreds(): boolean {
+  return !!(process.env.E2E_WAITER_EMAIL && process.env.E2E_WAITER_PASSWORD)
+}
 
 /**
  * Hace login en /login con las credenciales dadas y espera la redirección
@@ -32,3 +40,4 @@ export async function login(page: Page, { email, password }: Creds): Promise<voi
 
 export const loginAsOwner = (page: Page) => login(page, ownerCreds())
 export const loginAsCashier = (page: Page) => login(page, cashierCreds())
+export const loginAsWaiter = (page: Page) => login(page, waiterCreds())
