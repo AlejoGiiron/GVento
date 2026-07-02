@@ -128,6 +128,7 @@ export function MovementsModal({ onClose }: MovementsModalProps) {
             </div>
           </div>
           <button
+            data-testid="movements-close"
             onClick={onClose}
             style={{
               width: 32, height: 32, borderRadius: 8,
