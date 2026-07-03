@@ -1,7 +1,10 @@
 import { useState } from 'react'
 import { X, DollarSign, TrendingUp, TrendingDown, Minus, AlertTriangle } from 'lucide-react'
 import { useCashShift } from '@/hooks/useCashShift'
+import { useRestaurantConfig } from '@/hooks/useRestaurantConfig'
 import { calcShiftBalance } from '@/lib/shiftCalc'
+import type { ShiftReconciliation, MethodReconciliation } from '@/lib/shiftCalc'
+import { printCashReport, buildCashReportData } from '@/lib/printer'
 
 const formatCOP = (n: number) =>
   new Intl.NumberFormat('es-CO', {
@@ -16,13 +19,24 @@ const METHOD_LABELS: Record<string, string> = {
   nequi: 'Nequi',
 }
 
+// Métodos NO-efectivo: su esperado = solo ventas de ese método (sin apertura ni
+// movimientos, que son solo de efectivo). El efectivo conserva su bloque F1.
+const OTHER_METHODS = ['card', 'transfer', 'nequi'] as const
+type OtherMethod = (typeof OTHER_METHODS)[number]
+
 interface CloseShiftModalProps {
   onClose: () => void
 }
 
 export function CloseShiftModal({ onClose }: CloseShiftModalProps) {
   const { currentShift, salesSummary, movements, closeShift, isClosingShift } = useCashShift()
+  const { restaurant } = useRestaurantConfig()
   const [rawAmount, setRawAmount] = useState('')
+  // Arqueo multi-método: declarado por método NO-efectivo (blanco = 0) + comentario.
+  const [declaredOther, setDeclaredOther] = useState<Record<OtherMethod, string>>({
+    card: '', transfer: '', nequi: '',
+  })
+  const [comment, setComment] = useState('')
 
   const declared = parseInt(rawAmount.replace(/\D/g, ''), 10) || 0
 
@@ -38,12 +52,54 @@ export function CloseShiftModal({ onClose }: CloseShiftModalProps) {
     declared,
   })
 
+  // Arqueo por método: efectivo = expectedCash (apertura+ventas+ing−egr, ya calculado);
+  // los demás = solo ventas de ese método. Diferencia = declarado − esperado (informativa).
+  const otherRows = OTHER_METHODS.map((m) => {
+    const expected = salesSummary?.[m] ?? 0
+    const declaredM = parseInt(declaredOther[m].replace(/\D/g, ''), 10) || 0
+    return { method: m, expected, declared: declaredM, difference: declaredM - expected }
+  })
+  const expectedTotal = expectedCash + otherRows.reduce((s, r) => s + r.expected, 0)
+  const declaredTotal = declared + otherRows.reduce((s, r) => s + r.declared, 0)
+  const differenceTotal = declaredTotal - expectedTotal
+
   const canClose = rawAmount.length > 0
 
   const handleClose = async () => {
     if (!canClose || isClosingShift) return
+    // Snapshot del arqueo: efectivo (F1) + los 3 otros métodos + totales.
+    // sales_count lo completa la mutación al cerrar.
+    const otherMethodsObj = Object.fromEntries(
+      otherRows.map((r) => [r.method, { expected: r.expected, declared: r.declared, difference: r.difference }]),
+    ) as Record<OtherMethod, MethodReconciliation>
+    const reconciliation: Omit<ShiftReconciliation, 'sales_count'> = {
+      methods: {
+        cash: { expected: expectedCash, declared, difference },
+        ...otherMethodsObj,
+      },
+      expected_total: expectedTotal,
+      declared_total: declaredTotal,
+      difference_total: differenceTotal,
+    }
     try {
-      await closeShift({ closingAmount: declared, expectedAmount: expectedCash, difference })
+      const closedRow = await closeShift({
+        closingAmount: declared,
+        expectedAmount: expectedCash,
+        difference,
+        reconciliation,
+        comment,
+      })
+      // Auto-imprimir el comprobante tras el cierre exitoso (el modal fue el
+      // preview; confirmar persiste + imprime en un gesto). Mismo builder que la
+      // reimpresión del historial → salida idéntica; usa el snapshot, no recomputa.
+      if (closedRow?.close_reconciliation) {
+        printCashReport(buildCashReportData(closedRow, {
+          restaurantName: restaurant?.name,
+          restaurantAddress: restaurant?.address,
+          movementsIn,
+          movementsOut,
+        }))
+      }
       onClose()
     } catch {
       // error toast handled in hook
@@ -265,14 +321,87 @@ export function CloseShiftModal({ onClose }: CloseShiftModalProps) {
                   </div>
                 </div>
               </div>
-              <span style={{
-                fontFamily: 'monospace', fontSize: 17, fontWeight: 700,
-                color: difference >= 0 ? '#059669' : '#dc2626',
-              }}>
+              <span
+                data-testid="shift-cash-difference"
+                style={{
+                  fontFamily: 'monospace', fontSize: 17, fontWeight: 700,
+                  color: difference >= 0 ? '#059669' : '#dc2626',
+                }}
+              >
                 {difference >= 0 ? '+' : ''}{formatCOP(difference)}
               </span>
             </div>
           )}
+
+          {/* ── Otros métodos (arqueo multi-método) ── */}
+          <div style={{ marginTop: 22 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 }}>
+              Otros métodos <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 500, color: '#cbd5e1' }}>· declarado opcional</span>
+            </div>
+            <div style={{ background: '#f8fafc', borderRadius: 10, padding: '8px 14px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 82px 86px 76px', gap: 6, fontSize: 10.5, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.4, paddingBottom: 6, borderBottom: '1px solid #eef2f7' }}>
+                <span>Método</span>
+                <span style={{ textAlign: 'right' }}>Esperado</span>
+                <span style={{ textAlign: 'right' }}>Declarado</span>
+                <span style={{ textAlign: 'right' }}>Dif.</span>
+              </div>
+              {otherRows.map((r) => (
+                <div key={r.method} style={{ display: 'grid', gridTemplateColumns: '1fr 82px 86px 76px', gap: 6, alignItems: 'center', padding: '7px 0', borderBottom: '1px solid #f1f5f9' }}>
+                  <span style={{ fontSize: 13, fontWeight: r.expected > 0 ? 500 : 400, color: r.expected > 0 ? '#334155' : '#94a3b8' }}>{METHOD_LABELS[r.method]}</span>
+                  <span style={{ fontSize: 13, fontFamily: 'monospace', textAlign: 'right', fontWeight: r.expected > 0 ? 600 : 400, color: r.expected > 0 ? '#0f172a' : '#94a3b8' }}>
+                    {formatCOP(r.expected)}
+                  </span>
+                  <input
+                    data-testid={`pay-declared-${r.method}`}
+                    inputMode="numeric"
+                    value={declaredOther[r.method] ? formatCOP(r.declared).replace('$', '').trim() : ''}
+                    onChange={(e) => setDeclaredOther((s) => ({ ...s, [r.method]: e.target.value.replace(/\D/g, '') }))}
+                    placeholder="0"
+                    style={{ width: '100%', boxSizing: 'border-box', padding: '6px 8px', border: '1.5px solid #e5e7eb', borderRadius: 7, fontSize: 12.5, fontWeight: 600, color: '#0f172a', fontFamily: 'monospace', textAlign: 'right', outline: 'none', background: '#fff' }}
+                  />
+                  <span
+                    data-testid={`pay-diff-${r.method}`}
+                    style={{ fontSize: 12.5, fontFamily: 'monospace', textAlign: 'right', fontWeight: 600, color: r.difference === 0 ? '#64748b' : r.difference > 0 ? '#059669' : '#dc2626' }}
+                  >
+                    {r.difference > 0 ? '+' : ''}{formatCOP(r.difference)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* ── Comentario del cierre ── */}
+          <div style={{ marginTop: 20 }}>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 8 }}>
+              Comentario del cierre
+            </label>
+            <textarea
+              data-testid="close-shift-comment"
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              placeholder="Nota o justificación de diferencias (opcional)"
+              rows={2}
+              style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', border: '1.5px solid #e5e7eb', borderRadius: 10, fontSize: 13, color: '#0f172a', outline: 'none', resize: 'vertical', fontFamily: 'inherit', background: '#f8fafc' }}
+            />
+          </div>
+
+          {/* ── Total del arqueo ── */}
+          <div data-testid="shift-arqueo-total" style={{ marginTop: 20, padding: '12px 16px', borderRadius: 10, background: '#0f172a', display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+              <span style={{ color: '#cbd5e1' }}>Esperado total</span>
+              <span style={{ fontFamily: 'monospace', color: '#e2e8f0' }}>{formatCOP(expectedTotal)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+              <span style={{ color: '#cbd5e1' }}>Declarado total</span>
+              <span style={{ fontFamily: 'monospace', color: '#e2e8f0' }}>{formatCOP(declaredTotal)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 700, borderTop: '1px solid #1e293b', paddingTop: 7, marginTop: 1, color: '#fff' }}>
+              <span>Diferencia total</span>
+              <span style={{ fontFamily: 'monospace', color: differenceTotal === 0 ? '#34d399' : differenceTotal > 0 ? '#34d399' : '#f87171' }}>
+                {differenceTotal >= 0 ? '+' : ''}{formatCOP(differenceTotal)}
+              </span>
+            </div>
+          </div>
         </div>
 
         {/* Footer */}

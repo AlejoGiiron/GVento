@@ -112,6 +112,14 @@ Resumen rápido:
   y confirmar diff nulo.
 - **Rotar la password de BD del proyecto (LAB):** quedó expuesta; pendiente de rotación en
   Supabase (Dashboard → Database → reset password) y actualizar donde se use.
+- **RPC de cierre de turno con recompute server-side del esperado (endurecimiento):** hoy el
+  cierre es un UPDATE cliente que confía en el esperado calculado en el navegador desde
+  `salesSummary` (paridad con F1) y lo congela en `close_reconciliation`. Endurecimiento
+  futuro: mover el cierre a una RPC SECURITY DEFINER que **recompute el esperado por método
+  desde `payments` en la ventana `[opened_at, closed_at]`** (server-authoritative), evitando
+  confiar en el cliente. Requiere acotar la ventana con cota superior (hoy `getShiftPayments`
+  no la tiene; ver el bug de ventana temporal que motivó el snapshot). Junto a la deuda de
+  pasar los gates de enum a `has_permission`.
 - **SELECT de `profiles` es por sede activa** (RLS `restaurant_id = get_my_restaurant_id()`):
   las listas org-wide (asignar usuarios a sedes, conteo de usuarios por rol) solo ven
   usuarios de la sede activa. Con 1 sede coincide con toda la org; al haber multi-sede
@@ -182,14 +190,63 @@ Resumen rápido:
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: Pago mixto — dividir una venta entre varios métodos
-  (rama feature/pago-mixto, sesión 2026-07-03) — RPC register_sale_payment APLICADA en LAB;
-  PaymentSplitEditor compartido (POS+Mesa), "Dividir pago" bajo demanda, historial con
-  todos los métodos, fiado no se cruza. tests/pago-mixto.spec.ts 7/7 verde en lab.
-  tsc 0 + build verde. (Antes en esta sesión: refactor de impresión unificada —
-  thermalPrintCss + printThermal — MERGEADO a develop, output byte-idéntico verificado.)
-Siguiente: mergear feature/pago-mixto a develop; luego el comprobante de arqueo de caja
-  (printCashReport vía printThermal) apoyado en el cuadre multi-método que habilita el pago mixto.
+Última fase completada: Arqueo multi-método al cerrar turno
+  (rama feature/arqueo-cierre, sesión 2026-07-03) — migración shift-reconciliation.sql
+  APLICADA en LAB; CloseShiftModal con conciliación por método (F1 efectivo intacto +
+  card/transfer/nequi), snapshot congelado en close_reconciliation (jsonb) + close_comment,
+  comprobante printCashReport (auto-print al cerrar) reusando printThermal de P4.1,
+  reimpresión desde P3 (idéntica byte-a-byte al cierre). tests/arqueo.spec.ts 4/4 + caja.spec
+  6/6 verde en lab. tsc 0 + build verde.
+  (Antes en esta sesión: impresión unificada thermalPrintCss/printThermal MERGEADO a develop;
+  pago mixto register_sale_payment + PaymentSplitEditor MERGEADO a develop, 7/7 verde.)
+Siguiente: mergear feature/arqueo-cierre a develop. Pendiente aplicar register-sale-payment.sql
+  y shift-reconciliation.sql en G-10 (prod) cuando toque desplegar; regenerar database.types.ts
+  cuando se resuelva el acceso de management del CLI (deuda).
+
+### Detalle Arqueo multi-método (F, sesión 2026-07-03, rama feature/arqueo-cierre)
+- **Migración `supabase/shift-reconciliation.sql`** (APLICADA en LAB): `cash_shifts` +2 columnas
+  nullable aditivas — `close_reconciliation jsonb` (snapshot del arqueo por método) +
+  `close_comment text`. No rompe cierres viejos (null → reimpresión deshabilitada).
+- **Por qué SNAPSHOT y no recomputar:** `payments` no tiene `shift_id` y `getShiftPayments`
+  filtra solo por `created_at >= opened_at` (sin cota superior). Recomputar el esperado de un
+  turno CERRADO sumaría pagos de turnos posteriores → hay que CONGELAR el esperado por método
+  al cerrar. Al cierre la ventana solo-`opened_at` sí es correcta (único turno abierto).
+- **Esperado por método:** efectivo = apertura + ventas efvo + ingresos − egresos (fórmula F1,
+  `calcShiftBalance`); card/transfer/nequi = solo ventas de ese método (`salesSummary[m]`, sin
+  apertura ni movimientos — los `cash_movements` son solo efectivo).
+- **`ShiftReconciliation`/`MethodReconciliation`** en `src/lib/shiftCalc.ts`: `{ methods:
+  {cash,card,transfer,nequi}:{expected,declared,difference}, expected_total, declared_total,
+  difference_total, sales_count }`. Diferencia = declared − expected en los 4 (uniforme).
+- **`sales_count`** = órdenes DISTINTAS con pago en la ventana (`getShiftSalesCount` →
+  `new Set(order_id).size`) — una venta mixta = 1 venta aunque tenga N filas payments.
+- **CloseShiftModal:** bloque F1 de efectivo INTACTO (caja.spec byte-estable; solo se añadió el
+  testid `shift-cash-difference` para desambiguar del total del arqueo) + sección "Otros
+  métodos" (esperado | declarado input opcional blanco=0 | dif con color, testids
+  `pay-declared-{m}`/`pay-diff-{m}`) + comentario (`close-shift-comment`) + total del arqueo
+  (`shift-arqueo-total`). Diferencia informativa NO bloqueante (`canClose` = efectivo declarado,
+  como F1). El efectivo del snapshot = `calcShiftBalance` (misma fuente que F1, no diverge).
+- **Cierre atómico:** `useCashShift.closeShiftMutation` computa `sales_count` al cerrar (no lo
+  recibe del cliente — blindado por `Omit<ShiftReconciliation,'sales_count'>`) y persiste TODO
+  en un solo UPDATE (`closeShift` helper, ahora con joins abrió/cerró). `close_comment` = null
+  si vacío (`.trim() || null`). Retorna la fila cerrada (snapshot + closed_at server).
+- **Comprobante `printCashReport`** (printer.ts) = `buildCashReportHtml` + `printThermal` (P4.1):
+  sede, turno (rango), abrió/cerró, apertura, ventas por método (efvo derivado =
+  esperado−apertura−ing+egr), ingresos/egresos, arqueo esp/dec/dif por método, totales,
+  comentario, nº ventas. **Auto-print al confirmar el cierre**.
+- **`buildCashReportData(row, ctx)`** (printer.ts, compartido): arma `CashReportData` desde una
+  fila de turno. Lo usan IDÉNTICO el cierre (fila recién persistida) y la reimpresión P3 (misma
+  fila) → reimpreso byte-a-byte idéntico (verificado 5157=5157). Usa el snapshot, NUNCA recomputa.
+- **P3 ShiftHistoryPage:** `getClosedShifts`/`ClosedShiftRow` + `close_reconciliation`/
+  `close_comment`; botón "Reimprimir arqueo" (`shift-reprint`) por fila → `buildCashReportData` +
+  `printCashReport`; movimientos re-leídos por `shift_id` (`getShiftMovementTotals`, persisten).
+  Deshabilitado con tooltip "Sin arqueo por método" si `close_reconciliation` null (turnos
+  viejos). Gating `can('caja.cerrar')` (la ruta P3 ya lo exige).
+- **tests/arqueo.spec.ts** (4, lab): cierre → snapshot correcto (efvo con apertura+mov, otros
+  solo ventas; el assert caza la mixta mal cargada) + sales_count 3 + comentario; no bloquea con
+  diferencia; reimpresión P3 lee el snapshot (stub window.print, verifica sin recomputar);
+  limpieza. `caja.spec` 6/6 (F1 intacto, `shift-cash-difference` desambiguado). tsc 0 + build verde.
+- database.types.ts: `cash_shifts.close_reconciliation`/`close_comment` agregadas A MANO
+  (regeneración pendiente por permisos de CLI — ver deuda).
 
 ### Detalle Pago mixto (F, sesión 2026-07-03, rama feature/pago-mixto)
 - **RPC `supabase/register-sale-payment.sql`** (APLICADA en LAB, pendiente en G-10):
