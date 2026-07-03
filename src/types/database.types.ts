@@ -1375,6 +1375,10 @@ export type Database = {
         Args: { p_invoice: Json; p_items: Json }
         Returns: Json
       }
+      register_sale_payment: {
+        Args: { p_order_id: string; p_payments: Json }
+        Returns: Json
+      }
     }
     Enums: {
       movement_type: "in" | "out"
