@@ -12,18 +12,19 @@ export interface ComandaData {
   }[]
 }
 
-const CSS_ID = 'gvento-printer-css'
-const CONTENT_ID = 'gvento-comanda-content'
+// ─── Andamiaje térmico común (80mm) ───────────────────────────────
+// Una sola fuente para el envoltorio de estilos y el ciclo
+// crear-DOM → imprimir → limpiar que comparten TODOS los comprobantes
+// (comanda, ticket de venta y, próximamente, el arqueo de caja).
 
-function injectComandaCSS(): void {
-  if (document.getElementById(CSS_ID)) return
-  const style = document.createElement('style')
-  style.id = CSS_ID
-  style.textContent = `
+// CSS del envoltorio térmico 80mm. Solo varían la clase y el par
+// font-size/line-height; el resto es idéntico entre comprobantes.
+function thermalPrintCss(cls: string, fontSize = 12, lineHeight = 1.45): string {
+  return `
 @media print {
   body * { visibility: hidden !important; }
-  .comanda-print, .comanda-print * { visibility: visible !important; }
-  .comanda-print {
+  .${cls}, .${cls} * { visibility: visible !important; }
+  .${cls} {
     display: block !important;
     position: fixed !important;
     top: 0 !important; left: 0 !important;
@@ -32,30 +33,53 @@ function injectComandaCSS(): void {
     padding: 6mm !important;
     box-sizing: border-box !important;
     font-family: 'Courier New', monospace !important;
-    font-size: 13px !important;
-    line-height: 1.5 !important;
+    font-size: ${fontSize}px !important;
+    line-height: ${lineHeight} !important;
     color: black !important;
   }
 }
-.comanda-print { display: none; }
+.${cls} { display: none; }
 `
-  document.head.appendChild(style)
+}
+
+interface ThermalPrintOptions {
+  styleId: string
+  contentId: string
+  className: string
+  fontSize?: number
+  lineHeight?: number
+}
+
+// Inyecta el CSS térmico (una sola vez, guard por styleId), monta el
+// nodo oculto con el contenido variable, imprime y limpia.
+function printThermal(contentHtml: string, opts: ThermalPrintOptions): void {
+  const { styleId, contentId, className, fontSize, lineHeight } = opts
+
+  if (!document.getElementById(styleId)) {
+    const style = document.createElement('style')
+    style.id = styleId
+    style.textContent = thermalPrintCss(className, fontSize, lineHeight)
+    document.head.appendChild(style)
+  }
+
+  const existing = document.getElementById(contentId)
+  if (existing) existing.remove()
+
+  const div = document.createElement('div')
+  div.id = contentId
+  div.className = className
+  div.innerHTML = contentHtml
+  document.body.appendChild(div)
+  window.print()
+  setTimeout(() => div.remove(), 1000)
 }
 
 export function printComanda(data: ComandaData): void {
-  injectComandaCSS()
-
   const timeStr = new Date().toLocaleTimeString('es-CO', {
     hour: '2-digit', minute: '2-digit', timeZone: 'America/Bogota',
   })
 
-  const existing = document.getElementById(CONTENT_ID)
-  if (existing) existing.remove()
-
-  const div = document.createElement('div')
-  div.id = CONTENT_ID
-  div.className = 'comanda-print'
-  div.innerHTML = `
+  const html = `
     <div style="text-align:center;margin-bottom:8px">
       ${data.restaurantName ? `<div style="font-size:13px;font-weight:700;letter-spacing:1px">${data.restaurantName.toUpperCase()}</div>` : ''}
       <div style="font-size:16px;font-weight:700;letter-spacing:2px">COMANDA</div>
@@ -75,9 +99,14 @@ export function printComanda(data: ComandaData): void {
     <div style="border-top:1px dashed #000;margin:8px 0"></div>
     <div style="text-align:center;font-size:11px">— Cocina G-Vento —</div>
   `
-  document.body.appendChild(div)
-  window.print()
-  setTimeout(() => div.remove(), 1000)
+
+  printThermal(html, {
+    styleId: 'gvento-printer-css',
+    contentId: 'gvento-comanda-content',
+    className: 'comanda-print',
+    fontSize: 13,
+    lineHeight: 1.5,
+  })
 }
 
 export function printToThermal(_url: string, data: ComandaData): void {
@@ -88,9 +117,6 @@ export function printToThermal(_url: string, data: ComandaData): void {
 // Reutilizable: lo usa la reimpresión desde el Historial de Ventas. El POS
 // tiene su propio componente PrintTicket en pantalla; esta función imprime un
 // recibo equivalente desde datos ya persistidos (sin React).
-
-const SALE_CSS_ID = 'gvento-sale-ticket-css'
-const SALE_CONTENT_ID = 'gvento-sale-ticket-content'
 
 const ORDER_TYPE_LABEL: Record<string, string> = {
   dine_in: 'Mesa', takeaway: 'Para llevar', delivery: 'Delivery',
@@ -123,36 +149,7 @@ export interface SaleTicketData {
   total: number
 }
 
-function injectSaleCSS(): void {
-  if (document.getElementById(SALE_CSS_ID)) return
-  const style = document.createElement('style')
-  style.id = SALE_CSS_ID
-  style.textContent = `
-@media print {
-  body * { visibility: hidden !important; }
-  .sale-ticket-print, .sale-ticket-print * { visibility: visible !important; }
-  .sale-ticket-print {
-    display: block !important;
-    position: fixed !important;
-    top: 0 !important; left: 0 !important;
-    width: 80mm !important;
-    background: white !important;
-    padding: 6mm !important;
-    box-sizing: border-box !important;
-    font-family: 'Courier New', monospace !important;
-    font-size: 12px !important;
-    line-height: 1.45 !important;
-    color: black !important;
-  }
-}
-.sale-ticket-print { display: none; }
-`
-  document.head.appendChild(style)
-}
-
 export function printSaleTicket(data: SaleTicketData): void {
-  injectSaleCSS()
-
   const d = new Date(data.createdAt)
   const dateStr = d.toLocaleDateString('es-CO', {
     day: '2-digit', month: '2-digit', year: '2-digit', timeZone: 'America/Bogota',
@@ -167,13 +164,7 @@ export function printSaleTicket(data: SaleTicketData): void {
   const methodLabel = data.method ? (METHOD_LABEL[data.method] ?? data.method) : null
   const iva = Math.round(data.total - data.total / 1.19)
 
-  const existing = document.getElementById(SALE_CONTENT_ID)
-  if (existing) existing.remove()
-
-  const div = document.createElement('div')
-  div.id = SALE_CONTENT_ID
-  div.className = 'sale-ticket-print'
-  div.innerHTML = `
+  const html = `
     <div style="text-align:center;margin-bottom:6px">
       ${data.restaurantName ? `<div style="font-size:16px;font-weight:700;letter-spacing:3px">${data.restaurantName.toUpperCase()}</div>` : ''}
       ${data.restaurantAddress ? `<div style="font-size:11px">${data.restaurantAddress}</div>` : ''}
@@ -206,7 +197,10 @@ export function printSaleTicket(data: SaleTicketData): void {
     <div style="border-top:1px dashed #000;margin:8px 0"></div>
     <div style="text-align:center;font-size:11px">¡Gracias por su visita!</div>
   `
-  document.body.appendChild(div)
-  window.print()
-  setTimeout(() => div.remove(), 1000)
+
+  printThermal(html, {
+    styleId: 'gvento-sale-ticket-css',
+    contentId: 'gvento-sale-ticket-content',
+    className: 'sale-ticket-print',
+  })
 }
