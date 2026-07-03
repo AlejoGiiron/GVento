@@ -132,6 +132,12 @@ test.describe.serial('Cocina por sede y por producto', () => {
       // El item "Cocina" desaparece del sidebar (uses_kitchen=false).
       await expect(page.getByRole('link', { name: 'Cocina' })).toHaveCount(0, { timeout: 15_000 })
 
+      // Asentar la recarga de TablesPage: el cambio de sede dispara
+      // invalidateQueries (tables/orders). Bajo carga, tocar la mesa antes de
+      // que el panel monte hacía que el check sin espera de "Abrir mesa" corriera
+      // en falso. Esperar a que la red asiente hace el panel determinista.
+      await page.waitForLoadState('networkidle').catch(() => {})
+
       // Abrir la mesa de la sede sin cocina y verificar que NO hay botón "Cocina".
       await page.getByRole('button', { name: /Mesa 1/ }).click()
       const abrir = page.getByRole('button', { name: 'Abrir mesa' })

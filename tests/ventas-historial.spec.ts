@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { loginAsOwner } from './helpers/auth'
 import { openShiftIfClosed, closeShiftIfOpen } from './helpers/shift'
+import { saveProductAndClose } from './helpers/product'
 
 // ⚠️  Suite para el LABORATORIO (opción C). NO correr contra producción.
 // En un Supabase de laboratorio recién sembrado, la primera venta de la sede
@@ -28,7 +29,7 @@ async function createProduct(page: Page, name: string, price: string) {
   await page.getByPlaceholder('Ej: Mojito Cubano').fill(name)
   await page.getByPlaceholder('0').first().fill(price)
   await page.getByTestId('product-category-select').selectOption({ label: CAT })
-  await page.getByRole('button', { name: 'Crear producto' }).click()
+  await saveProductAndClose(page)
   await expect(page.getByText(name)).toBeVisible()
 }
 
@@ -111,7 +112,7 @@ test.describe.serial('Numeración e historial de ventas', () => {
     await page.getByPlaceholder('Buscar producto...').fill(P_BASE)
     await page.getByTitle('Editar', { exact: true }).first().click()
     await page.getByTestId('product-extra-option').filter({ hasText: E_LIBRE }).click()
-    await page.getByRole('button', { name: 'Guardar cambios' }).click()
+    await saveProductAndClose(page)
     await expect(page.getByTestId('product-grid-card').filter({ hasText: P_BASE })).toBeVisible()
   })
 

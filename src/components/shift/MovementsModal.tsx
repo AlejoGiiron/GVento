@@ -317,6 +317,7 @@ export function MovementsModal({ onClose }: MovementsModalProps) {
                 {movements.map((m) => (
                   <div
                     key={m.id}
+                    data-testid="movement-item"
                     style={{
                       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                       padding: '10px 14px', borderRadius: 9,

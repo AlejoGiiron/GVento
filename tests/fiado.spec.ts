@@ -178,7 +178,11 @@ test.describe.serial('Fiado / Cuentas por cobrar', () => {
     const n = await sellOnFiado(page, CLIENTE)
 
     await page.goto('/historial')
-    const row = page.getByTestId('sale-row').filter({ hasText: `#${n}` })
+    // Ancla al NOMBRE ACCESIBLE (que sí inserta espacios entre elementos):
+    // filtrar por texto "#N" era ambiguo porque el textContent concatena los
+    // spans SIN espacio (la fila de la orden #1 => "#102/07…" contiene "#10").
+    // El nombre accesible es "#10 02/07…", así que "^#10 " no matchea "#1 02/07…".
+    const row = page.getByRole('button', { name: new RegExp(`^#${n}\\s`) })
     await expect(row).toBeVisible()
     await expect(row.getByTestId('sale-row-method')).toContainText('Fiado')
   })

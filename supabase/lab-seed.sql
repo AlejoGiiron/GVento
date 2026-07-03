@@ -109,6 +109,17 @@ begin
   update public.restaurants set uses_kitchen = true  where id in (v_norte, v_sur);
   update public.restaurants set uses_kitchen = false where id = v_nokitchen;
 
+  -- Motivos de egreso configurables (config.cash_out_reasons). Sin ellos, el
+  -- único motivo es "Otro" (exige texto libre) y el test de "egreso con motivo
+  -- de la lista" no puede elegir de una lista. Se MERGE en config (|| preserva
+  -- el resto de claves) y se reescribe en cada corrida → idempotente.
+  update public.restaurants
+     set config = coalesce(config, '{}'::jsonb)
+                  || jsonb_build_object('cash_out_reasons', jsonb_build_array(
+                       'Compra de insumos', 'Pago a proveedor', 'Retiro de caja',
+                       'Servicios', 'Otro'))
+   where id = v_norte;
+
   -- ========================================================
   -- b.2) Purga de RESIDUO E2E — higiene del lab entre corridas
   --   Specs previos (extras/compras/historial/inventario) crean categorías y

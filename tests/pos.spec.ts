@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { loginAsOwner } from './helpers/auth'
 import { closeShiftIfOpen, openShiftIfClosed } from './helpers/shift'
+import { waitPosReady } from './helpers/pos'
 
 // "$ 12.000" → 12000
 function parseCOP(text: string): number {
@@ -10,6 +11,7 @@ function parseCOP(text: string): number {
 test.describe('POS — venta y carrito', () => {
   test('agregar un producto al carrito calcula el total', async ({ page }) => {
     await loginAsOwner(page)
+    await waitPosReady(page)
     await expect(page.getByText('Carrito vacío')).toBeVisible()
 
     await page.getByTestId('product-card').first().click()

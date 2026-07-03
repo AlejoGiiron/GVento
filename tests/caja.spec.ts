@@ -47,8 +47,10 @@ test.describe.serial('Caja', () => {
     await page.getByTestId('movement-amount').fill('15000')
     await page.getByTestId('movement-submit').click()
 
-    // El egreso aparece en la lista con el motivo elegido de la lista.
-    await expect(page.getByText(chosen).first()).toBeVisible()
+    // El egreso aparece en la LISTA de movimientos con el motivo elegido. Se
+    // acota a movement-item: el mismo texto está también como <option> del
+    // select (oculto), así que getByText(chosen).first() resolvía a ese option.
+    await expect(page.getByTestId('movement-item').filter({ hasText: chosen })).toBeVisible()
   })
 
   test('egreso que supera el efectivo disponible advierte sobregiro y permite confirmar', async ({ page }) => {
@@ -76,7 +78,9 @@ test.describe.serial('Caja', () => {
     // Segundo click: confirma y registra el egreso de todos modos.
     await page.getByTestId('movement-submit').click()
     await expect(page.getByTestId('overdraft-warning')).toBeHidden()
-    await expect(page.getByText(chosen).first()).toBeVisible()
+    // Acotado a la LISTA (movement-item): el motivo también existe como <option>
+    // oculto del select, que getByText(chosen).first() resolvía por error.
+    await expect(page.getByTestId('movement-item').filter({ hasText: chosen })).toBeVisible()
   })
 
   test('cerrar turno muestra esperado y diferencia', async ({ page }) => {
