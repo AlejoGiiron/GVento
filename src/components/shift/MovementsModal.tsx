@@ -128,6 +128,7 @@ export function MovementsModal({ onClose }: MovementsModalProps) {
             </div>
           </div>
           <button
+            data-testid="movements-close"
             onClick={onClose}
             style={{
               width: 32, height: 32, borderRadius: 8,
@@ -316,6 +317,7 @@ export function MovementsModal({ onClose }: MovementsModalProps) {
                 {movements.map((m) => (
                   <div
                     key={m.id}
+                    data-testid="movement-item"
                     style={{
                       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                       padding: '10px 14px', borderRadius: 9,

@@ -10,6 +10,17 @@ import { type Page, expect } from '@playwright/test'
  *
  * OJO: cierra el turno REAL del backend. Es intencional para fijar el estado.
  */
+/**
+ * Deja ASENTAR el estado del turno (useCashShift) tras la carga inicial. Ese
+ * estado puede PARPADEAR (currentShift null → real) y mostrar por un instante el
+ * banner equivocado. Decidir sobre ese transitorio hacía intentar abrir un turno
+ * YA abierto → POST cash_shifts 409 → el modal quedaba bloqueando la UI. Esperar
+ * a que la red quede inactiva evita actuar sobre el parpadeo.
+ */
+async function settleShift(page: Page): Promise<void> {
+  await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {})
+}
+
 export async function closeShiftIfOpen(page: Page): Promise<void> {
   const closeBtn = page.getByRole('button', { name: 'Cerrar turno', exact: true })
   const openBanner = page.getByRole('button', { name: 'Abrir turno' })
@@ -18,6 +29,7 @@ export async function closeShiftIfOpen(page: Page): Promise<void> {
   // SOLO tras resolverse la query (la píldora "Sin turno" se ve también
   // mientras carga, por eso no sirve como señal).
   await expect(closeBtn.or(openBanner)).toBeVisible({ timeout: 15_000 })
+  await settleShift(page)
 
   // Sin botón "Cerrar turno" → ya no hay turno abierto.
   if ((await closeBtn.count()) === 0) return
@@ -43,6 +55,7 @@ export async function openShiftIfClosed(page: Page, amount = 0): Promise<void> {
 
   // Esperar a que el turno cargue (uno de los dos botones accionables).
   await expect(closeBtn.or(openBanner)).toBeVisible({ timeout: 15_000 })
+  await settleShift(page)
 
   // Si ya hay turno, el header muestra "Cerrar turno".
   if ((await closeBtn.count()) > 0) return

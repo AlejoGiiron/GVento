@@ -102,6 +102,24 @@ Resumen rápido:
 
 ## Pendientes de verificar / deuda conocida
 
+- **Regenerar `database.types.ts` con `supabase gen types`** cuando se resuelva el acceso
+  de management del CLI. Hoy la entrada de `register_sale_payment` (Functions) está agregada
+  **a mano** pero VERIFICADA idéntica a lo que genera el CLI (mismo shape que
+  `register_purchase`/`register_debt_payment`, posición alfabética correcta, `Views<>`
+  preservado, tsc 0). El `supabase gen types --linked` falla con 403: la cuenta del CLI no
+  tiene privilegios de management sobre el proyecto (es permiso de cuenta, no la password).
+  Al resolverlo, correr `supabase gen types typescript --linked --schema public > src/types/database.types.ts`
+  y confirmar diff nulo.
+- **Rotar la password de BD del proyecto (LAB):** quedó expuesta; pendiente de rotación en
+  Supabase (Dashboard → Database → reset password) y actualizar donde se use.
+- **RPC de cierre de turno con recompute server-side del esperado (endurecimiento):** hoy el
+  cierre es un UPDATE cliente que confía en el esperado calculado en el navegador desde
+  `salesSummary` (paridad con F1) y lo congela en `close_reconciliation`. Endurecimiento
+  futuro: mover el cierre a una RPC SECURITY DEFINER que **recompute el esperado por método
+  desde `payments` en la ventana `[opened_at, closed_at]`** (server-authoritative), evitando
+  confiar en el cliente. Requiere acotar la ventana con cota superior (hoy `getShiftPayments`
+  no la tiene; ver el bug de ventana temporal que motivó el snapshot). Junto a la deuda de
+  pasar los gates de enum a `has_permission`.
 - **SELECT de `profiles` es por sede activa** (RLS `restaurant_id = get_my_restaurant_id()`):
   las listas org-wide (asignar usuarios a sedes, conteo de usuarios por rol) solo ven
   usuarios de la sede activa. Con 1 sede coincide con toda la org; al haber multi-sede
@@ -172,15 +190,94 @@ Resumen rápido:
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: Refactor RBAC — permiso comodín "*" para el rol owner
-  (rama feature/compras-proveedores, sesión 2026-06-24) — migración
-  owner-wildcard-permission.sql APLICADA y verificada (owner de G-10 y LAB en ["*"],
-  nadie más con comodín); has_permission reconoce "*"; usePermissions (can/isOwner) y
-  ConfigPage Roles actualizados. rbac.spec 5/5 verde contra el laboratorio.
-En progreso: Compras / Proveedores (F5) — Parte 1 BD APLICADA + Parte 2 UI escrita,
-  PENDIENTE de revisión del usuario (sin commit). database.types.ts regenerado
-  (suppliers, purchase_invoices(_items), cost_price, register_purchase). tsc 0 + build verde.
-Siguiente: revisión del usuario → correr compras.spec.ts en el lab → commit.
+Última fase completada: Arqueo multi-método al cerrar turno
+  (rama feature/arqueo-cierre, sesión 2026-07-03) — migración shift-reconciliation.sql
+  APLICADA en LAB; CloseShiftModal con conciliación por método (F1 efectivo intacto +
+  card/transfer/nequi), snapshot congelado en close_reconciliation (jsonb) + close_comment,
+  comprobante printCashReport (auto-print al cerrar) reusando printThermal de P4.1,
+  reimpresión desde P3 (idéntica byte-a-byte al cierre). tests/arqueo.spec.ts 4/4 + caja.spec
+  6/6 verde en lab. tsc 0 + build verde.
+  (Antes en esta sesión: impresión unificada thermalPrintCss/printThermal MERGEADO a develop;
+  pago mixto register_sale_payment + PaymentSplitEditor MERGEADO a develop, 7/7 verde.)
+Siguiente: mergear feature/arqueo-cierre a develop. Pendiente aplicar register-sale-payment.sql
+  y shift-reconciliation.sql en G-10 (prod) cuando toque desplegar; regenerar database.types.ts
+  cuando se resuelva el acceso de management del CLI (deuda).
+
+### Detalle Arqueo multi-método (F, sesión 2026-07-03, rama feature/arqueo-cierre)
+- **Migración `supabase/shift-reconciliation.sql`** (APLICADA en LAB): `cash_shifts` +2 columnas
+  nullable aditivas — `close_reconciliation jsonb` (snapshot del arqueo por método) +
+  `close_comment text`. No rompe cierres viejos (null → reimpresión deshabilitada).
+- **Por qué SNAPSHOT y no recomputar:** `payments` no tiene `shift_id` y `getShiftPayments`
+  filtra solo por `created_at >= opened_at` (sin cota superior). Recomputar el esperado de un
+  turno CERRADO sumaría pagos de turnos posteriores → hay que CONGELAR el esperado por método
+  al cerrar. Al cierre la ventana solo-`opened_at` sí es correcta (único turno abierto).
+- **Esperado por método:** efectivo = apertura + ventas efvo + ingresos − egresos (fórmula F1,
+  `calcShiftBalance`); card/transfer/nequi = solo ventas de ese método (`salesSummary[m]`, sin
+  apertura ni movimientos — los `cash_movements` son solo efectivo).
+- **`ShiftReconciliation`/`MethodReconciliation`** en `src/lib/shiftCalc.ts`: `{ methods:
+  {cash,card,transfer,nequi}:{expected,declared,difference}, expected_total, declared_total,
+  difference_total, sales_count }`. Diferencia = declared − expected en los 4 (uniforme).
+- **`sales_count`** = órdenes DISTINTAS con pago en la ventana (`getShiftSalesCount` →
+  `new Set(order_id).size`) — una venta mixta = 1 venta aunque tenga N filas payments.
+- **CloseShiftModal:** bloque F1 de efectivo INTACTO (caja.spec byte-estable; solo se añadió el
+  testid `shift-cash-difference` para desambiguar del total del arqueo) + sección "Otros
+  métodos" (esperado | declarado input opcional blanco=0 | dif con color, testids
+  `pay-declared-{m}`/`pay-diff-{m}`) + comentario (`close-shift-comment`) + total del arqueo
+  (`shift-arqueo-total`). Diferencia informativa NO bloqueante (`canClose` = efectivo declarado,
+  como F1). El efectivo del snapshot = `calcShiftBalance` (misma fuente que F1, no diverge).
+- **Cierre atómico:** `useCashShift.closeShiftMutation` computa `sales_count` al cerrar (no lo
+  recibe del cliente — blindado por `Omit<ShiftReconciliation,'sales_count'>`) y persiste TODO
+  en un solo UPDATE (`closeShift` helper, ahora con joins abrió/cerró). `close_comment` = null
+  si vacío (`.trim() || null`). Retorna la fila cerrada (snapshot + closed_at server).
+- **Comprobante `printCashReport`** (printer.ts) = `buildCashReportHtml` + `printThermal` (P4.1):
+  sede, turno (rango), abrió/cerró, apertura, ventas por método (efvo derivado =
+  esperado−apertura−ing+egr), ingresos/egresos, arqueo esp/dec/dif por método, totales,
+  comentario, nº ventas. **Auto-print al confirmar el cierre**.
+- **`buildCashReportData(row, ctx)`** (printer.ts, compartido): arma `CashReportData` desde una
+  fila de turno. Lo usan IDÉNTICO el cierre (fila recién persistida) y la reimpresión P3 (misma
+  fila) → reimpreso byte-a-byte idéntico (verificado 5157=5157). Usa el snapshot, NUNCA recomputa.
+- **P3 ShiftHistoryPage:** `getClosedShifts`/`ClosedShiftRow` + `close_reconciliation`/
+  `close_comment`; botón "Reimprimir arqueo" (`shift-reprint`) por fila → `buildCashReportData` +
+  `printCashReport`; movimientos re-leídos por `shift_id` (`getShiftMovementTotals`, persisten).
+  Deshabilitado con tooltip "Sin arqueo por método" si `close_reconciliation` null (turnos
+  viejos). Gating `can('caja.cerrar')` (la ruta P3 ya lo exige).
+- **tests/arqueo.spec.ts** (4, lab): cierre → snapshot correcto (efvo con apertura+mov, otros
+  solo ventas; el assert caza la mixta mal cargada) + sales_count 3 + comentario; no bloquea con
+  diferencia; reimpresión P3 lee el snapshot (stub window.print, verifica sin recomputar);
+  limpieza. `caja.spec` 6/6 (F1 intacto, `shift-cash-difference` desambiguado). tsc 0 + build verde.
+- database.types.ts: `cash_shifts.close_reconciliation`/`close_comment` agregadas A MANO
+  (regeneración pendiente por permisos de CLI — ver deuda).
+
+### Detalle Pago mixto (F, sesión 2026-07-03, rama feature/pago-mixto)
+- **RPC `supabase/register-sale-payment.sql`** (APLICADA en LAB, pendiente en G-10):
+  `register_sale_payment(p_order_id uuid, p_payments jsonb) → jsonb` SECURITY DEFINER.
+  Valida sede + gate `get_my_role() in ('admin','cashier')` (calca el RLS de INSERT de
+  payments; deuda: pasar a has_permission al eliminar el enum). Solo CONTADO: rechaza
+  `payment_status <> 'paid'` (el fiado se salda con register_debt_payment). Rechaza pagos
+  previos (doble cobro). Deriva el total de la BD y valida `Σ amounts = total` (raise si no
+  cuadra). Inserta N filas payments (una por método) atómico. NO crea cash_movement (el
+  efectivo se deriva de payments en el cuadre). revoke public/anon + grant authenticated.
+- **`PaymentSplitEditor`** (components/pos, compartido POS+Mesa): N líneas método+monto,
+  "restante" en vivo, máx 1 línea/método (4 del enum), reporta `(parts, valid)` al padre
+  (valid = restante 0 exacto y todo monto>0 → gobierna Cobrar, bloquea falta Y excedido).
+  Vuelto anclado a la línea de efectivo (recibido opcional, solo UI; la fila se registra por
+  el monto imputado). Semilla `[efectivo: total]` editable (no fuerza efectivo).
+- **POS (CheckoutModal) y Mesa (TableCheckoutModal):** botón "Dividir pago" (pay-split-toggle)
+  bajo demanda; el caso común de 1 método queda intacto. `handleConfirm` unificado: simple →
+  `[{method, amount:total}]`, dividir → splitParts; ambos por `registerSalePayment`. isFiado =
+  `!split && method==='fiado'` (en dividir no hay fiado, 3 capas: UI + lógica + RPC). El
+  efectivo entra a caja / el nequi no, derivado de payments (sin lógica nueva de caja).
+- **Historial (SalesHistoryPage):** `methodDisplay` agrega TODOS los métodos ("Efectivo +
+  Nequi"); detalle con desglose método+monto cuando hay >1 pago (sale-detail-payments).
+  Simple se ve igual que hoy. Filtro por método: con filtro activo la fila muestra solo el
+  método filtrado (acordado, por el `payments!inner` de PostgREST).
+- Helper `registerSalePayment(orderId, parts)` + tipo `SalePaymentPart`. Testids de soporte:
+  `checkout-total` (ambos modales), `shift-sales-{method}` (CloseShiftModal).
+- **tests/pago-mixto.spec.ts** (7 tests, lab): POS mixta (2 filas payments + efectivo a caja/
+  nequi no, vía Supabase directo + cuadre), historial, validación bloqueante (falta+excedido),
+  simple 1 fila, mesa mixta sin doble descuento de stock, fiado no se cruza, limpieza. 7/7 verde.
+- database.types.ts: `register_sale_payment` agregado A MANO (regeneración pendiente por
+  permisos de CLI — ver deuda). tsc 0 + build verde.
 
 ### Detalle Compras / Proveedores (F5, sesión 2026-06-24, rama feature/compras-proveedores)
 

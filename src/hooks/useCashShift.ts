@@ -9,10 +9,13 @@ import {
   openShift as openShiftHelper,
   closeShift as closeShiftHelper,
   getShiftPayments,
+  getShiftSalesCount,
   getCashMovements,
   createCashMovement,
+  type ClosedShiftRow,
 } from '@/lib/supabase-helpers'
-import type { Tables, TablesInsert } from '@/types/database.types'
+import type { Tables, TablesInsert, Json } from '@/types/database.types'
+import type { ShiftReconciliation } from '@/lib/shiftCalc'
 
 export interface ShiftSalesSummary {
   cash: number
@@ -99,15 +102,30 @@ export function useCashShift() {
       closingAmount: number
       expectedAmount: number
       difference: number
+      // Snapshot del arqueo SIN sales_count (lo completa esta mutación al cerrar,
+      // que es el único momento en que la ventana solo-opened_at es correcta).
+      reconciliation: Omit<ShiftReconciliation, 'sales_count'>
+      comment: string
     }) => {
-      const { error } = await closeShiftHelper(currentShift!.id, {
+      // sales_count congelado al cierre (órdenes distintas en la ventana).
+      const salesCount = await getShiftSalesCount(restaurantId!, currentShift!.opened_at)
+      const reconciliation: ShiftReconciliation = {
+        ...params.reconciliation,
+        sales_count: salesCount,
+      }
+      const { data, error } = await closeShiftHelper(currentShift!.id, {
         closing_amount: params.closingAmount,
         expected_amount: params.expectedAmount,
         difference: params.difference,
         closed_by: profile!.id,
         closed_at: new Date().toISOString(),
+        close_reconciliation: reconciliation as unknown as Json,
+        close_comment: params.comment.trim() || null,
       })
       if (error) throw error
+      // Fila cerrada con joins (abrió/cerró) + snapshot + closed_at real del
+      // servidor → insumo del comprobante, idéntico a la reimpresión del historial.
+      return data as unknown as ClosedShiftRow
     },
     onSuccess: () => { invalidateShift(); toast.success('Turno cerrado correctamente') },
     onError: () => toast.error('Error al cerrar el turno'),

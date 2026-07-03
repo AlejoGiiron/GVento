@@ -16,6 +16,8 @@ import { PurchasesPage } from '@/pages/PurchasesPage'
 import { FiadoPage } from '@/pages/FiadoPage'
 import { ReportsPage } from '@/pages/ReportsPage'
 import { SalesHistoryPage } from '@/pages/SalesHistoryPage'
+import { ShiftHistoryPage } from '@/pages/ShiftHistoryPage'
+import { ExpensesHistoryPage } from '@/pages/ExpensesHistoryPage'
 import { ConfigPage } from '@/pages/ConfigPage'
 
 function App() {
@@ -55,6 +57,12 @@ function App() {
               </Route>
               <Route element={<ProtectedRoute permission="ventas.historial" />}>
                 <Route path="historial" element={<SalesHistoryPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission="caja.cerrar" />}>
+                <Route path="historial-turnos" element={<ShiftHistoryPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permission="caja.movimientos" />}>
+                <Route path="historial-gastos" element={<ExpensesHistoryPage />} />
               </Route>
               <Route element={<ProtectedRoute permission="reportes.financiero" />}>
                 <Route path="reportes" element={<ReportsPage />} />

@@ -1,5 +1,6 @@
 import { useState, useEffect, useId } from 'react'
 import { X, ChevronRight, Package, AlertTriangle } from 'lucide-react'
+import { toast } from 'react-hot-toast'
 import { ImageUpload } from './ImageUpload'
 import { RecipeEditor } from './RecipeEditor'
 import { useProductMutations } from '@/hooks/useProductMutations'
@@ -159,17 +160,44 @@ export function ProductModal({ product, categories, onClose }: ProductModalProps
       if (!isEditing) payload.stock_qty = tracking ? 0 : null
       else if (!tracking) payload.stock_qty = null
 
+      // El producto en sí: si esto falla no hay nada que sincronizar → propaga.
       await saveProduct.mutateAsync(payload)
 
-      // Sincroniza los extras asignados (product_extras) con la selección.
-      await reconcile.mutateAsync({ productId, extraIds: [...selectedExtras] })
+      // Pasos post-guardado AISLADOS: un fallo en uno NO debe saltar el otro
+      // en silencio (antes: un hipo en extras dejaba el compuesto SIN receta,
+      // sin descontar insumos y sin avisar). La receta va primero: es más
+      // crítica para el inventario que los extras. Ambos reconcile son
+      // idempotentes → reintentar guardando de nuevo completa lo que falte.
+      const failed: string[] = []
+      try {
+        // Receta (product_components) si es compuesto; si pasó a simple, se
+        // vacía para no dejar insumos huérfanos.
+        await reconcileRecipe.mutateAsync({
+          parentId: productId,
+          rows: isComposite ? recipeRows : [],
+        })
+      } catch {
+        failed.push('la receta')
+      }
+      try {
+        // Extras asignados (product_extras) según la selección.
+        await reconcile.mutateAsync({ productId, extraIds: [...selectedExtras] })
+      } catch {
+        failed.push('los extras')
+      }
 
-      // Sincroniza la receta (product_components) si es compuesto; si pasó a
-      // simple, vacía la receta para no dejar insumos huérfanos.
-      await reconcileRecipe.mutateAsync({
-        parentId: productId,
-        rows: isComposite ? recipeRows : [],
-      })
+      if (failed.length > 0) {
+        // Fallo parcial VISIBLE: el producto YA se guardó, solo faltó completar.
+        // No cerramos el modal → el usuario reintenta guardando de nuevo
+        // (reconcile idempotente). El mensaje deja claro que el producto existe
+        // para que no lo cree otra vez y lo duplique.
+        toast.error(
+          `El producto se guardó, pero no se pudo guardar ${failed.join(' ni ')}. ` +
+          `Vuelve a guardar para reintentar.`,
+          { duration: 8000 },
+        )
+        return // el finally apaga "saving"; el modal queda abierto
+      }
 
       onClose()
     } finally {
@@ -202,7 +230,7 @@ export function ProductModal({ product, categories, onClose }: ProductModalProps
       }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div style={{
+      <div data-testid="product-modal" style={{
         background: '#fff', borderRadius: 14,
         width: 560, maxWidth: '100%',
         boxShadow: '0 25px 50px -12px rgba(0,0,0,.25)',

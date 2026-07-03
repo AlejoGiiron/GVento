@@ -482,6 +482,20 @@ export const removeOrderItem = (itemId: string) =>
 export const createPayment = (payment: TablesInsert<'payments'>) =>
   supabase.from('payments').insert(payment).select().single()
 
+// Una parte de un pago (mixto o simple): método del enum + monto imputado.
+// El vuelto NO se persiste: la fila de efectivo va por el monto imputado.
+export type SalePaymentPart = { method: Enums<'payment_method'>; amount: number }
+
+// Registra atómicamente N pagos de una venta de contado (pago mixto). La RPC
+// SECURITY DEFINER valida sede, que sea venta de contado (no fiado), que no
+// tenga pagos previos y que Σ amounts = total de la orden (rechaza si no cuadra).
+// NO crea cash_movement: el efectivo se deriva de payments en el cuadre de caja.
+export const registerSalePayment = (orderId: string, parts: SalePaymentPart[]) =>
+  supabase.rpc('register_sale_payment', {
+    p_order_id: orderId,
+    p_payments: parts as unknown as Json,
+  })
+
 export const getOrderPayments = (orderId: string) =>
   supabase.from('payments').select('*').eq('order_id', orderId)
 
@@ -492,6 +506,18 @@ export const getShiftPayments = (restaurantId: string, from: string) =>
     .eq('restaurant_id', restaurantId)
     .gte('created_at', from)
 
+// Nº de VENTAS (órdenes distintas) con pago en la ventana del turno. Una venta
+// mixta = varias filas payments pero UNA orden → se cuentan order_id distintos.
+export const getShiftSalesCount = async (restaurantId: string, from: string): Promise<number> => {
+  const { data, error } = await supabase
+    .from('payments')
+    .select('order_id')
+    .eq('restaurant_id', restaurantId)
+    .gte('created_at', from)
+  if (error) throw error
+  return new Set((data ?? []).map((p) => p.order_id)).size
+}
+
 // --- Cash Movements ---
 
 export const getCashMovements = (shiftId: string) =>
@@ -500,6 +526,18 @@ export const getCashMovements = (shiftId: string) =>
     .select('*')
     .eq('shift_id', shiftId)
     .order('created_at', { ascending: false })
+
+// Totales de ingresos/egresos de un turno (para reimprimir su arqueo). Los
+// cash_movements persisten por shift_id → re-leíbles tras el cierre sin snapshot.
+export const getShiftMovementTotals = async (shiftId: string): Promise<{ in: number; out: number }> => {
+  const { data, error } = await getCashMovements(shiftId)
+  if (error) throw error
+  const rows = data ?? []
+  return {
+    in: rows.filter((m) => m.type === 'in').reduce((s, m) => s + m.amount, 0),
+    out: rows.filter((m) => m.type === 'out').reduce((s, m) => s + m.amount, 0),
+  }
+}
 
 export const createCashMovement = (movement: TablesInsert<'cash_movements'>) =>
   supabase.from('cash_movements').insert(movement).select().single()
@@ -522,8 +560,130 @@ export const closeShift = (
   data: Pick<
     TablesUpdate<'cash_shifts'>,
     'closing_amount' | 'closed_by' | 'closed_at' | 'expected_amount' | 'difference'
+    | 'close_reconciliation' | 'close_comment'
   >,
-) => supabase.from('cash_shifts').update(data).eq('id', shiftId).select().single()
+) => supabase
+  .from('cash_shifts')
+  .update(data)
+  .eq('id', shiftId)
+  // Mismos joins que getClosedShifts: el comprobante del cierre usa los mismos
+  // nombres (abrió/cerró) que la reimpresión → salida idéntica.
+  .select(
+    'id, opening_amount, opened_at, opened_by, closing_amount, expected_amount, ' +
+    'difference, closed_at, closed_by, close_reconciliation, close_comment, ' +
+    'abrio:profiles!cash_shifts_opened_by_fkey(full_name), ' +
+    'cerro:profiles!cash_shifts_closed_by_fkey(full_name)',
+  )
+  .single()
+
+// --- Historial de turnos y de gastos (solo lectura, paginado) ---
+
+/** Fila de turno cerrado con el nombre de quién abrió/cerró. */
+export type ClosedShiftRow = {
+  id: string
+  opening_amount: number
+  opened_at: string
+  opened_by: string
+  closing_amount: number | null
+  expected_amount: number | null
+  difference: number | null
+  closed_at: string | null
+  closed_by: string | null
+  // Arqueo multi-método persistido (snapshot). null en turnos pre-migración →
+  // la reimpresión del comprobante se deshabilita (degradación con gracia).
+  close_reconciliation: Json | null
+  close_comment: string | null
+  abrio: { full_name: string | null } | null
+  cerro: { full_name: string | null } | null
+}
+
+export interface ClosedShiftsFilters {
+  restaurantId: string
+  /** Filtro de PRESENTACIÓN (no seguridad): solo turnos abiertos/cerrados por
+   *  este usuario. La RLS ya limita a la sede. */
+  userId?: string | null
+  from?: string
+  to?: string
+  page: number
+  pageSize: number
+}
+
+export const getClosedShifts = ({
+  restaurantId, userId, from, to, page, pageSize,
+}: ClosedShiftsFilters) => {
+  let q = supabase
+    .from('cash_shifts')
+    .select(
+      'id, opening_amount, opened_at, opened_by, closing_amount, expected_amount, ' +
+      'difference, closed_at, closed_by, close_reconciliation, close_comment, ' +
+      'abrio:profiles!cash_shifts_opened_by_fkey(full_name), ' +
+      'cerro:profiles!cash_shifts_closed_by_fkey(full_name)',
+      { count: 'exact' },
+    )
+    .eq('restaurant_id', restaurantId)
+    .not('closed_at', 'is', null)
+  if (userId) q = q.or(`opened_by.eq.${userId},closed_by.eq.${userId}`)
+  if (from) q = q.gte('closed_at', from)
+  if (to) q = q.lte('closed_at', to)
+  return q
+    .order('closed_at', { ascending: false })
+    .range(page * pageSize, page * pageSize + pageSize - 1)
+}
+
+/** Fila de egreso (movimiento 'out') con el nombre de quién lo registró. */
+export type CashOutRow = {
+  id: string
+  amount: number
+  reason: string
+  created_at: string
+  created_by: string
+  shift_id: string
+  autor: { full_name: string | null } | null
+}
+
+export interface CashOutFilters {
+  restaurantId: string
+  userId?: string | null
+  from?: string
+  to?: string
+  page: number
+  pageSize: number
+}
+
+export const getCashOutMovements = ({
+  restaurantId, userId, from, to, page, pageSize,
+}: CashOutFilters) => {
+  let q = supabase
+    .from('cash_movements')
+    .select(
+      'id, amount, reason, created_at, created_by, shift_id, ' +
+      'autor:profiles!cash_movements_created_by_fkey(full_name)',
+      { count: 'exact' },
+    )
+    .eq('restaurant_id', restaurantId)
+    .eq('type', 'out')
+  if (userId) q = q.eq('created_by', userId)
+  if (from) q = q.gte('created_at', from)
+  if (to) q = q.lte('created_at', to)
+  return q
+    .order('created_at', { ascending: false })
+    .range(page * pageSize, page * pageSize + pageSize - 1)
+}
+
+/** Suma de egresos del período (para el total; consulta sin paginar, solo amount). */
+export const getCashOutTotal = ({
+  restaurantId, userId, from, to,
+}: Omit<CashOutFilters, 'page' | 'pageSize'>) => {
+  let q = supabase
+    .from('cash_movements')
+    .select('amount')
+    .eq('restaurant_id', restaurantId)
+    .eq('type', 'out')
+  if (userId) q = q.eq('created_by', userId)
+  if (from) q = q.gte('created_at', from)
+  if (to) q = q.lte('created_at', to)
+  return q
+}
 
 // --- Couriers ---
 

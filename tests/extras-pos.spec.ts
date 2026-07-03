@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { loginAsOwner } from './helpers/auth'
 import { openShiftIfClosed, closeShiftIfOpen } from './helpers/shift'
+import { saveProductAndClose } from './helpers/product'
 
 // "$ 12.000" → 12000
 const parseCOP = (text: string): number => Number(text.replace(/[^\d]/g, ''))
@@ -24,7 +25,7 @@ async function createProduct(page: Page, name: string, price: string, opts?: { s
   if (opts?.stock) {
     await page.getByTestId('product-stock-tracking').click() // Control de inventario (kind simple)
   }
-  await page.getByRole('button', { name: 'Crear producto' }).click()
+  await saveProductAndClose(page)
   await expect(page.getByText(name)).toBeVisible()
   // El stock ya no se edita en la ficha: arranca en 0 y se carga por ajuste.
   if (opts?.stock) await setStock(page, name, opts.stock)
@@ -123,7 +124,7 @@ test.describe.serial('Extras en POS', () => {
     await page.getByTitle('Editar', { exact: true }).first().click()
     await page.getByTestId('product-extra-option').filter({ hasText: E_FREE }).click()
     await page.getByTestId('product-extra-option').filter({ hasText: E_LINKED }).click()
-    await page.getByRole('button', { name: 'Guardar cambios' }).click()
+    await saveProductAndClose(page)
     await expect(page.getByTestId('product-grid-card').filter({ hasText: P_BASE })).toBeVisible()
   })
 
@@ -195,16 +196,19 @@ test.describe.serial('Extras en POS', () => {
     // El stock queda NEGATIVO (no en 0).
     expect(await readStock(page, P_STOCK)).toBe(-2)
 
-    // Alerta de sobreventa en el grid (ProductCard).
+    // Alerta de sobreventa en el grid (ProductCard). Se acota a la card de
+    // P_STOCK: el mismo testid 'oversold-alert' existe también en el modal de
+    // edición, así que sin scope el locator es ambiguo (strict mode).
     await page.goto('/productos')
     await page.getByPlaceholder('Buscar producto...').fill(P_STOCK)
-    await expect(page.getByTestId('oversold-alert')).toBeVisible()
-    await expect(page.getByTestId('oversold-alert')).toContainText('Sobreventa: reponer')
-    await expect(page.getByTestId('stock-badge')).toContainText('-2')
+    const card = page.getByTestId('product-grid-card').filter({ hasText: P_STOCK })
+    await expect(card.getByTestId('oversold-alert')).toBeVisible()
+    await expect(card.getByTestId('oversold-alert')).toContainText('Sobreventa: reponer')
+    await expect(card.getByTestId('stock-badge')).toContainText('-2')
 
-    // Y en el modal de edición del producto.
+    // Y en el modal de edición del producto (acotado al modal).
     await page.getByTitle('Editar', { exact: true }).first().click()
-    await expect(page.getByTestId('oversold-alert')).toBeVisible()
+    await expect(page.getByTestId('product-modal').getByTestId('oversold-alert')).toBeVisible()
   })
 
   test('limpieza: cerrar turno, desactivar extras, productos y categoría', async ({ page }) => {

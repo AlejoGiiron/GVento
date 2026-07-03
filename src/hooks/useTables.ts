@@ -31,7 +31,7 @@ export type ActiveOrder = Tables<'orders'> & {
 }
 
 export function useTables() {
-  const { profile } = useAuth()
+  const { profile, isLoading: authLoading } = useAuth()
   const { currentShift } = useCashShift()
   const [tables, setTables] = useState<TableRow[]>([])
   const [activeOrders, setActiveOrders] = useState<Record<string, ActiveOrder>>({})
@@ -39,33 +39,43 @@ export function useTables() {
   const channelRef = useRef<RealtimeChannel | null>(null)
 
   const fetchAll = useCallback(async () => {
-    if (!profile?.restaurant_id) return
-
-    const { data: tablesData, error } = await getTables(profile.restaurant_id)
-    if (error) {
-      toast.error('Error cargando mesas')
+    if (!profile?.restaurant_id) {
+      // Sin sede activa: nada que traer. Si la sesión ya cargó, apagar el
+      // loading (estado vacío, NO spinner eterno). Si la sesión aún carga,
+      // mantener el spinner hasta que llegue el profile.
+      if (!authLoading) setLoading(false)
       return
     }
-    const rows = tablesData ?? []
-    setTables(rows)
 
-    const occupiedIds = rows
-      .filter((t) => t.status === 'occupied' || t.status === 'waiting_bill')
-      .map((t) => t.id)
-
-    if (occupiedIds.length > 0) {
-      const { data: ordersData } = await getActiveOrdersForTables(occupiedIds)
-      const map: Record<string, ActiveOrder> = {}
-      for (const order of (ordersData ?? []) as ActiveOrder[]) {
-        if (order.table_id) map[order.table_id] = order
+    try {
+      const { data: tablesData, error } = await getTables(profile.restaurant_id)
+      if (error) {
+        toast.error('Error cargando mesas')
+        return
       }
-      setActiveOrders(map)
-    } else {
-      setActiveOrders({})
-    }
+      const rows = tablesData ?? []
+      setTables(rows)
 
-    setLoading(false)
-  }, [profile?.restaurant_id])
+      const occupiedIds = rows
+        .filter((t) => t.status === 'occupied' || t.status === 'waiting_bill')
+        .map((t) => t.id)
+
+      if (occupiedIds.length > 0) {
+        const { data: ordersData } = await getActiveOrdersForTables(occupiedIds)
+        const map: Record<string, ActiveOrder> = {}
+        for (const order of (ordersData ?? []) as ActiveOrder[]) {
+          if (order.table_id) map[order.table_id] = order
+        }
+        setActiveOrders(map)
+      } else {
+        setActiveOrders({})
+      }
+    } finally {
+      // Pase lo que pase (error de red, sede nula), la pantalla nunca debe
+      // quedar colgada en "Cargando mesas…".
+      setLoading(false)
+    }
+  }, [profile?.restaurant_id, authLoading])
 
   useEffect(() => {
     fetchAll()

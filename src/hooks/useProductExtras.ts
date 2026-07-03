@@ -1,6 +1,5 @@
 import { useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'react-hot-toast'
 import { getProductExtras, addProductExtra, removeProductExtra } from '@/lib/supabase-helpers'
 
 /**
@@ -42,7 +41,9 @@ export function useProductExtras(productId: string | null) {
     onSuccess: (_data, { productId }) => {
       queryClient.invalidateQueries({ queryKey: ['product_extras', productId] })
     },
-    onError: () => toast.error('Error al actualizar extras del producto'),
+    // El error se maneja de forma centralizada en ProductModal.handleSubmit
+    // (mensaje accionable + reintento idempotente); aquí no se toastea para no
+    // duplicar y para que el guardado no falle en silencio por pasos.
   })
 
   const assignedIds = useMemo(

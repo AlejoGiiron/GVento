@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { loginAsOwner } from './helpers/auth'
+import { waitPosReady } from './helpers/pos'
 
 // Botones desambiguados por `title`:
 //   footer "Poner la venta en espera"  → poner en espera
@@ -9,6 +10,7 @@ const HELD_INDICATOR = 'Ventas en espera'
 const LABEL_PLACEHOLDER = /Señor de gorra/
 
 async function addAndHold(page: import('@playwright/test').Page, label: string) {
+  await waitPosReady(page)
   await page.getByTestId('product-card').first().click()
   await page.getByTitle(HOLD_BTN).click()
   await page.getByPlaceholder(LABEL_PLACEHOLDER).fill(label)
@@ -18,6 +20,7 @@ async function addAndHold(page: import('@playwright/test').Page, label: string) 
 test.describe('Venta en espera', () => {
   test('poner en espera vacía el carrito y el contador marca 1', async ({ page }) => {
     await loginAsOwner(page)
+    await waitPosReady(page)
     await page.getByTestId('product-card').first().click()
     await expect(page.getByText('Carrito vacío')).toHaveCount(0)
 

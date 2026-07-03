@@ -1,6 +1,5 @@
 import { useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'react-hot-toast'
 import {
   getProductComponents,
   addProductComponent,
@@ -72,7 +71,9 @@ export function useProductComponents(parentId: string | null) {
     onSuccess: (_data, { parentId }) => {
       queryClient.invalidateQueries({ queryKey: ['product_components', parentId] })
     },
-    onError: () => toast.error('Error al guardar la receta'),
+    // El error se maneja de forma centralizada en ProductModal.handleSubmit
+    // (mensaje accionable + reintento idempotente); aquí no se toastea para no
+    // duplicar y para que el guardado no falle en silencio por pasos.
   })
 
   const components = (query.data ?? []) as ProductComponentRow[]

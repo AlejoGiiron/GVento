@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { loginAsOwner } from './helpers/auth'
 import { openShiftIfClosed, closeShiftIfOpen } from './helpers/shift'
+import { saveProductAndClose } from './helpers/product'
 
 const SUFFIX = Date.now().toString().slice(-6)
 const CAT = `E2E Inv ${SUFFIX}`
@@ -22,7 +23,7 @@ async function createSimpleTracked(page: Page, name: string, price: string) {
   await page.getByTestId('product-category-select').selectOption({ label: CAT })
   // kind 'simple' es el default; activar control de inventario.
   await page.getByTestId('product-stock-tracking').click()
-  await page.getByRole('button', { name: 'Crear producto' }).click()
+  await saveProductAndClose(page)
   await expect(page.getByText(name)).toBeVisible()
 }
 
@@ -38,7 +39,7 @@ async function createComposite(page: Page, name: string, price: string, insumo: 
   await page.getByTestId('recipe-add-qty').fill(String(qty))
   await page.getByTestId('recipe-add-confirm').click()
   await expect(page.getByTestId('recipe-row').filter({ hasText: insumo })).toBeVisible()
-  await page.getByRole('button', { name: 'Crear producto' }).click()
+  await saveProductAndClose(page)
   await expect(page.getByText(name)).toBeVisible()
 }
 

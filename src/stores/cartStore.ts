@@ -82,6 +82,10 @@ interface CartStore {
   holdCurrentOrder: (label: string) => void
   resumeHeldOrder: (id: string) => void
   discardHeldOrder: (id: string) => void
+  /** Limpia TODO el estado de venta (carrito + descuento + ventas en espera).
+   *  A diferencia de clear() (que deja vivas las ventas en espera), esto resetea
+   *  la sesión completa. Se usa al cerrar sesión. */
+  resetSession: () => void
 }
 
 export const useCartStore = create<CartStore>((set) => ({
@@ -198,4 +202,10 @@ export const useCartStore = create<CartStore>((set) => ({
     set((state) => ({
       heldOrders: state.heldOrders.filter((h) => h.id !== id),
     })),
+
+  // Reset total de la sesión de venta. El estado del carrito y las ventas en
+  // espera son del cajero actual: no deben sobrevivir a un cambio de usuario en
+  // la misma pestaña (POS compartido). Se llama al cerrar sesión.
+  resetSession: () =>
+    set({ items: [], discount: 0, discountType: 'pct', heldOrders: [] }),
 }))
