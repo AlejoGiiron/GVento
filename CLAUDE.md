@@ -102,6 +102,16 @@ Resumen rápido:
 
 ## Pendientes de verificar / deuda conocida
 
+- **Regenerar `database.types.ts` con `supabase gen types`** cuando se resuelva el acceso
+  de management del CLI. Hoy la entrada de `register_sale_payment` (Functions) está agregada
+  **a mano** pero VERIFICADA idéntica a lo que genera el CLI (mismo shape que
+  `register_purchase`/`register_debt_payment`, posición alfabética correcta, `Views<>`
+  preservado, tsc 0). El `supabase gen types --linked` falla con 403: la cuenta del CLI no
+  tiene privilegios de management sobre el proyecto (es permiso de cuenta, no la password).
+  Al resolverlo, correr `supabase gen types typescript --linked --schema public > src/types/database.types.ts`
+  y confirmar diff nulo.
+- **Rotar la password de BD del proyecto (LAB):** quedó expuesta; pendiente de rotación en
+  Supabase (Dashboard → Database → reset password) y actualizar donde se use.
 - **SELECT de `profiles` es por sede activa** (RLS `restaurant_id = get_my_restaurant_id()`):
   las listas org-wide (asignar usuarios a sedes, conteo de usuarios por rol) solo ven
   usuarios de la sede activa. Con 1 sede coincide con toda la org; al haber multi-sede
@@ -172,15 +182,45 @@ Resumen rápido:
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: Refactor RBAC — permiso comodín "*" para el rol owner
-  (rama feature/compras-proveedores, sesión 2026-06-24) — migración
-  owner-wildcard-permission.sql APLICADA y verificada (owner de G-10 y LAB en ["*"],
-  nadie más con comodín); has_permission reconoce "*"; usePermissions (can/isOwner) y
-  ConfigPage Roles actualizados. rbac.spec 5/5 verde contra el laboratorio.
-En progreso: Compras / Proveedores (F5) — Parte 1 BD APLICADA + Parte 2 UI escrita,
-  PENDIENTE de revisión del usuario (sin commit). database.types.ts regenerado
-  (suppliers, purchase_invoices(_items), cost_price, register_purchase). tsc 0 + build verde.
-Siguiente: revisión del usuario → correr compras.spec.ts en el lab → commit.
+Última fase completada: Pago mixto — dividir una venta entre varios métodos
+  (rama feature/pago-mixto, sesión 2026-07-03) — RPC register_sale_payment APLICADA en LAB;
+  PaymentSplitEditor compartido (POS+Mesa), "Dividir pago" bajo demanda, historial con
+  todos los métodos, fiado no se cruza. tests/pago-mixto.spec.ts 7/7 verde en lab.
+  tsc 0 + build verde. (Antes en esta sesión: refactor de impresión unificada —
+  thermalPrintCss + printThermal — MERGEADO a develop, output byte-idéntico verificado.)
+Siguiente: mergear feature/pago-mixto a develop; luego el comprobante de arqueo de caja
+  (printCashReport vía printThermal) apoyado en el cuadre multi-método que habilita el pago mixto.
+
+### Detalle Pago mixto (F, sesión 2026-07-03, rama feature/pago-mixto)
+- **RPC `supabase/register-sale-payment.sql`** (APLICADA en LAB, pendiente en G-10):
+  `register_sale_payment(p_order_id uuid, p_payments jsonb) → jsonb` SECURITY DEFINER.
+  Valida sede + gate `get_my_role() in ('admin','cashier')` (calca el RLS de INSERT de
+  payments; deuda: pasar a has_permission al eliminar el enum). Solo CONTADO: rechaza
+  `payment_status <> 'paid'` (el fiado se salda con register_debt_payment). Rechaza pagos
+  previos (doble cobro). Deriva el total de la BD y valida `Σ amounts = total` (raise si no
+  cuadra). Inserta N filas payments (una por método) atómico. NO crea cash_movement (el
+  efectivo se deriva de payments en el cuadre). revoke public/anon + grant authenticated.
+- **`PaymentSplitEditor`** (components/pos, compartido POS+Mesa): N líneas método+monto,
+  "restante" en vivo, máx 1 línea/método (4 del enum), reporta `(parts, valid)` al padre
+  (valid = restante 0 exacto y todo monto>0 → gobierna Cobrar, bloquea falta Y excedido).
+  Vuelto anclado a la línea de efectivo (recibido opcional, solo UI; la fila se registra por
+  el monto imputado). Semilla `[efectivo: total]` editable (no fuerza efectivo).
+- **POS (CheckoutModal) y Mesa (TableCheckoutModal):** botón "Dividir pago" (pay-split-toggle)
+  bajo demanda; el caso común de 1 método queda intacto. `handleConfirm` unificado: simple →
+  `[{method, amount:total}]`, dividir → splitParts; ambos por `registerSalePayment`. isFiado =
+  `!split && method==='fiado'` (en dividir no hay fiado, 3 capas: UI + lógica + RPC). El
+  efectivo entra a caja / el nequi no, derivado de payments (sin lógica nueva de caja).
+- **Historial (SalesHistoryPage):** `methodDisplay` agrega TODOS los métodos ("Efectivo +
+  Nequi"); detalle con desglose método+monto cuando hay >1 pago (sale-detail-payments).
+  Simple se ve igual que hoy. Filtro por método: con filtro activo la fila muestra solo el
+  método filtrado (acordado, por el `payments!inner` de PostgREST).
+- Helper `registerSalePayment(orderId, parts)` + tipo `SalePaymentPart`. Testids de soporte:
+  `checkout-total` (ambos modales), `shift-sales-{method}` (CloseShiftModal).
+- **tests/pago-mixto.spec.ts** (7 tests, lab): POS mixta (2 filas payments + efectivo a caja/
+  nequi no, vía Supabase directo + cuadre), historial, validación bloqueante (falta+excedido),
+  simple 1 fila, mesa mixta sin doble descuento de stock, fiado no se cruza, limpieza. 7/7 verde.
+- database.types.ts: `register_sale_payment` agregado A MANO (regeneración pendiente por
+  permisos de CLI — ver deuda). tsc 0 + build verde.
 
 ### Detalle Compras / Proveedores (F5, sesión 2026-06-24, rama feature/compras-proveedores)
 

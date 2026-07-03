@@ -482,6 +482,20 @@ export const removeOrderItem = (itemId: string) =>
 export const createPayment = (payment: TablesInsert<'payments'>) =>
   supabase.from('payments').insert(payment).select().single()
 
+// Una parte de un pago (mixto o simple): método del enum + monto imputado.
+// El vuelto NO se persiste: la fila de efectivo va por el monto imputado.
+export type SalePaymentPart = { method: Enums<'payment_method'>; amount: number }
+
+// Registra atómicamente N pagos de una venta de contado (pago mixto). La RPC
+// SECURITY DEFINER valida sede, que sea venta de contado (no fiado), que no
+// tenga pagos previos y que Σ amounts = total de la orden (rechaza si no cuadra).
+// NO crea cash_movement: el efectivo se deriva de payments en el cuadre de caja.
+export const registerSalePayment = (orderId: string, parts: SalePaymentPart[]) =>
+  supabase.rpc('register_sale_payment', {
+    p_order_id: orderId,
+    p_payments: parts as unknown as Json,
+  })
+
 export const getOrderPayments = (orderId: string) =>
   supabase.from('payments').select('*').eq('order_id', orderId)
 

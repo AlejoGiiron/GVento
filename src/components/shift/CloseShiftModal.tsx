@@ -131,7 +131,7 @@ export function CloseShiftModal({ onClose }: CloseShiftModalProps) {
                 return (
                   <div key={method} style={{ ...rowStyle, borderBottom: '1px solid #f1f5f9' }}>
                     <span style={{ color: '#64748b' }}>{METHOD_LABELS[method]}</span>
-                    <span style={{ fontFamily: 'monospace', fontWeight: amount > 0 ? 600 : 400, color: amount > 0 ? '#0f172a' : '#94a3b8' }}>
+                    <span data-testid={`shift-sales-${method}`} style={{ fontFamily: 'monospace', fontWeight: amount > 0 ? 600 : 400, color: amount > 0 ? '#0f172a' : '#94a3b8' }}>
                       {formatCOP(amount)}
                     </span>
                   </div>

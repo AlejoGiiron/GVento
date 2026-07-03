@@ -65,16 +65,19 @@ const METHOD_OPTIONS: { value: PayMethod | ''; label: string }[] = [
   { value: 'nequi',    label: 'Nequi / QR' },
 ]
 
-function paymentMethodOf(row: { payments: { method: PayMethod }[] }): PayMethod | null {
-  return row.payments[0]?.method ?? null
+// Métodos DISTINTOS de la venta. Con pago mixto hay una fila por método; el
+// pago simple tiene una sola. Se deduplica por si acaso (no debería repetirse).
+function paymentMethodsOf(row: { payments: { method: PayMethod }[] }): PayMethod[] {
+  return [...new Set(row.payments.map((p) => p.method))]
 }
 
-// Etiqueta de método para la lista/detalle. Una venta a fiado NO tiene fila en
+// Etiqueta de método(s) para la lista/detalle. Simple → un método (igual que
+// hoy); mixto → "Efectivo + Nequi". Una venta a fiado NO tiene fila en
 // `payments` (la liquidación vive en debt_payments), así que se deriva del
 // payment_status para que no aparezca como venta sin método.
 function methodDisplay(row: { payment_status: string; payments: { method: PayMethod }[] }): string {
-  const m = row.payments[0]?.method
-  if (m) return METHOD_LABEL[m]
+  const methods = paymentMethodsOf(row)
+  if (methods.length > 0) return methods.map((m) => METHOD_LABEL[m]).join(' + ')
   if (row.payment_status === 'paid') return 'Fiado (saldado)'
   if (row.payment_status === 'partial') return 'Fiado (parcial)'
   return 'Fiado'
@@ -95,7 +98,9 @@ function SaleDetailModal({ orderId, onClose }: { orderId: string; onClose: () =>
   }, [sale])
 
   const discount = sale ? Math.max(0, subtotal - sale.total) : 0
-  const method = sale ? paymentMethodOf(sale) : null
+  // Reimpresión: etiqueta de método(s) combinada ("Efectivo + Nequi" en mixto);
+  // null si es fiado sin payments (el ticket omite la línea de método).
+  const method = sale && sale.payments.length > 0 ? methodDisplay(sale) : null
 
   const handleReprint = () => {
     if (!sale) return
@@ -163,7 +168,17 @@ function SaleDetailModal({ orderId, onClose }: { orderId: string; onClose: () =>
                 {sale.customer_name && <div>Cliente: <span style={{ fontWeight: 600, color: '#0f172a' }}>{sale.customer_name}</span>{sale.customer_phone ? ` · ${sale.customer_phone}` : ''}</div>}
                 {sale.waiter_name && <div>Responsable: <span style={{ fontWeight: 600, color: '#0f172a' }}>{sale.waiter_name}</span></div>}
                 <div>Atendió: <span style={{ fontWeight: 600, color: '#0f172a' }}>{sale.profiles?.full_name ?? '—'}</span></div>
-                <div>Pago: <span style={{ fontWeight: 600, color: '#0f172a' }}>{methodDisplay(sale)}</span></div>
+                <div>Pago: <span data-testid="sale-detail-method" style={{ fontWeight: 600, color: '#0f172a' }}>{methodDisplay(sale)}</span></div>
+                {sale.payments.length > 1 && (
+                  <div data-testid="sale-detail-payments" style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 2, paddingLeft: 10 }}>
+                    {sale.payments.map((p, i) => (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', maxWidth: 220 }}>
+                        <span>{METHOD_LABEL[p.method]}</span>
+                        <span style={{ fontFamily: 'monospace', color: '#0f172a' }}>{formatCOP(p.amount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Items */}

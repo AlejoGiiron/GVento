@@ -3,7 +3,7 @@ import {
   UtensilsCrossed, Plus, Users, X, Check, Search,
   ChevronRight, Banknote, CreditCard, Building2, Smartphone,
   Trash, Minus, Settings, Pencil,
-  ReceiptText, RefreshCw, ChefHat, HandCoins,
+  ReceiptText, RefreshCw, ChefHat, HandCoins, SplitSquareHorizontal,
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { useQueryClient } from '@tanstack/react-query'
@@ -18,12 +18,14 @@ import { useProductsWithExtras } from '@/hooks/useProductsWithExtras'
 import {
   createTable, updateTable, deleteTable,
   updateTableStatus, createOrder, addOrderItemsWithExtras,
-  updateOrderTotal, updateOrderStatus, createPayment,
+  updateOrderTotal, updateOrderStatus, registerSalePayment,
   getTableActiveOrderCount, removeOrderItem, markItemsSentToKitchen,
   assignOrderNumber, setOrderFiado,
 } from '@/lib/supabase-helpers'
+import type { SalePaymentPart } from '@/lib/supabase-helpers'
 import { OpenShiftModal } from '@/components/shift/OpenShiftModal'
 import { ItemConfigModal } from '@/components/pos/ItemConfigModal'
+import { PaymentSplitEditor } from '@/components/pos/PaymentSplitEditor'
 import { CustomerPicker } from '@/components/fiado/CustomerPicker'
 import { printComanda } from '@/lib/printer'
 import type { Enums } from '@/types/database.types'
@@ -600,9 +602,14 @@ function TableCheckoutModal({
   // Fiado: cliente seleccionado (solo aplica si method === 'fiado').
   const [customerId, setCustomerId] = useState<string | null>(null)
   const [customerName, setCustomerName] = useState<string>('')
+  // Pago dividido (mixto): activo bajo demanda vía "Dividir pago".
+  const [split, setSplit] = useState(false)
+  const [splitParts, setSplitParts] = useState<SalePaymentPart[]>([])
+  const [splitValid, setSplitValid] = useState(false)
 
   const canFiado = can('fiado.gestionar')
-  const isFiado = method === 'fiado'
+  // En modo dividir el fiado no aplica (mixto = solo métodos reales).
+  const isFiado = !split && method === 'fiado'
   const total = order.total
   const receivedNum = parseInt(received.replace(/\D/g, ''), 10) || 0
   const change = receivedNum - total
@@ -634,12 +641,14 @@ function TableCheckoutModal({
         const { error: fiadoErr } = await setOrderFiado(order.id, customerId!, customerName)
         if (fiadoErr) throw fiadoErr
       } else {
-        const { error: payErr } = await createPayment({
-          order_id: order.id,
-          method: methodMap[method],
-          amount: total,
-          restaurant_id: profile.restaurant_id,
-        })
+        // Un solo camino de cobro: simple = una parte al total; dividir = las
+        // partes del editor. La RPC valida atómicamente Σ = total e inserta una
+        // fila por método. En !split el método nunca es fiado (isFiado lo excluye),
+        // pero el isFiado compuesto impide a TS estrecharlo → cast explícito.
+        const parts: SalePaymentPart[] = split
+          ? splitParts
+          : [{ method: methodMap[method as Exclude<PaymentMethodUI, 'fiado'>], amount: total }]
+        const { error: payErr } = await registerSalePayment(order.id, parts)
         if (payErr) throw payErr
       }
 
@@ -688,7 +697,7 @@ function TableCheckoutModal({
                 <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5 }}>
                   {table.name} · Total a cobrar
                 </div>
-                <div style={{ fontSize: 28, fontWeight: 700, color: '#0f172a', fontFamily: 'monospace', letterSpacing: -0.5 }}>
+                <div data-testid="checkout-total" style={{ fontSize: 28, fontWeight: 700, color: '#0f172a', fontFamily: 'monospace', letterSpacing: -0.5 }}>
                   {formatCOP(total)}
                 </div>
               </div>
@@ -696,6 +705,7 @@ function TableCheckoutModal({
                 <X size={16} />
               </button>
             </div>
+            {!split && (
             <div style={{ padding: 22 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: '#0f172a', marginBottom: 12 }}>Método de pago</div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
@@ -719,6 +729,23 @@ function TableCheckoutModal({
                   </button>
                 ))}
               </div>
+
+              {/* Dividir pago: revela el editor de pago mixto bajo demanda.
+                  El caso común (un método al 100%) queda intacto arriba. */}
+              {!isFiado && (
+                <button
+                  type="button"
+                  data-testid="pay-split-toggle"
+                  onClick={() => setSplit(true)}
+                  style={{
+                    marginTop: 14, display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '8px 12px', borderRadius: 8, border: '1px dashed #cbd5e1',
+                    background: '#fff', color: '#334155', fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+                  }}
+                >
+                  <SplitSquareHorizontal size={14} /> Dividir pago
+                </button>
+              )}
 
               {/* Fiado: selección de cliente obligatoria */}
               {isFiado && (
@@ -754,6 +781,36 @@ function TableCheckoutModal({
                 </button>
               </div>
             </div>
+            )}
+
+            {/* ── Modo dividir (pago mixto) ── */}
+            {split && (
+            <div style={{ padding: 22 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#0f172a', marginBottom: 12 }}>
+                Dividir pago entre métodos
+              </div>
+              <PaymentSplitEditor
+                total={total}
+                onChange={(parts, ok) => { setSplitParts(parts); setSplitValid(ok) }}
+              />
+              <div style={{ marginTop: 18, display: 'flex', gap: 10 }}>
+                <button
+                  onClick={() => setSplit(false)}
+                  style={{ flex: 1, padding: '12px', border: '1.5px solid #e5e7eb', background: '#fff', borderRadius: 9, cursor: 'pointer', fontSize: 13.5, fontWeight: 600, color: '#334155' }}
+                >
+                  Un solo método
+                </button>
+                <button
+                  data-testid="checkout-confirm"
+                  disabled={submitting || !splitValid}
+                  onClick={handleConfirm}
+                  style={{ flex: 2, padding: '12px', border: 'none', background: submitting || !splitValid ? '#cbd5e1' : '#10b981', borderRadius: 9, cursor: submitting || !splitValid ? 'not-allowed' : 'pointer', fontSize: 13.5, fontWeight: 600, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                >
+                  {submitting ? 'Procesando...' : <><Check size={15} /><span>Cobrar {formatCOP(total)}</span></>}
+                </button>
+              </div>
+            </div>
+            )}
           </>
         )}
 
