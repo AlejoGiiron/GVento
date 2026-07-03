@@ -98,7 +98,9 @@ test.describe.serial('Caja', () => {
     // Declarar de más → sobrante con diferencia positiva.
     await page.getByTestId('close-shift-declared').fill('60000')
     await expect(page.getByText('Sobrante', { exact: true })).toBeVisible()
-    await expect(page.getByText('+ $ 10.000').or(page.getByText(/\+.*10\.000/))).toBeVisible()
+    // Acotado al monto de diferencia del bloque F1 (efectivo): el total del arqueo
+    // muestra el MISMO +10.000 cuando solo el efectivo difiere (sin testid = 2 matches, strict mode).
+    await expect(page.getByTestId('shift-cash-difference')).toContainText('10.000')
 
     // Declarar de menos → faltante.
     await page.getByTestId('close-shift-declared').fill('40000')

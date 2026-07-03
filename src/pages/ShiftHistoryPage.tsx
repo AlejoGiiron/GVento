@@ -1,6 +1,9 @@
 import { useState } from 'react'
-import { ClipboardList, Calendar, ChevronLeft, ChevronRight } from 'lucide-react'
+import { ClipboardList, Calendar, ChevronLeft, ChevronRight, Printer } from 'lucide-react'
 import { usePermissions } from '@/hooks/usePermissions'
+import { useRestaurantConfig } from '@/hooks/useRestaurantConfig'
+import { getShiftMovementTotals } from '@/lib/supabase-helpers'
+import { printCashReport, buildCashReportData } from '@/lib/printer'
 import {
   useShiftHistory, SHIFTS_PAGE_SIZE,
   type ClosedShiftRow, type HistoryScope,
@@ -56,6 +59,23 @@ export function ShiftHistoryPage() {
   // es filtro de PRESENTACIÓN, no seguridad (la RLS limita a la sede igual).
   const { can } = usePermissions()
   const elevated = can('reportes.financiero')
+  const { restaurant } = useRestaurantConfig()
+  // Reimpresión del arqueo: mismo permiso que P3 (la ruta ya exige caja.cerrar).
+  const canReprint = can('caja.cerrar')
+
+  // Reimprime el comprobante desde el SNAPSHOT persistido (no recomputa el
+  // esperado → inmune al bug de ventana). Movimientos re-leídos por shift_id.
+  // Mismo builder/print que el cierre → comprobante idéntico al original.
+  const handleReprint = async (row: ClosedShiftRow) => {
+    if (!row.close_reconciliation) return
+    const totals = await getShiftMovementTotals(row.id)
+    printCashReport(buildCashReportData(row, {
+      restaurantName: restaurant?.name,
+      restaurantAddress: restaurant?.address,
+      movementsIn: totals.in,
+      movementsOut: totals.out,
+    }))
+  }
 
   const [from, setFrom] = useState(daysAgoBogota(30))
   const [to, setTo] = useState(todayBogota())
@@ -136,11 +156,12 @@ export function ShiftHistoryPage() {
         ) : (
           <div style={{ background: '#fff', border: '1px solid #f1f5f9', borderRadius: 12, overflow: 'hidden', opacity: isFetching ? 0.7 : 1, transition: 'opacity .12s' }}>
             {/* Head */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr 1fr 1.2fr', gap: 12, padding: '11px 16px', borderBottom: '1px solid #f1f5f9', background: '#f8fafc', fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr 1fr 1.2fr auto', gap: 12, padding: '11px 16px', borderBottom: '1px solid #f1f5f9', background: '#f8fafc', fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.4 }}>
               <span>Apertura</span>
               <span style={{ textAlign: 'right' }}>Declarado</span>
               <span style={{ textAlign: 'right' }}>Esperado</span>
               <span style={{ textAlign: 'right' }}>Diferencia</span>
+              <span style={{ width: 96 }} />
             </div>
             {/* Rows */}
             {rows.map((row: ClosedShiftRow) => {
@@ -150,7 +171,7 @@ export function ShiftHistoryPage() {
                   key={row.id}
                   data-testid="shift-history-row"
                   style={{
-                    display: 'grid', gridTemplateColumns: '1.3fr 1fr 1fr 1.2fr', gap: 12, alignItems: 'center',
+                    display: 'grid', gridTemplateColumns: '1.3fr 1fr 1fr 1.2fr auto', gap: 12, alignItems: 'center',
                     padding: '13px 16px', borderBottom: '1px solid #f8fafc',
                   }}
                 >
@@ -183,6 +204,26 @@ export function ShiftHistoryPage() {
                     >
                       {d.label}
                     </span>
+                  </span>
+                  <span style={{ textAlign: 'right' }}>
+                    {canReprint && (
+                      <button
+                        data-testid="shift-reprint"
+                        onClick={() => handleReprint(row)}
+                        disabled={row.close_reconciliation == null}
+                        title={row.close_reconciliation != null ? 'Reimprimir arqueo' : 'Sin arqueo por método'}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 5,
+                          padding: '6px 10px', borderRadius: 7, border: '1px solid #e5e7eb',
+                          background: row.close_reconciliation != null ? '#fff' : '#f8fafc',
+                          color: row.close_reconciliation != null ? '#334155' : '#cbd5e1',
+                          cursor: row.close_reconciliation != null ? 'pointer' : 'not-allowed',
+                          fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
+                        }}
+                      >
+                        <Printer size={13} /> Arqueo
+                      </button>
+                    )}
                   </span>
                 </div>
               )

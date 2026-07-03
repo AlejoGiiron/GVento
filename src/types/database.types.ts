@@ -71,6 +71,8 @@ export type Database = {
       }
       cash_shifts: {
         Row: {
+          close_comment: string | null
+          close_reconciliation: Json | null
           closed_at: string | null
           closed_by: string | null
           closing_amount: number | null
@@ -84,6 +86,8 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          close_comment?: string | null
+          close_reconciliation?: Json | null
           closed_at?: string | null
           closed_by?: string | null
           closing_amount?: number | null
@@ -97,6 +101,8 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          close_comment?: string | null
+          close_reconciliation?: Json | null
           closed_at?: string | null
           closed_by?: string | null
           closing_amount?: number | null

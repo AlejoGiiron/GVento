@@ -1,3 +1,5 @@
+import type { ShiftReconciliation, ArqueoMethod } from '@/lib/shiftCalc'
+
 export interface ComandaData {
   restaurantName?: string | null
   tableName: string
@@ -202,5 +204,155 @@ export function printSaleTicket(data: SaleTicketData): void {
     styleId: 'gvento-sale-ticket-css',
     contentId: 'gvento-sale-ticket-content',
     className: 'sale-ticket-print',
+  })
+}
+
+// ─── Arqueo de caja (comprobante de cierre de turno) ──────────────
+// Se reusa idéntico al cerrar (datos en vivo) y al reimprimir desde el
+// historial (datos del snapshot persistido). Una sola forma: CashReportData.
+
+const ARQUEO_METHOD_LABEL: Record<ArqueoMethod, string> = {
+  cash: 'Efectivo', card: 'Tarjeta', transfer: 'Transferencia', nequi: 'Nequi',
+}
+const ARQUEO_ORDER: ArqueoMethod[] = ['cash', 'card', 'transfer', 'nequi']
+
+export interface CashReportData {
+  restaurantName?: string | null
+  restaurantAddress?: string | null
+  shiftId: string
+  openedAt: string
+  closedAt: string | null
+  openedByName?: string | null
+  closedByName?: string | null
+  openingAmount: number
+  movementsIn: number
+  movementsOut: number
+  reconciliation: ShiftReconciliation
+  comment?: string | null
+}
+
+function buildCashReportHtml(data: CashReportData): string {
+  const rec = data.reconciliation
+  const fmtDT = (iso: string) =>
+    new Date(iso).toLocaleString('es-CO', {
+      day: '2-digit', month: '2-digit', year: '2-digit',
+      hour: '2-digit', minute: '2-digit', timeZone: 'America/Bogota',
+    })
+
+  // Ventas efectivo = esperado_cash − apertura − ingresos + egresos (inverso de
+  // la fórmula del esperado). Para los demás, ventas = esperado del método.
+  const cashSales =
+    rec.methods.cash.expected - data.openingAmount - data.movementsIn + data.movementsOut
+  const salesByMethod: Record<ArqueoMethod, number> = {
+    cash: cashSales,
+    card: rec.methods.card.expected,
+    transfer: rec.methods.transfer.expected,
+    nequi: rec.methods.nequi.expected,
+  }
+  const salesTotal = ARQUEO_ORDER.reduce((s, m) => s + salesByMethod[m], 0)
+
+  const money = (n: number) => formatCOP(n)
+  const signed = (n: number) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${formatCOP(Math.abs(n))}`
+  const dash = '<div style="border-top:1px dashed #000;margin:6px 0"></div>'
+  const line = (a: string, b: string, opts: { bold?: boolean; size?: number } = {}) =>
+    `<div style="display:flex;justify-content:space-between;font-size:${opts.size ?? 11}px${opts.bold ? ';font-weight:700' : ''}">
+      <span>${a}</span><span style="font-family:monospace">${b}</span>
+    </div>`
+
+  const salesRows = ARQUEO_ORDER
+    .filter((m) => salesByMethod[m] !== 0)
+    .map((m) => line(ARQUEO_METHOD_LABEL[m], money(salesByMethod[m])))
+    .join('')
+
+  // Arqueo por método: esperado | declarado | diferencia (compacto).
+  const arqueoRows = ARQUEO_ORDER.map((m) => {
+    const r = rec.methods[m]
+    return `
+      <div style="margin-bottom:3px">
+        <div style="font-size:11px;font-weight:600">${ARQUEO_METHOD_LABEL[m]}</div>
+        <div style="display:flex;justify-content:space-between;font-size:10px;font-family:monospace;color:#000">
+          <span>esp ${money(r.expected)}</span>
+          <span>dec ${money(r.declared)}</span>
+          <span>${r.difference === 0 ? 'ok' : 'dif ' + signed(r.difference)}</span>
+        </div>
+      </div>`
+  }).join('')
+
+  return `
+    <div style="text-align:center;margin-bottom:6px">
+      ${data.restaurantName ? `<div style="font-size:15px;font-weight:700;letter-spacing:2px">${data.restaurantName.toUpperCase()}</div>` : ''}
+      ${data.restaurantAddress ? `<div style="font-size:11px">${data.restaurantAddress}</div>` : ''}
+      <div style="font-size:13px;font-weight:700;margin-top:4px">ARQUEO DE CAJA</div>
+      <div style="font-size:10px;margin-top:2px">Turno #${data.shiftId.slice(-6).toUpperCase()}</div>
+    </div>
+    ${dash}
+    ${line('Abrió', fmtDT(data.openedAt))}
+    ${data.openedByName ? line('', data.openedByName, { size: 10 }) : ''}
+    ${data.closedAt ? line('Cerró', fmtDT(data.closedAt)) : ''}
+    ${data.closedByName ? line('', data.closedByName, { size: 10 }) : ''}
+    ${line('Apertura', money(data.openingAmount))}
+    ${dash}
+    <div style="font-size:10px;font-weight:700;letter-spacing:1px;margin-bottom:2px">VENTAS POR MÉTODO</div>
+    ${salesRows || `<div style="font-size:11px;color:#000">Sin ventas</div>`}
+    ${line('Total ventas', `${money(salesTotal)}  ·  ${rec.sales_count} vta(s)`, { bold: true })}
+    ${(data.movementsIn > 0 || data.movementsOut > 0) ? `
+      ${dash}
+      ${data.movementsIn > 0 ? line('Ingresos', signed(data.movementsIn)) : ''}
+      ${data.movementsOut > 0 ? line('Egresos', signed(-data.movementsOut)) : ''}
+    ` : ''}
+    ${dash}
+    <div style="font-size:10px;font-weight:700;letter-spacing:1px;margin-bottom:4px">ARQUEO (esperado / declarado)</div>
+    ${arqueoRows}
+    ${dash}
+    ${line('Esperado total', money(rec.expected_total))}
+    ${line('Declarado total', money(rec.declared_total))}
+    ${line('Diferencia total', signed(rec.difference_total), { bold: true, size: 13 })}
+    ${data.comment ? `${dash}<div style="font-size:10.5px"><span style="font-weight:600">Comentario:</span> ${data.comment}</div>` : ''}
+    ${dash}
+    <div style="text-align:center;font-size:11px">— Arqueo G-Vento —</div>
+  `
+}
+
+// Fila de turno cerrado (subset compartido por el cierre en vivo y el historial).
+export interface CashReportShiftRow {
+  id: string
+  opened_at: string
+  closed_at: string | null
+  opening_amount: number
+  close_reconciliation: unknown
+  close_comment: string | null
+  abrio: { full_name: string | null } | null
+  cerro: { full_name: string | null } | null
+}
+
+// Arma CashReportData desde una fila de turno + contexto. Lo usan IDÉNTICO el
+// cierre (fila recién persistida) y la reimpresión del historial (misma fila) →
+// el comprobante reimpreso es idéntico al del cierre. Usa el SNAPSHOT
+// (row.close_reconciliation), NUNCA recomputa el esperado (bug de ventana).
+export function buildCashReportData(
+  row: CashReportShiftRow,
+  ctx: { restaurantName?: string | null; restaurantAddress?: string | null; movementsIn: number; movementsOut: number },
+): CashReportData {
+  return {
+    restaurantName: ctx.restaurantName,
+    restaurantAddress: ctx.restaurantAddress,
+    shiftId: row.id,
+    openedAt: row.opened_at,
+    closedAt: row.closed_at,
+    openedByName: row.abrio?.full_name ?? null,
+    closedByName: row.cerro?.full_name ?? null,
+    openingAmount: row.opening_amount,
+    movementsIn: ctx.movementsIn,
+    movementsOut: ctx.movementsOut,
+    reconciliation: row.close_reconciliation as ShiftReconciliation,
+    comment: row.close_comment,
+  }
+}
+
+export function printCashReport(data: CashReportData): void {
+  printThermal(buildCashReportHtml(data), {
+    styleId: 'gvento-cash-report-css',
+    contentId: 'gvento-cash-report-content',
+    className: 'cash-report-print',
   })
 }

@@ -506,6 +506,18 @@ export const getShiftPayments = (restaurantId: string, from: string) =>
     .eq('restaurant_id', restaurantId)
     .gte('created_at', from)
 
+// Nº de VENTAS (órdenes distintas) con pago en la ventana del turno. Una venta
+// mixta = varias filas payments pero UNA orden → se cuentan order_id distintos.
+export const getShiftSalesCount = async (restaurantId: string, from: string): Promise<number> => {
+  const { data, error } = await supabase
+    .from('payments')
+    .select('order_id')
+    .eq('restaurant_id', restaurantId)
+    .gte('created_at', from)
+  if (error) throw error
+  return new Set((data ?? []).map((p) => p.order_id)).size
+}
+
 // --- Cash Movements ---
 
 export const getCashMovements = (shiftId: string) =>
@@ -514,6 +526,18 @@ export const getCashMovements = (shiftId: string) =>
     .select('*')
     .eq('shift_id', shiftId)
     .order('created_at', { ascending: false })
+
+// Totales de ingresos/egresos de un turno (para reimprimir su arqueo). Los
+// cash_movements persisten por shift_id → re-leíbles tras el cierre sin snapshot.
+export const getShiftMovementTotals = async (shiftId: string): Promise<{ in: number; out: number }> => {
+  const { data, error } = await getCashMovements(shiftId)
+  if (error) throw error
+  const rows = data ?? []
+  return {
+    in: rows.filter((m) => m.type === 'in').reduce((s, m) => s + m.amount, 0),
+    out: rows.filter((m) => m.type === 'out').reduce((s, m) => s + m.amount, 0),
+  }
+}
 
 export const createCashMovement = (movement: TablesInsert<'cash_movements'>) =>
   supabase.from('cash_movements').insert(movement).select().single()
@@ -536,8 +560,21 @@ export const closeShift = (
   data: Pick<
     TablesUpdate<'cash_shifts'>,
     'closing_amount' | 'closed_by' | 'closed_at' | 'expected_amount' | 'difference'
+    | 'close_reconciliation' | 'close_comment'
   >,
-) => supabase.from('cash_shifts').update(data).eq('id', shiftId).select().single()
+) => supabase
+  .from('cash_shifts')
+  .update(data)
+  .eq('id', shiftId)
+  // Mismos joins que getClosedShifts: el comprobante del cierre usa los mismos
+  // nombres (abrió/cerró) que la reimpresión → salida idéntica.
+  .select(
+    'id, opening_amount, opened_at, opened_by, closing_amount, expected_amount, ' +
+    'difference, closed_at, closed_by, close_reconciliation, close_comment, ' +
+    'abrio:profiles!cash_shifts_opened_by_fkey(full_name), ' +
+    'cerro:profiles!cash_shifts_closed_by_fkey(full_name)',
+  )
+  .single()
 
 // --- Historial de turnos y de gastos (solo lectura, paginado) ---
 
@@ -552,6 +589,10 @@ export type ClosedShiftRow = {
   difference: number | null
   closed_at: string | null
   closed_by: string | null
+  // Arqueo multi-método persistido (snapshot). null en turnos pre-migración →
+  // la reimpresión del comprobante se deshabilita (degradación con gracia).
+  close_reconciliation: Json | null
+  close_comment: string | null
   abrio: { full_name: string | null } | null
   cerro: { full_name: string | null } | null
 }
@@ -574,7 +615,7 @@ export const getClosedShifts = ({
     .from('cash_shifts')
     .select(
       'id, opening_amount, opened_at, opened_by, closing_amount, expected_amount, ' +
-      'difference, closed_at, closed_by, ' +
+      'difference, closed_at, closed_by, close_reconciliation, close_comment, ' +
       'abrio:profiles!cash_shifts_opened_by_fkey(full_name), ' +
       'cerro:profiles!cash_shifts_closed_by_fkey(full_name)',
       { count: 'exact' },

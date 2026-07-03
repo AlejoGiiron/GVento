@@ -32,6 +32,31 @@ export interface ShiftBalance {
   isOverdraft: boolean
 }
 
+// ─── Arqueo multi-método (snapshot que se persiste al cerrar) ──────
+// Se CONGELA al cerrar: payments no tiene shift_id y su ventana es solo
+// temporal, así que recomputar el esperado de un turno cerrado sumaría pagos
+// posteriores. Por eso el esperado por método se snapshotea aquí.
+
+export type ArqueoMethod = 'cash' | 'card' | 'transfer' | 'nequi'
+
+export interface MethodReconciliation {
+  /** cash = apertura + ventas efectivo + ingresos − egresos; otros = ventas del método. */
+  expected: number
+  /** Declarado por el cajero (blanco = 0). */
+  declared: number
+  /** declared − expected. Negativo = faltante, positivo = sobrante. */
+  difference: number
+}
+
+export interface ShiftReconciliation {
+  methods: Record<ArqueoMethod, MethodReconciliation>
+  expected_total: number
+  declared_total: number
+  difference_total: number
+  /** Ventas (órdenes distintas) del turno. Una venta mixta = 1 venta, N pagos. */
+  sales_count: number
+}
+
 /** Efectivo disponible en caja según los movimientos hasta el momento. */
 export function availableCash(
   input: Pick<ShiftBalanceInput, 'openingAmount' | 'cashSales' | 'movementsIn' | 'movementsOut'>,
