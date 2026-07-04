@@ -45,7 +45,10 @@ export function ImageUpload({ value, onChange, onRemove }: ImageUploadProps) {
         <img
           src={value}
           alt="Imagen del producto"
-          style={{ width: '100%', height: 180, objectFit: 'cover', display: 'block' }}
+          // contain para que la preview muestre la foto COMPLETA (lo que se publicará),
+          // no una recortada. Aquí no hay color de categoría → superficie neutra del
+          // tema (#f1f5f9, la misma de skeletons/placeholders) como letterbox.
+          style={{ width: '100%', height: 180, objectFit: 'contain', display: 'block', background: '#f1f5f9' }}
         />
         <div style={{ position: 'absolute', inset: 0, background: 'rgba(15,23,42,0)', transition: 'background .15s' }}
           onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(15,23,42,.3)' }}
