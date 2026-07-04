@@ -189,7 +189,9 @@ function ProductImage({ product, color = '#10b981' }: { product: ProductWithCate
   if (product.image_url) {
     return (
       <img src={product.image_url} alt={product.name}
-        style={{ width: '100%', height: 140, objectFit: 'cover' }} />
+        // contain (no cover) para no recortar la foto; el letterbox toma el mismo
+        // tono suave de categoría que el placeholder de al lado (${color}20).
+        style={{ width: '100%', height: 140, objectFit: 'contain', background: `${color}20` }} />
     )
   }
 

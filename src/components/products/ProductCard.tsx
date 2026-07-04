@@ -39,7 +39,9 @@ export function ProductCard({ product, onEdit, onDeactivate }: ProductCardProps)
           <img
             src={product.image_url}
             alt={product.name}
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            // contain (no cover) para no recortar fotos verticales/horizontales;
+            // el letterbox toma el tono suave de la categoría del contenedor (${color}15).
+            style={{ width: '100%', height: '100%', objectFit: 'contain' }}
           />
         ) : (
           <div style={{
