@@ -100,30 +100,36 @@ test.describe.serial('Compras / Proveedores', () => {
     await expect(page.getByTestId('purchase-row').filter({ hasText: PROVEEDOR }).first()).toBeVisible()
   })
 
-  test('compra en efectivo CON turno abierto genera egreso de caja', async ({ page }) => {
+  test('compra en efectivo NO toca la caja (con turno abierto, sin egreso automático)', async ({ page }) => {
+    // Regla de raíz: la compra NUNCA genera un egreso de caja automático. El
+    // efectivo que sale del cajón se registra como egreso MANUAL. Se prueba con
+    // turno ABIERTO (el escenario que antes creaba el egreso indebido).
     await loginAsOwner(page)
     await page.goto('/ventas')
     await openShiftIfClosed(page, 100000)
 
     await registerPurchase(page, { supplier: PROVEEDOR, method: 'cash', product: INSUMO, qty: 5, cost: 2000 })
     await expect(page.getByTestId('new-invoice-modal')).toHaveCount(0)
-    await expect(page.getByText(/Egreso de caja registrado/)).toBeVisible()
+    // Toast de éxito normal; NADA de "Egreso de caja registrado".
+    await expect(page.getByText(/Compra registrada y stock actualizado/)).toBeVisible()
+    await expect(page.getByText(/Egreso de caja registrado/)).toHaveCount(0)
 
-    // El egreso (Compra a proveedor ...) aparece en los movimientos del turno.
+    // Y en los movimientos del turno NO aparece ningún egreso de la compra.
     await page.getByRole('button', { name: 'Movimientos' }).click()
-    await expect(page.getByText(`Compra a proveedor ${PROVEEDOR}`)).toBeVisible()
+    await expect(page.getByText(`Compra a proveedor ${PROVEEDOR}`)).toHaveCount(0)
   })
 
-  test('compra en efectivo SIN turno: advierte y NO impacta la caja', async ({ page }) => {
+  test('compra en efectivo SIN turno: se registra sin advertencia de caja', async ({ page }) => {
+    // Sin turno la compra ya no advierte nada de caja (nunca la tocó).
     await loginAsOwner(page)
     await page.goto('/ventas')
     await closeShiftIfOpen(page)
 
     await registerPurchase(page, { supplier: PROVEEDOR, method: 'cash', product: INSUMO, qty: 3, cost: 1000 })
 
-    // Advertencia inequívoca: la compra se registró, pero el efectivo NO entró a caja.
-    await expect(page.getByText(/no se registró en caja/)).toBeVisible()
     await expect(page.getByTestId('new-invoice-modal')).toHaveCount(0)
+    await expect(page.getByText(/Compra registrada y stock actualizado/)).toBeVisible()
+    await expect(page.getByText(/no se registró en caja/)).toHaveCount(0)
   })
 
   test('gating: el cajero NO ve Compras', async ({ page }) => {
