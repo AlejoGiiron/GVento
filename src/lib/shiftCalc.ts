@@ -55,6 +55,10 @@ export interface ShiftReconciliation {
   difference_total: number
   /** Ventas (órdenes distintas) del turno. Una venta mixta = 1 venta, N pagos. */
   sales_count: number
+  /** Total de VALES (ruletazo) entregados en el turno = suma discount_amount con
+   *  kind='vale' de las órdenes con pago en la ventana. INFORMATIVO: NO entra al
+   *  cuadre (el vale no es dinero cobrado, es lo que se dejó de cobrar). */
+  vouchers_total: number
 }
 
 /** Efectivo disponible en caja según los movimientos hasta el momento. */

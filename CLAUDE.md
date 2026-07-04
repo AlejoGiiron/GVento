@@ -190,18 +190,63 @@ Resumen rápido:
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: Arqueo multi-método al cerrar turno
-  (rama feature/arqueo-cierre, sesión 2026-07-03) — migración shift-reconciliation.sql
-  APLICADA en LAB; CloseShiftModal con conciliación por método (F1 efectivo intacto +
-  card/transfer/nequi), snapshot congelado en close_reconciliation (jsonb) + close_comment,
-  comprobante printCashReport (auto-print al cerrar) reusando printThermal de P4.1,
-  reimpresión desde P3 (idéntica byte-a-byte al cierre). tests/arqueo.spec.ts 4/4 + caja.spec
-  6/6 verde en lab. tsc 0 + build verde.
-  (Antes en esta sesión: impresión unificada thermalPrintCss/printThermal MERGEADO a develop;
-  pago mixto register_sale_payment + PaymentSplitEditor MERGEADO a develop, 7/7 verde.)
-Siguiente: mergear feature/arqueo-cierre a develop. Pendiente aplicar register-sale-payment.sql
-  y shift-reconciliation.sql en G-10 (prod) cuando toque desplegar; regenerar database.types.ts
-  cuando se resuelva el acceso de management del CLI (deuda).
+Última fase completada: Vale descuento / ruletazo
+  (rama feature/vale-descuento, sesión 2026-07-03) — migración orders-discount-vale.sql
+  APLICADA en LAB; descuento REAL persistido en orders (monto+tipo+kind+razón), vale como modo
+  del descuento (Mesa + POS), venta gratis (vale 100% → sin payment), vale informativo en el
+  arqueo (vouchers_total) + KPI "Regalado en vales" en Reportes. tests/vale-descuento.spec.ts
+  8/8 + arqueo 4/4 + pago-mixto 7/7 + pos 6/6 + reportes 5/5 verde en lab. tsc 0 + build verde.
+  (Antes en esta sesión y YA EN main: impresión unificada + pago mixto + arqueo multi-método —
+  release promovido a main 37d0eee, pusheado a origin.)
+Siguiente: mergear feature/vale-descuento a develop. Pendiente en G-10 (prod) cuando toque
+  desplegar: register-sale-payment.sql, shift-reconciliation.sql, orders-discount-vale.sql;
+  regenerar database.types.ts cuando se resuelva el acceso de management del CLI (deuda).
+
+### Detalle Vale descuento / ruletazo (F, sesión 2026-07-03, rama feature/vale-descuento)
+- **Migración `supabase/orders-discount-vale.sql`** (APLICADA en LAB): `orders` +4 columnas
+  aditivas — `discount_amount numeric(12,2) default 0`, `discount_type ('pct'|'fixed')`,
+  `discount_kind ('normal'|'vale') default 'normal'`, `discount_reason text`. Constraint
+  `chk_vale_is_fixed` (vale ⇒ fixed) + índice parcial `idx_orders_vale`. Resuelve de paso la
+  deuda del descuento derivado: ahora se persiste el REAL (SalesHistoryPage ya no lo estima).
+- **Vale = MODO del descuento** (no un 2º descuento): toggle "Es vale (ruletazo)" que fuerza
+  monto fijo + `kind='vale'`. Descuento normal (toggle off) = comportamiento de hoy (`kind='normal'`).
+  Borde blindado: vale + monto 0 → se persiste `kind='normal'`/`type=null` (no viola la constraint).
+- **Mesa (TableCheckoutModal):** bloque descuento nuevo (input monto + toggle vale + razón,
+  testids `discount-amount`/`discount-vale-toggle`/`discount-reason`) ANTES del pago; el total
+  descontado alimenta el PaymentSplitEditor. IDEMPOTENTE: `subtotal = order.total +
+  order.discount_amount` (invariante recuperado del estado persistido, NO del total crudo) →
+  reintentar no doble-descuenta (mismo patrón anti-doble-descuento de stock). Helper
+  `applyOrderDiscount` (UPDATE, antes de registerSalePayment). El select de mesa es `*` → trae
+  discount_amount sin cambios.
+- **POS (CartPanel + CheckoutModal):** cartStore gana `discountKind`/`discountReason` +
+  `setDiscountKind` (vale ⇒ fuerza fixed) `setDiscountReason`; propagados en hold/resume/clear.
+  Toggle vale en la cabecera del descuento (oculta el selector %/$). Persiste en el createOrder
+  (INSERT único, sin el patrón de mesa: el subtotal del carrito es invariante en memoria).
+- **Venta GRATIS (vale 100% → total 0):** `handleConfirm` (POS+Mesa) salta register_sale_payment
+  cuando `total===0` (la RPC valida amount>0). La orden queda registrada con su vale, número
+  asignado, `payment_status='paid'` (saldada, NO fiado), delivered (Mesa) — SIN payment.
+  Historial: `methodDisplay` → "Cortesía" (total 0 sin pagos; distinto del fiado saldado que
+  tiene total>0). El botón "Continuar" va directo a handleConfirm si total 0.
+- **PaymentSplitEditor (compartido):** re-sembrado INTELIGENTE ante cambio de `total` (p.ej.
+  aplicar un descuento tras abrir el split): flag `dirty` — si la semilla está intacta se
+  re-siembra a `[efectivo: nuevoTotal]`; si el cajero ya editó, NO se tocan sus líneas (el
+  `remaining` reactivo lo guía). `remaining`/`valid` ya eran reactivos al prop total.
+- **Arqueo:** `getShiftVouchersTotal` (vales de órdenes con pago en la ventana + ventas GRATIS
+  vale/total=0/con número en la ventana); `ShiftReconciliation.vouchers_total` congelado en el
+  snapshot al cerrar. Línea informativa "Vales entregados" en el comprobante (printer.ts) y en
+  CloseShiftModal (`shift-vouchers-total`) — NO toca el cuadre (el vale no es dinero cobrado).
+  `getShiftSalesCount` extendido: cuenta las ventas gratis (total=0 + order_number no-null) además
+  de las con pago (una venta gratis es una venta; fiado sin pago sigue sin contar).
+- **Reporte:** `getVouchersTotal(restaurantId, fromISO, toISO)` (suma discount_amount kind='vale'
+  por rango, límites de día Bogotá porque created_at es UTC); `useReports` expone `vouchersTotal`;
+  KPI "Regalado en vales" (`report-vouchers`, ícono Gift) en ReportsPage tab Financiero.
+- **tests/vale-descuento.spec.ts** (8): vale en Mesa (+ invariante subtotal), vale en POS, descuento
+  normal ≠ vale, arqueo (vouchers_total + cuadre intacto), reporte (delta), venta gratis (clamp +
+  cierre sin pago + "Cortesía"), borde vale-sin-monto, limpieza. tsc 0 + build verde.
+- database.types.ts: `orders` +4 columnas agregadas A MANO (deuda CLI).
+- BORDE anotado: las ventas GRATIS se anclan al turno por `created_at` (no hay timestamp de pago).
+  Una mesa abierta en un turno previo y cerrada gratis en el actual no se cuenta en ese turno (sí
+  en el reporte mensual). Raro² (ruletazo 100% sobre mesa que cruzó turno).
 
 ### Detalle Arqueo multi-método (F, sesión 2026-07-03, rama feature/arqueo-cierre)
 - **Migración `supabase/shift-reconciliation.sql`** (APLICADA en LAB): `cash_shifts` +2 columnas

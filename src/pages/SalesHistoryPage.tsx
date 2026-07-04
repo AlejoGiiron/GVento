@@ -75,9 +75,12 @@ function paymentMethodsOf(row: { payments: { method: PayMethod }[] }): PayMethod
 // hoy); mixto → "Efectivo + Nequi". Una venta a fiado NO tiene fila en
 // `payments` (la liquidación vive en debt_payments), así que se deriva del
 // payment_status para que no aparezca como venta sin método.
-function methodDisplay(row: { payment_status: string; payments: { method: PayMethod }[] }): string {
+function methodDisplay(row: { payment_status: string; total: number; payments: { method: PayMethod }[] }): string {
   const methods = paymentMethodsOf(row)
   if (methods.length > 0) return methods.map((m) => METHOD_LABEL[m]).join(' + ')
+  // Venta GRATIS (vale 100%): total 0, sin filas en payments, saldada ('paid').
+  // Se distingue del fiado saldado (que tiene total > 0).
+  if (row.total === 0) return 'Cortesía'
   if (row.payment_status === 'paid') return 'Fiado (saldado)'
   if (row.payment_status === 'partial') return 'Fiado (parcial)'
   return 'Fiado'

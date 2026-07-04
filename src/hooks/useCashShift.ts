@@ -10,6 +10,7 @@ import {
   closeShift as closeShiftHelper,
   getShiftPayments,
   getShiftSalesCount,
+  getShiftVouchersTotal,
   getCashMovements,
   createCashMovement,
   type ClosedShiftRow,
@@ -74,6 +75,15 @@ export function useCashShift() {
     enabled: !!currentShift?.id,
   })
 
+  // Vales (ruletazo) del turno — INFORMATIVO (no entra al cuadre). Para mostrar
+  // en el cierre; el snapshot lo recongela en la mutación al cerrar.
+  const { data: vouchersTotal = 0 } = useQuery({
+    queryKey: ['shift_vouchers', currentShift?.id],
+    queryFn: () => getShiftVouchersTotal(restaurantId!, currentShift!.opened_at),
+    enabled: !!currentShift?.id,
+    refetchInterval: 5_000,
+  })
+
   const invalidateShift = () =>
     queryClient.invalidateQueries({ queryKey: ['cash_shift_open', restaurantId] })
 
@@ -102,16 +112,19 @@ export function useCashShift() {
       closingAmount: number
       expectedAmount: number
       difference: number
-      // Snapshot del arqueo SIN sales_count (lo completa esta mutación al cerrar,
-      // que es el único momento en que la ventana solo-opened_at es correcta).
-      reconciliation: Omit<ShiftReconciliation, 'sales_count'>
+      // Snapshot del arqueo SIN sales_count/vouchers_total (los completa esta
+      // mutación al cerrar, único momento en que la ventana solo-opened_at es
+      // correcta — recomputarlos en un turno cerrado sumaría datos posteriores).
+      reconciliation: Omit<ShiftReconciliation, 'sales_count' | 'vouchers_total'>
       comment: string
     }) => {
-      // sales_count congelado al cierre (órdenes distintas en la ventana).
+      // Congelados al cierre: nº de ventas + total de vales (informativo).
       const salesCount = await getShiftSalesCount(restaurantId!, currentShift!.opened_at)
+      const vouchers = await getShiftVouchersTotal(restaurantId!, currentShift!.opened_at)
       const reconciliation: ShiftReconciliation = {
         ...params.reconciliation,
         sales_count: salesCount,
+        vouchers_total: vouchers,
       }
       const { data, error } = await closeShiftHelper(currentShift!.id, {
         closing_amount: params.closingAmount,
@@ -187,6 +200,7 @@ export function useCashShift() {
     isLoadingShift,
     salesSummary,
     movements,
+    vouchersTotal,
     refetchSales,
     openShift: openShiftMutation.mutateAsync,
     closeShift: closeShiftMutation.mutateAsync,

@@ -307,6 +307,7 @@ function buildCashReportHtml(data: CashReportData): string {
     ${line('Esperado total', money(rec.expected_total))}
     ${line('Declarado total', money(rec.declared_total))}
     ${line('Diferencia total', signed(rec.difference_total), { bold: true, size: 13 })}
+    ${(rec.vouchers_total ?? 0) > 0 ? `${dash}${line('Vales entregados', money(rec.vouchers_total))}` : ''}
     ${data.comment ? `${dash}<div style="font-size:10.5px"><span style="font-weight:600">Comentario:</span> ${data.comment}</div>` : ''}
     ${dash}
     <div style="text-align:center;font-size:11px">— Arqueo G-Vento —</div>
