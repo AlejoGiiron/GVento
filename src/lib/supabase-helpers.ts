@@ -915,12 +915,12 @@ export type PurchaseItemPayload = {
   unit_cost: number
 }
 
-// Resultado de register_purchase (el jsonb que retorna la RPC).
+// Resultado de register_purchase (el jsonb que retorna la RPC). La compra NO
+// toca la caja: no crea egreso automático (el efectivo que sale del cajón se
+// registra como egreso MANUAL). Por eso no hay flags de caja en el retorno.
 export interface RegisterPurchaseResult {
   invoice_id: string
   total: number
-  cash_movement_created: boolean
-  shift_open: boolean
 }
 
 // Registra la compra de forma atómica (sube stock, actualiza cost_price y, si
