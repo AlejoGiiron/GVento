@@ -348,6 +348,37 @@ export const updateOrderStatus = (orderId: string, status: Tables<'orders'>['sta
 export const updateOrderTotal = (orderId: string, total: number) =>
   supabase.from('orders').update({ total }).eq('id', orderId)
 
+// Aplica un descuento/vale a una orden. IDEMPOTENTE: el caller pasa `total` ya
+// recalculado desde el SUBTOTAL INVARIANTE (order.total + order.discount_amount),
+// no desde el total crudo → reintentar no doble-descuenta. Persiste el descuento
+// REAL (monto + tipo + kind + razón). Escribir ANTES de registerSalePayment para
+// que la RPC valide Σ pagos contra el total ya descontado.
+// Total REGALADO en vales en un rango (por sede). Suma discount_amount de las
+// órdenes con discount_kind='vale' y created_at en [fromISO, toISO]. RLS ya
+// limita a la sede; se filtra por restaurant_id de todas formas. Para el KPI
+// "Regalado en vales" de Reportes. from/to = límites ISO de día (Bogotá).
+export const getVouchersTotal = async (
+  restaurantId: string, fromISO: string, toISO: string,
+): Promise<number> => {
+  const { data, error } = await supabase
+    .from('orders')
+    .select('discount_amount')
+    .eq('restaurant_id', restaurantId)
+    .eq('discount_kind', 'vale')
+    .gte('created_at', fromISO)
+    .lte('created_at', toISO)
+  if (error) throw error
+  return (data ?? []).reduce((s, o) => s + (o.discount_amount ?? 0), 0)
+}
+
+export const applyOrderDiscount = (
+  orderId: string,
+  data: Pick<
+    TablesUpdate<'orders'>,
+    'total' | 'discount_amount' | 'discount_type' | 'discount_kind' | 'discount_reason'
+  >,
+) => supabase.from('orders').update(data).eq('id', orderId).select().single()
+
 // --- Numeración secuencial de ventas (por sede) ---
 
 // Devuelve el siguiente número correlativo de la sede (incremento atómico en
@@ -506,16 +537,70 @@ export const getShiftPayments = (restaurantId: string, from: string) =>
     .eq('restaurant_id', restaurantId)
     .gte('created_at', from)
 
-// Nº de VENTAS (órdenes distintas) con pago en la ventana del turno. Una venta
-// mixta = varias filas payments pero UNA orden → se cuentan order_id distintos.
+// Nº de VENTAS (órdenes distintas) del turno. Una venta mixta = varias filas
+// payments pero UNA orden → order_id distintos. Incluye las ventas GRATIS (vale
+// 100%, total 0, sin payment): se anclan por total=0 + order_number asignado
+// (marca de venta completada, la distingue de una mesa abierta) + created_at en
+// la ventana. Fiado (total>0, sin payment) NO cuenta (igual que antes).
 export const getShiftSalesCount = async (restaurantId: string, from: string): Promise<number> => {
-  const { data, error } = await supabase
+  const { data: pays, error: e1 } = await supabase
     .from('payments')
     .select('order_id')
     .eq('restaurant_id', restaurantId)
     .gte('created_at', from)
-  if (error) throw error
-  return new Set((data ?? []).map((p) => p.order_id)).size
+  if (e1) throw e1
+  const ids = new Set((pays ?? []).map((p) => p.order_id as string))
+
+  const { data: free, error: e2 } = await supabase
+    .from('orders')
+    .select('id')
+    .eq('restaurant_id', restaurantId)
+    .eq('total', 0)
+    .not('order_number', 'is', null)
+    .gte('created_at', from)
+  if (e2) throw e2
+  for (const o of free ?? []) ids.add(o.id as string)
+  return ids.size
+}
+
+// Total de VALES (ruletazo) entregados en el turno: suma discount_amount con
+// kind='vale' de las órdenes con pago en la ventana (mismo criterio que
+// sales_count). INFORMATIVO para el arqueo; no entra al cuadre. Las órdenes a
+// fiado (sin fila en payments) no cuentan acá — igual que en sales_count.
+export const getShiftVouchersTotal = async (restaurantId: string, from: string): Promise<number> => {
+  const { data: pays, error: e1 } = await supabase
+    .from('payments')
+    .select('order_id')
+    .eq('restaurant_id', restaurantId)
+    .gte('created_at', from)
+  if (e1) throw e1
+  const orderIds = [...new Set((pays ?? []).map((p) => p.order_id))]
+
+  let sum = 0
+  // Vales de órdenes COBRADAS en la ventana (con pago).
+  if (orderIds.length > 0) {
+    const { data: orders, error: e2 } = await supabase
+      .from('orders')
+      .select('discount_amount')
+      .eq('discount_kind', 'vale')
+      .in('id', orderIds)
+    if (e2) throw e2
+    sum += (orders ?? []).reduce((s, o) => s + (o.discount_amount ?? 0), 0)
+  }
+  // + Vales de ventas GRATIS (vale 100%, total 0, sin pago): se anclan por
+  // total=0 + order_number asignado + created_at en la ventana. Así el regalo se
+  // cuenta aunque no haya entrado dinero.
+  const { data: free, error: e3 } = await supabase
+    .from('orders')
+    .select('discount_amount')
+    .eq('restaurant_id', restaurantId)
+    .eq('discount_kind', 'vale')
+    .eq('total', 0)
+    .not('order_number', 'is', null)
+    .gte('created_at', from)
+  if (e3) throw e3
+  sum += (free ?? []).reduce((s, o) => s + (o.discount_amount ?? 0), 0)
+  return sum
 }
 
 // --- Cash Movements ---
@@ -830,12 +915,12 @@ export type PurchaseItemPayload = {
   unit_cost: number
 }
 
-// Resultado de register_purchase (el jsonb que retorna la RPC).
+// Resultado de register_purchase (el jsonb que retorna la RPC). La compra NO
+// toca la caja: no crea egreso automático (el efectivo que sale del cajón se
+// registra como egreso MANUAL). Por eso no hay flags de caja en el retorno.
 export interface RegisterPurchaseResult {
   invoice_id: string
   total: number
-  cash_movement_created: boolean
-  shift_open: boolean
 }
 
 // Registra la compra de forma atómica (sube stock, actualiza cost_price y, si

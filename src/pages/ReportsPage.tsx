@@ -9,7 +9,7 @@ import {
   LineChart, Line,
   PieChart, Pie, Cell,
 } from 'recharts'
-import { Download, TrendingUp, TrendingDown, ShoppingBag, DollarSign, Package, Wallet, Boxes } from 'lucide-react'
+import { Download, TrendingUp, TrendingDown, ShoppingBag, DollarSign, Package, Wallet, Boxes, Gift } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { useReports } from '@/hooks/useReports'
 
@@ -44,13 +44,14 @@ function Skeleton({ h }: { h: number }) {
 // ─── KPI Card ─────────────────────────────────────────────────────────────────
 
 function KPICard({
-  label, value, icon, change, isLoading,
+  label, value, icon, change, isLoading, testid,
 }: {
   label: string
   value: string
   icon: React.ReactNode
   change: number | null
   isLoading: boolean
+  testid?: string
 }) {
   if (isLoading) return <Skeleton h={110} />
   const up = change !== null && change >= 0
@@ -66,7 +67,7 @@ function KPICard({
           {icon}
         </span>
       </div>
-      <div style={{ fontFamily: 'monospace', fontSize: 22, fontWeight: 700, color: '#0f172a', letterSpacing: -0.5 }}>
+      <div data-testid={testid} style={{ fontFamily: 'monospace', fontSize: 22, fontWeight: 700, color: '#0f172a', letterSpacing: -0.5 }}>
         {value}
       </div>
       <div style={{
@@ -128,7 +129,7 @@ export function ReportsPage() {
   const prevFrom = useMemo(() => format(subDays(parseISO(from), periodLen), 'yyyy-MM-dd'), [from, periodLen])
 
   // ─── Data ─────────────────────────────────────────────────────────────────
-  const { dailySales, productPerformance, hourlySales, isLoading } = useReports({ from, to })
+  const { dailySales, productPerformance, hourlySales, vouchersTotal, isLoading } = useReports({ from, to })
   const { dailySales: prevDailySales } = useReports({ from: prevFrom, to: prevTo })
 
   // ─── KPI aggregates ───────────────────────────────────────────────────────
@@ -464,7 +465,7 @@ export function ReportsPage() {
           </div>
 
           {/* KPIs financieros */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
             <KPICard
               label="Ventas totales"
               value={COP(totalRev)}
@@ -485,6 +486,14 @@ export function ReportsPage() {
               icon={<TrendingUp size={15} />}
               change={pctChange(avgTicket, prevTicket)}
               isLoading={isLoading}
+            />
+            <KPICard
+              label="Regalado en vales"
+              value={COP(vouchersTotal)}
+              icon={<Gift size={15} />}
+              change={null}
+              isLoading={isLoading}
+              testid="report-vouchers"
             />
           </div>
 
