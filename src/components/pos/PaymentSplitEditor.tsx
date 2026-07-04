@@ -49,6 +49,18 @@ export function PaymentSplitEditor({ total, onChange }: PaymentSplitEditorProps)
   // cajero reduce esta línea y agrega otras para dividir.
   const [lines, setLines] = useState<Line[]>([{ method: 'cash', amount: total }])
   const [received, setReceived] = useState('') // recibido efectivo (opcional, solo UI)
+  // El cajero ya tocó las líneas (dividió manualmente). Gobierna el re-sembrado.
+  const [dirty, setDirty] = useState(false)
+
+  // Re-sembrado INTELIGENTE ante un cambio de `total` (p.ej. se aplicó/cambió un
+  // descuento tras abrir el split): si la semilla sigue INTACTA (!dirty), se
+  // ajusta sola a [efectivo: nuevoTotal]. Si el cajero YA editó, NO se tocan sus
+  // líneas — `remaining` (reactivo al prop `total`) recalcula y lo guía a la
+  // diferencia; la validación Σ=total bloquea/desbloquea Cobrar sola.
+  useEffect(() => {
+    if (!dirty) setLines([{ method: 'cash', amount: total }])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [total])
 
   const assigned = lines.reduce((s, l) => s + l.amount, 0)
   const remaining = total - assigned
@@ -70,18 +82,24 @@ export function PaymentSplitEditor({ total, onChange }: PaymentSplitEditorProps)
   const addLine = () => {
     const next = firstFreeMethod()
     if (!next) return // ya están los 4 métodos
+    setDirty(true)
     setLines((ls) => [...ls, { method: next, amount: 0 }])
   }
 
   const removeLine = (idx: number) => {
+    setDirty(true)
     setLines((ls) => (ls.length <= 1 ? ls : ls.filter((_, i) => i !== idx)))
   }
 
-  const setMethod = (idx: number, method: PayMethod) =>
+  const setMethod = (idx: number, method: PayMethod) => {
+    setDirty(true)
     setLines((ls) => ls.map((l, i) => (i === idx ? { ...l, method } : l)))
+  }
 
-  const setAmount = (idx: number, amount: number) =>
+  const setAmount = (idx: number, amount: number) => {
+    setDirty(true)
     setLines((ls) => ls.map((l, i) => (i === idx ? { ...l, amount } : l)))
+  }
 
   const canAdd = lines.length < METHODS.length
 

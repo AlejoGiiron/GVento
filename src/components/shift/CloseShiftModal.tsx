@@ -29,7 +29,7 @@ interface CloseShiftModalProps {
 }
 
 export function CloseShiftModal({ onClose }: CloseShiftModalProps) {
-  const { currentShift, salesSummary, movements, closeShift, isClosingShift } = useCashShift()
+  const { currentShift, salesSummary, movements, vouchersTotal, closeShift, isClosingShift } = useCashShift()
   const { restaurant } = useRestaurantConfig()
   const [rawAmount, setRawAmount] = useState('')
   // Arqueo multi-método: declarado por método NO-efectivo (blanco = 0) + comentario.
@@ -72,7 +72,7 @@ export function CloseShiftModal({ onClose }: CloseShiftModalProps) {
     const otherMethodsObj = Object.fromEntries(
       otherRows.map((r) => [r.method, { expected: r.expected, declared: r.declared, difference: r.difference }]),
     ) as Record<OtherMethod, MethodReconciliation>
-    const reconciliation: Omit<ShiftReconciliation, 'sales_count'> = {
+    const reconciliation: Omit<ShiftReconciliation, 'sales_count' | 'vouchers_total'> = {
       methods: {
         cash: { expected: expectedCash, declared, difference },
         ...otherMethodsObj,
@@ -402,6 +402,17 @@ export function CloseShiftModal({ onClose }: CloseShiftModalProps) {
               </span>
             </div>
           </div>
+
+          {/* Vales del turno — INFORMATIVO. NO entra al cuadre (el vale no es
+              dinero cobrado, es lo que se regaló). */}
+          {vouchersTotal > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, padding: '10px 14px', borderRadius: 10, background: '#fffbeb', border: '1px solid #fde68a' }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: '#92400e' }}>Vales entregados en el turno</span>
+              <span data-testid="shift-vouchers-total" style={{ fontFamily: 'monospace', fontSize: 14, fontWeight: 700, color: '#92400e' }}>
+                {formatCOP(vouchersTotal)}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Footer */}

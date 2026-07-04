@@ -20,7 +20,7 @@ import {
   updateTableStatus, createOrder, addOrderItemsWithExtras,
   updateOrderTotal, updateOrderStatus, registerSalePayment,
   getTableActiveOrderCount, removeOrderItem, markItemsSentToKitchen,
-  assignOrderNumber, setOrderFiado,
+  assignOrderNumber, setOrderFiado, applyOrderDiscount,
 } from '@/lib/supabase-helpers'
 import type { SalePaymentPart } from '@/lib/supabase-helpers'
 import { OpenShiftModal } from '@/components/shift/OpenShiftModal'
@@ -606,11 +606,21 @@ function TableCheckoutModal({
   const [split, setSplit] = useState(false)
   const [splitParts, setSplitParts] = useState<SalePaymentPart[]>([])
   const [splitValid, setSplitValid] = useState(false)
+  // Descuento / vale (ruletazo) al cerrar la mesa. Mesa no tenía descuento; se
+  // agrega acá. El vale es siempre monto fijo.
+  const [discountRaw, setDiscountRaw] = useState('')
+  const [isVale, setIsVale] = useState(false)
+  const [discountReason, setDiscountReason] = useState('')
 
   const canFiado = can('fiado.gestionar')
   // En modo dividir el fiado no aplica (mixto = solo métodos reales).
   const isFiado = !split && method === 'fiado'
-  const total = order.total
+  // Subtotal INVARIANTE recuperado del estado persistido (order.total ya puede
+  // venir descontado de un intento previo; sumar el descuento persistido lo
+  // recupera) → aplicar el descuento es idempotente, no doble-descuenta.
+  const subtotal = order.total + (order.discount_amount ?? 0)
+  const discountAmt = Math.min(parseInt(discountRaw.replace(/\D/g, ''), 10) || 0, subtotal)
+  const total = subtotal - discountAmt
   const receivedNum = parseInt(received.replace(/\D/g, ''), 10) || 0
   const change = receivedNum - total
 
@@ -633,6 +643,24 @@ function TableCheckoutModal({
     if (isFiado && !customerId) { toast.error('Selecciona un cliente para la venta a fiado'); return }
     setSubmitting(true)
     try {
+      // Descuento/vale ANTES del cobro. IDEMPOTENTE: `total` se computó desde el
+      // subtotal invariante, así que reintentar no doble-descuenta. Alimenta tanto
+      // el pago (la RPC valida Σ contra order.total) como el fiado (saldo). Se
+      // llama también si el descuento pasó a 0 pero la orden traía uno (para
+      // restaurar el total).
+      if (discountAmt > 0 || (order.discount_amount ?? 0) > 0) {
+        const { error: discErr } = await applyOrderDiscount(order.id, {
+          total,
+          // Sin monto (0) → kind normal + type null (no es un vale; respeta la
+          // constraint vale⇒fixed). Con monto: mesa siempre es fixed.
+          discount_amount: discountAmt,
+          discount_type: discountAmt > 0 ? 'fixed' : null,
+          discount_kind: discountAmt > 0 && isVale ? 'vale' : 'normal',
+          discount_reason: discountAmt > 0 ? (discountReason.trim() || null) : null,
+        })
+        if (discErr) throw discErr
+      }
+
       // Venta a fiado de mesa: la orden YA existe con sus ítems y el stock YA se
       // descontó al agregarlos (etapa de "Agregar a mesa", no aquí). Solo la
       // marcamos como pendiente de pago y ligada al cliente; NO entra dinero
@@ -640,7 +668,7 @@ function TableCheckoutModal({
       if (isFiado) {
         const { error: fiadoErr } = await setOrderFiado(order.id, customerId!, customerName)
         if (fiadoErr) throw fiadoErr
-      } else {
+      } else if (total > 0) {
         // Un solo camino de cobro: simple = una parte al total; dividir = las
         // partes del editor. La RPC valida atómicamente Σ = total e inserta una
         // fila por método. En !split el método nunca es fiado (isFiado lo excluye),
@@ -651,6 +679,9 @@ function TableCheckoutModal({
         const { error: payErr } = await registerSalePayment(order.id, parts)
         if (payErr) throw payErr
       }
+      // total === 0 (vale 100%): venta GRATIS. El descuento ya se aplicó arriba
+      // (applyOrderDiscount); se salta el pago (nada que cobrar). La orden queda
+      // delivered + con número + mesa liberada (abajo), payment_status='paid'.
 
       // Numeración: es una venta real (cobrada o a fiado) → asignar número.
       // Si falla, no se tumba la venta (queda registrada igual).
@@ -705,6 +736,50 @@ function TableCheckoutModal({
                 <X size={16} />
               </button>
             </div>
+
+            {/* Descuento / vale — aplica antes del pago; el total baja en vivo y
+                alimenta el pago (split o simple) y el fiado. */}
+            <div style={{ padding: '14px 22px 0' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: '#334155' }}>Descuento</span>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, color: isVale ? '#065f46' : '#64748b', fontWeight: isVale ? 700 : 500 }}>
+                  <input
+                    type="checkbox"
+                    data-testid="discount-vale-toggle"
+                    checked={isVale}
+                    onChange={(e) => setIsVale(e.target.checked)}
+                  />
+                  Es vale (ruletazo)
+                </label>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ position: 'relative', flex: '0 0 150px' }}>
+                  <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontFamily: 'monospace', fontSize: 13, pointerEvents: 'none' }}>$</span>
+                  <input
+                    data-testid="discount-amount"
+                    inputMode="numeric"
+                    value={discountRaw ? formatCOP(discountAmt).replace('$', '').trim() : ''}
+                    onChange={(e) => setDiscountRaw(e.target.value.replace(/\D/g, ''))}
+                    placeholder="0"
+                    style={{ width: '100%', boxSizing: 'border-box', padding: '9px 10px 9px 22px', border: `1.5px solid ${discountAmt > 0 ? (isVale ? '#10b981' : '#cbd5e1') : '#e5e7eb'}`, borderRadius: 8, fontSize: 14, fontWeight: 600, color: '#0f172a', fontFamily: 'monospace', textAlign: 'right', outline: 'none', background: '#fff' }}
+                  />
+                </div>
+                <input
+                  data-testid="discount-reason"
+                  value={discountReason}
+                  onChange={(e) => setDiscountReason(e.target.value)}
+                  placeholder="Motivo (opcional)"
+                  style={{ flex: 1, boxSizing: 'border-box', padding: '9px 10px', border: '1.5px solid #e5e7eb', borderRadius: 8, fontSize: 12.5, color: '#0f172a', outline: 'none', background: '#fff' }}
+                />
+              </div>
+              {discountAmt > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 8, fontSize: 12, color: '#64748b' }}>
+                  <span>Subtotal {formatCOP(subtotal)} − {isVale ? 'vale' : 'desc.'} {formatCOP(discountAmt)}</span>
+                  <span style={{ fontWeight: 700, color: '#0f172a', fontFamily: 'monospace' }}>{formatCOP(total)}</span>
+                </div>
+              )}
+            </div>
+
             {!split && (
             <div style={{ padding: 22 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: '#0f172a', marginBottom: 12 }}>Método de pago</div>
@@ -770,7 +845,7 @@ function TableCheckoutModal({
                 <button
                   data-testid="checkout-continue"
                   disabled={submitting || (isFiado && !customerId)}
-                  onClick={() => method === 'efectivo' ? setStep('amount') : handleConfirm()}
+                  onClick={() => method === 'efectivo' && total > 0 ? setStep('amount') : handleConfirm()}
                   style={{ flex: 2, padding: '12px', border: 'none', background: submitting || (isFiado && !customerId) ? '#cbd5e1' : '#10b981', borderRadius: 9, cursor: submitting || (isFiado && !customerId) ? 'not-allowed' : 'pointer', fontSize: 13.5, fontWeight: 600, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
                 >
                   {submitting

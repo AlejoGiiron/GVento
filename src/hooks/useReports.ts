@@ -1,7 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
+import { getVouchersTotal } from '@/lib/supabase-helpers'
 import type { Views } from '@/types/database.types'
+
+// 'YYYY-MM-DD' (Bogotá) → límites ISO del día en UTC. Bogotá = UTC-5 fijo.
+const dayStartISO = (day: string) => new Date(`${day}T00:00:00-05:00`).toISOString()
+const dayEndISO = (day: string) => new Date(`${day}T23:59:59.999-05:00`).toISOString()
 
 export type DailySalesRow        = Views<'daily_sales_summary'>
 export type ProductPerformanceRow = Views<'product_performance'>
@@ -15,7 +20,8 @@ export interface ReportParams {
 
 export function useReports({ from, to }: ReportParams) {
   const { profile } = useAuth()
-  const enabled = !!profile?.restaurant_id && !!from && !!to
+  const restaurantId = profile?.restaurant_id ?? null
+  const enabled = !!restaurantId && !!from && !!to
 
   const dailySales = useQuery({
     queryKey: ['reports_daily_sales', from, to],
@@ -81,11 +87,20 @@ export function useReports({ from, to }: ReportParams) {
     staleTime: 5 * 60_000,
   })
 
+  // Total regalado en vales (ruletazo) en el rango — KPI de Reportes.
+  const vouchers = useQuery({
+    queryKey: ['reports_vouchers', restaurantId, from, to],
+    queryFn: () => getVouchersTotal(restaurantId!, dayStartISO(from), dayEndISO(to)),
+    enabled,
+    staleTime: 5 * 60_000,
+  })
+
   return {
     dailySales:         dailySales.data         ?? [],
     productPerformance: productPerformance.data ?? [],
     hourlySales:        hourlySales.data        ?? [],
     waiterPerformance:  waiterPerformance.data  ?? [],
+    vouchersTotal:      vouchers.data           ?? 0,
     isLoading:
       dailySales.isLoading        ||
       productPerformance.isLoading ||

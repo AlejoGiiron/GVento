@@ -480,6 +480,10 @@ export type Database = {
           customer_name: string | null
           customer_phone: string | null
           delivery_address: string | null
+          discount_amount: number
+          discount_kind: string
+          discount_reason: string | null
+          discount_type: string | null
           estimated_delivery_minutes: number | null
           id: string
           notes: string | null
@@ -501,6 +505,10 @@ export type Database = {
           customer_name?: string | null
           customer_phone?: string | null
           delivery_address?: string | null
+          discount_amount?: number
+          discount_kind?: string
+          discount_reason?: string | null
+          discount_type?: string | null
           estimated_delivery_minutes?: number | null
           id?: string
           notes?: string | null
@@ -522,6 +530,10 @@ export type Database = {
           customer_name?: string | null
           customer_phone?: string | null
           delivery_address?: string | null
+          discount_amount?: number
+          discount_kind?: string
+          discount_reason?: string | null
+          discount_type?: string | null
           estimated_delivery_minutes?: number | null
           id?: string
           notes?: string | null

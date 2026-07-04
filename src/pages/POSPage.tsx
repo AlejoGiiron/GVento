@@ -22,7 +22,7 @@ import { createOrder, addOrderItemsWithExtras, registerSalePayment, assignOrderN
 import type { SalePaymentPart } from '@/lib/supabase-helpers'
 import { CustomerPicker } from '@/components/fiado/CustomerPicker'
 import { cashQuickAmounts } from '@/lib/cashRounding'
-import type { ProductWithCategory, CartItem, DiscountType, HeldOrder } from '@/stores/cartStore'
+import type { ProductWithCategory, CartItem, DiscountType, DiscountKind, HeldOrder } from '@/stores/cartStore'
 import type { Enums } from '@/types/database.types'
 
 type OrderType = 'dine_in' | 'takeaway' | 'delivery'
@@ -448,8 +448,13 @@ function CartPanel({
   const items = useCartStore((s) => s.items)
   const discount = useCartStore((s) => s.discount)
   const discountType = useCartStore((s) => s.discountType)
+  const discountKind = useCartStore((s) => s.discountKind)
+  const discountReason = useCartStore((s) => s.discountReason)
   const clear = useCartStore((s) => s.clear)
   const setDiscount = useCartStore((s) => s.setDiscount)
+  const setDiscountKind = useCartStore((s) => s.setDiscountKind)
+  const setDiscountReason = useCartStore((s) => s.setDiscountReason)
+  const isVale = discountKind === 'vale'
   const { can } = usePermissions()
 
   // dine_in requires a table_id (DB constraint) — that's handled by TablesPage, not the POS quick-sale flow
@@ -572,7 +577,19 @@ function CartPanel({
             Descuento
           </span>
           <div style={{ flex: 1 }} />
-          {/* Mode toggle */}
+          {/* Toggle "es vale" (ruletazo). El vale es siempre monto fijo → al
+              activarlo se oculta el selector %/$ y se marca discount_kind='vale'. */}
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 11, fontWeight: isVale ? 700 : 600, color: isVale ? '#065f46' : '#64748b', marginRight: 8 }}>
+            <input
+              type="checkbox"
+              data-testid="discount-vale-toggle"
+              checked={isVale}
+              onChange={(e) => setDiscountKind(e.target.checked ? 'vale' : 'normal')}
+            />
+            Vale
+          </label>
+          {/* Mode toggle (oculto para vale: siempre fijo) */}
+          {!isVale && (
           <div style={{ display: 'flex', borderRadius: 7, border: '1px solid #e5e7eb', overflow: 'hidden' }}>
             {(['pct', 'fixed'] as DiscountType[]).map((t) => (
               <button
@@ -590,6 +607,7 @@ function CartPanel({
               </button>
             ))}
           </div>
+          )}
         </div>
 
         {discountType === 'pct' ? (
@@ -646,6 +664,7 @@ function CartPanel({
             <input
               type="text"
               inputMode="numeric"
+              data-testid="discount-amount"
               value={discount ? String(discount) : ''}
               onChange={(e) => {
                 const digits = e.target.value.replace(/\D/g, '')
@@ -672,6 +691,21 @@ function CartPanel({
               </button>
             )}
           </div>
+        )}
+
+        {/* Motivo del vale (opcional) */}
+        {isVale && (
+          <input
+            data-testid="discount-reason"
+            value={discountReason}
+            onChange={(e) => setDiscountReason(e.target.value)}
+            placeholder="Motivo del vale (opcional)"
+            style={{
+              width: '100%', marginTop: 6, padding: '8px 12px',
+              border: '1.5px solid #e5e7eb', borderRadius: 8, fontSize: 12.5,
+              outline: 'none', boxSizing: 'border-box', color: '#0f172a',
+            }}
+          />
         )}
       </div>
       )}
@@ -758,6 +792,8 @@ function CheckoutModal({
   discountAmt,
   discount,
   discountType,
+  discountKind,
+  discountReason,
   iva,
   orderType,
   onClose,
@@ -769,6 +805,8 @@ function CheckoutModal({
   discountAmt: number
   discount: number
   discountType: DiscountType
+  discountKind: DiscountKind
+  discountReason: string
   iva: number
   orderType: OrderType
   onClose: () => void
@@ -832,6 +870,14 @@ function CheckoutModal({
         total,
         restaurant_id: profile.restaurant_id,
         created_by: profile.id,
+        // Descuento REAL persistido (monto en COP ya reflejado en total) + su
+        // clase (normal | vale). El vale es siempre 'fixed' (forzado en el store).
+        // Sin monto (0) → kind normal + type null (no es un vale; respeta la
+        // constraint vale⇒fixed).
+        discount_amount: discountAmt,
+        discount_type: discountAmt > 0 ? discountType : null,
+        discount_kind: discountAmt > 0 ? discountKind : 'normal',
+        discount_reason: discountAmt > 0 ? (discountReason.trim() || null) : null,
         ...(isFiado
           ? { payment_status: 'pending', customer_id: customerId, customer_name: customerName }
           : {}),
@@ -850,7 +896,11 @@ function CheckoutModal({
       )
       if (itemsErr) throw itemsErr
 
-      if (!isFiado) {
+      // Venta GRATIS (total 0 = vale 100%): NO hay dinero que cobrar. Se salta
+      // register_sale_payment (valida amount>0). La orden queda registrada con su
+      // vale (entra al vouchers_total) pero SIN payment; payment_status='paid'
+      // (default, saldada — no es fiado). El nº se asigna igual (abajo).
+      if (!isFiado && total > 0) {
         // Un solo camino de cobro: simple = una parte al total; dividir = las
         // partes del editor. La RPC valida atómicamente que Σ = total (rechaza
         // si no cuadra) e inserta una fila por método.
@@ -992,7 +1042,7 @@ function CheckoutModal({
                 <button
                   data-testid="checkout-continue"
                   disabled={submitting || (isFiado && !customerId)}
-                  onClick={() => method === 'efectivo' ? setStep('amount') : handleConfirm()}
+                  onClick={() => method === 'efectivo' && total > 0 ? setStep('amount') : handleConfirm()}
                   style={{
                     flex: 2, padding: '12px', border: 'none',
                     background: submitting || (isFiado && !customerId) ? '#cbd5e1' : '#10b981',
@@ -1490,6 +1540,8 @@ export function POSPage() {
   const items = useCartStore((s) => s.items)
   const discount = useCartStore((s) => s.discount)
   const discountType = useCartStore((s) => s.discountType)
+  const discountKind = useCartStore((s) => s.discountKind)
+  const discountReason = useCartStore((s) => s.discountReason)
   const add = useCartStore((s) => s.add)
   const addItem = useCartStore((s) => s.addItem)
   const updateItemExtras = useCartStore((s) => s.updateItemExtras)
@@ -1743,6 +1795,8 @@ export function POSPage() {
           discountAmt={discountAmt}
           discount={discount}
           discountType={discountType}
+          discountKind={discountKind}
+          discountReason={discountReason}
           iva={iva}
           orderType={orderType}
           onClose={() => setCheckout(false)}
