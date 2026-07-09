@@ -9,7 +9,12 @@ const INSUMO = 'Lab Vaso'
 
 const SUFFIX = Date.now().toString().slice(-6)
 const CLIENTE = `E2E Fiado ${SUFFIX}`
+const CLIENTE_G = `E2E Grupo ${SUFFIX}`
 const MESA = `Mesa Fiado ${SUFFIX}`
+
+// Órdenes del cliente-grupo (compartidas entre los tests de agrupación).
+let gN1 = 0
+let gN2 = 0
 
 // "$ 18.000" → 18000
 const parseCOP = (text: string): number => Number(text.replace(/[^\d]/g, ''))
@@ -59,14 +64,48 @@ async function readStock(page: Page, name: string): Promise<number> {
   return Number(await row.getByTestId('stock-level-qty').innerText())
 }
 
-// Localiza la fila de deuda de una venta por su número.
-function debtRow(page: Page, orderNumber: number) {
-  return page.getByTestId('debt-row').filter({ hasText: `#${orderNumber}` })
+// ── Helpers del maestro-detalle de Cartera ────────────────────────
+
+// Selecciona un cliente en la lista de Cartera (panel izquierdo).
+async function selectCustomer(page: Page, name: string) {
+  await page.getByTestId('customer-row').filter({ hasText: name }).click()
+  await expect(page.getByTestId('customer-detail')).toBeVisible()
+}
+
+// Fila de un fiado individual dentro del detalle, por número de venta. Ancla al
+// texto EXACTO de la celda "#N" (evita que "#1" matchee "#10").
+function creditRow(page: Page, orderNumber: number) {
+  return page.getByTestId('credit-row').filter({ has: page.getByText(`#${orderNumber}`, { exact: true }) })
+}
+
+// Abre el modal de abono de un fiado (el cliente ya debe estar seleccionado).
+async function openAbono(page: Page, orderNumber: number) {
+  await creditRow(page, orderNumber).getByTestId('abonar-btn').click()
+  await expect(page.getByTestId('debt-payment-modal')).toBeVisible()
+}
+
+// Salda por completo un fiado del cliente (por transferencia, aísla de caja).
+async function saldarFiado(page: Page, customer: string, orderNumber: number) {
+  await selectCustomer(page, customer)
+  await openAbono(page, orderNumber)
+  await page.getByTestId('debt-method').selectOption('transfer')
+  await page.getByTestId('debt-amount-full').click()
+  await page.getByTestId('debt-submit').click()
+  await expect(page.getByTestId('debt-payment-modal')).toHaveCount(0)
+}
+
+// Lee los 3 KPIs de la cabecera de Cartera.
+async function readKpis(page: Page) {
+  return {
+    porCobrar: parseCOP(await page.getByTestId('kpi-por-cobrar-value').innerText()),
+    clientes: Number(await page.getByTestId('kpi-clientes-deuda-value').innerText()),
+    fiados: Number(await page.getByTestId('kpi-fiados-abiertos-value').innerText()),
+  }
 }
 
 // ── Suite ─────────────────────────────────────────────────────────
 
-test.describe.serial('Fiado / Cuentas por cobrar', () => {
+test.describe.serial('Fiado / Cartera', () => {
   test('setup: crear cliente', async ({ page }) => {
     await loginAsOwner(page)
     await createCustomer(page, CLIENTE)
@@ -79,13 +118,13 @@ test.describe.serial('Fiado / Cuentas por cobrar', () => {
 
     const n = await sellOnFiado(page, CLIENTE)
 
-    // La deuda aparece pendiente: saldo = total, abonado = 0 (no entró pago).
+    // La deuda aparece en el detalle del cliente: saldo = total, pagado = 0.
     await page.goto('/fiado')
-    const row = debtRow(page, n)
+    await selectCustomer(page, CLIENTE)
+    const row = creditRow(page, n)
     await expect(row).toBeVisible()
     await expect(row).toContainText('Pendiente')
-    await expect(row).toContainText(CLIENTE)
-    const saldo = parseCOP(await row.getByTestId('debt-row-saldo').innerText())
+    const saldo = parseCOP(await row.getByTestId('credit-row-saldo').innerText())
     expect(saldo).toBe(18000)
 
     // El stock del insumo bajó en 1 (la mercancía salió, aunque no se pagó).
@@ -98,8 +137,8 @@ test.describe.serial('Fiado / Cuentas por cobrar', () => {
     const n = await sellOnFiado(page, CLIENTE)
 
     await page.goto('/fiado')
-    await debtRow(page, n).click()
-    await expect(page.getByTestId('debt-payment-modal')).toBeVisible()
+    await selectCustomer(page, CLIENTE)
+    await openAbono(page, n)
 
     // Abono por transferencia (aísla de la caja) de 8.000 sobre saldo 18.000.
     await page.getByTestId('debt-method').selectOption('transfer')
@@ -109,19 +148,19 @@ test.describe.serial('Fiado / Cuentas por cobrar', () => {
     await expect(page.getByText(/Abono registrado · saldo/)).toBeVisible()
     await expect(page.getByTestId('debt-payment-modal')).toHaveCount(0)
 
-    // La deuda ahora es parcial con saldo 10.000.
-    const row = debtRow(page, n)
+    // La deuda ahora es parcial con saldo 10.000 (el detalle se refresca solo).
+    const row = creditRow(page, n)
     await expect(row).toContainText('Parcial')
-    expect(parseCOP(await row.getByTestId('debt-row-saldo').innerText())).toBe(10000)
+    expect(parseCOP(await row.getByTestId('credit-row-saldo').innerText())).toBe(10000)
   })
 
-  test('saldar la deuda → estado paid y sale de cuentas por cobrar', async ({ page }) => {
+  test('saldar la deuda → el fiado sale del detalle (payment_status paid)', async ({ page }) => {
     await loginAsOwner(page)
     const n = await sellOnFiado(page, CLIENTE)
 
     await page.goto('/fiado')
-    await debtRow(page, n).click()
-    await expect(page.getByTestId('debt-payment-modal')).toBeVisible()
+    await selectCustomer(page, CLIENTE)
+    await openAbono(page, n)
 
     // "Saldar" rellena el saldo completo → liquida la deuda.
     await page.getByTestId('debt-method').selectOption('transfer')
@@ -130,8 +169,9 @@ test.describe.serial('Fiado / Cuentas por cobrar', () => {
 
     await expect(page.getByText(/Deuda saldada/)).toBeVisible()
 
-    // Ya no aparece en cuentas por cobrar (payment_status pasó a 'paid').
-    await expect(debtRow(page, n)).toHaveCount(0)
+    // Ese fiado ya no aparece en el detalle (el cliente sigue con otras deudas
+    // de tests previos, así que no desaparece de la lista — eso se prueba aparte).
+    await expect(creditRow(page, n)).toHaveCount(0)
   })
 
   test('abono en efectivo con turno abierto entra a caja como ingreso', async ({ page }) => {
@@ -143,7 +183,8 @@ test.describe.serial('Fiado / Cuentas por cobrar', () => {
     await openShiftIfClosed(page, 100000)
 
     await page.goto('/fiado')
-    await debtRow(page, n).click()
+    await selectCustomer(page, CLIENTE)
+    await openAbono(page, n)
     await page.getByTestId('debt-method').selectOption('cash')
     await page.getByTestId('debt-amount').fill('5000')
     await page.getByTestId('debt-submit').click()
@@ -162,8 +203,8 @@ test.describe.serial('Fiado / Cuentas por cobrar', () => {
     const n = await sellOnFiado(page, CLIENTE)
 
     await page.goto('/fiado')
-    await debtRow(page, n).click()
-    await expect(page.getByTestId('debt-payment-modal')).toBeVisible()
+    await selectCustomer(page, CLIENTE)
+    await openAbono(page, n)
 
     const saldo = parseCOP(await page.getByTestId('debt-saldo').innerText())
     await page.getByTestId('debt-amount').fill(String(saldo + 10000))
@@ -171,6 +212,73 @@ test.describe.serial('Fiado / Cuentas por cobrar', () => {
     // La UI muestra el error y deshabilita el botón (no se llega a la RPC).
     await expect(page.getByTestId('debt-amount-error')).toBeVisible()
     await expect(page.getByTestId('debt-submit')).toBeDisabled()
+  })
+
+  // ── Agrupación por cliente + KPIs (rediseño maestro-detalle) ─────
+
+  test('agrupación + KPIs: 2 fiados de un cliente = 1 fila con saldo sumado', async ({ page }) => {
+    await loginAsOwner(page)
+    await createCustomer(page, CLIENTE_G)
+
+    // Baseline de KPIs ANTES de crear las deudas de este cliente nuevo.
+    await page.goto('/fiado')
+    const base = await readKpis(page)
+
+    gN1 = await sellOnFiado(page, CLIENTE_G)
+    gN2 = await sellOnFiado(page, CLIENTE_G)
+
+    await page.goto('/fiado')
+
+    // El cliente aparece UNA sola vez en la lista, con el saldo CONSOLIDADO
+    // (2 × 18.000 = 36.000) — la agrupación por customer_id es de presentación.
+    const rowLoc = page.getByTestId('customer-row').filter({ hasText: CLIENTE_G })
+    await expect(rowLoc).toHaveCount(1)
+    expect(parseCOP(await rowLoc.getByTestId('customer-row-saldo').innerText())).toBe(36000)
+
+    // KPIs subieron exactamente: +1 cliente con deuda, +2 fiados, +36.000.
+    const after = await readKpis(page)
+    expect(after.clientes).toBe(base.clientes + 1)
+    expect(after.fiados).toBe(base.fiados + 2)
+    expect(after.porCobrar).toBe(base.porCobrar + 36000)
+
+    // Seleccionar el cliente muestra SUS 2 fiados individuales y el total.
+    await selectCustomer(page, CLIENTE_G)
+    await expect(creditRow(page, gN1)).toBeVisible()
+    await expect(creditRow(page, gN2)).toBeVisible()
+    expect(parseCOP(await page.getByTestId('detail-total').innerText())).toBe(36000)
+  })
+
+  test('abono parcial mantiene al cliente; saldar el último lo saca (KPIs bajan)', async ({ page }) => {
+    await loginAsOwner(page)
+    await page.goto('/fiado')
+    const base = await readKpis(page)   // con CLIENTE_G presente (2 fiados, 36.000)
+
+    // (1) Abono PARCIAL sobre gN1 (transfer 8.000 sobre 18.000).
+    await selectCustomer(page, CLIENTE_G)
+    await openAbono(page, gN1)
+    await page.getByTestId('debt-method').selectOption('transfer')
+    await page.getByTestId('debt-amount').fill('8000')
+    await page.getByTestId('debt-submit').click()
+    await expect(page.getByText(/Abono registrado · saldo/)).toBeVisible()
+
+    // El fiado bajó a 10.000 y el consolidado del cliente a 28.000; SIGUE en lista.
+    // Aserciones con auto-retry: esperan a que el refetch de ['debts'] aterrice.
+    await selectCustomer(page, CLIENTE_G)
+    await expect(creditRow(page, gN1).getByTestId('credit-row-saldo')).toContainText('10.000')
+    const rowLoc = page.getByTestId('customer-row').filter({ hasText: CLIENTE_G })
+    await expect(rowLoc).toHaveCount(1)
+    await expect(rowLoc.getByTestId('customer-row-saldo')).toContainText('28.000')
+
+    // (2) Saldar AMBOS fiados → el cliente deja de deber.
+    await saldarFiado(page, CLIENTE_G, gN1)   // resto 10.000
+    await saldarFiado(page, CLIENTE_G, gN2)   // 18.000
+
+    // Desaparece de la lista y el detalle se limpia; KPIs bajan −1 cliente / −2 fiados.
+    await expect(page.getByTestId('customer-row').filter({ hasText: CLIENTE_G })).toHaveCount(0)
+    await expect(page.getByTestId('customer-detail')).toHaveCount(0)
+    const after = await readKpis(page)
+    expect(after.clientes).toBe(base.clientes - 1)
+    expect(after.fiados).toBe(base.fiados - 2)
   })
 
   test('historial: la venta a fiado muestra "Fiado" como método', async ({ page }) => {
@@ -246,11 +354,10 @@ test.describe.serial('Fiado / Cuentas por cobrar', () => {
     expect(afterClose).toBe(afterAdd)
     expect(afterClose).toBe(before - 1)
 
-    // La deuda quedó pendiente, ligada al cliente.
+    // La deuda quedó pendiente, ligada al cliente (visible en su detalle).
     await page.goto('/fiado')
-    const row = debtRow(page, n)
-    await expect(row).toBeVisible()
-    await expect(row).toContainText(CLIENTE)
+    await selectCustomer(page, CLIENTE)
+    await expect(creditRow(page, n)).toBeVisible()
 
     // La mesa quedó LIBERADA: al hacer click pide abrir (mesa libre).
     await page.goto('/mesas')
@@ -273,7 +380,7 @@ test.describe.serial('Fiado / Cuentas por cobrar', () => {
     // los usuarios del lab (owner y cajero ambos lo tienen).
   })
 
-  test('limpieza: cerrar turno y desactivar cliente', async ({ page }) => {
+  test('limpieza: cerrar turno y desactivar clientes', async ({ page }) => {
     page.on('dialog', (d) => d.accept())
     await loginAsOwner(page)
 
@@ -282,8 +389,13 @@ test.describe.serial('Fiado / Cuentas por cobrar', () => {
 
     await page.goto('/fiado')
     await page.getByTestId('fiado-tab-customers').click()
-    await page.getByTestId('customer-row').filter({ hasText: CLIENTE }).getByTestId('customer-deactivate').click()
-    await expect(page.getByTestId('customer-row').filter({ hasText: CLIENTE })).toHaveCount(0)
+    for (const name of [CLIENTE, CLIENTE_G]) {
+      const cust = page.getByTestId('customer-row').filter({ hasText: name })
+      if (await cust.count() > 0) {
+        await cust.getByTestId('customer-deactivate').click()
+        await expect(page.getByTestId('customer-row').filter({ hasText: name })).toHaveCount(0)
+      }
+    }
 
     // Borrado best-effort de la mesa creada (la orden a fiado quedó 'delivered'
     // y la mesa libre, así que no debería estar bloqueada). No se hard-assertea:
