@@ -17,6 +17,7 @@ export interface Debt {
   abonado: number
   saldo: number
   payment_status: string             // 'pending' | 'partial'
+  customerId: string | null
   customerName: string
 }
 
@@ -30,6 +31,7 @@ const deriveDebt = (row: DebtRow): Debt => {
     abonado,
     saldo: Math.max(0, row.total - abonado),
     payment_status: row.payment_status,
+    customerId: row.customer_id,
     customerName: row.customers?.name ?? row.customer_name ?? 'Cliente',
   }
 }

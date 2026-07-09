@@ -1043,6 +1043,7 @@ export interface DebtRow {
   created_at: string
   total: number
   payment_status: string             // 'pending' | 'partial'
+  customer_id: string | null
   customer_name: string | null
   customers: { name: string } | null
   debt_payments: { amount: number }[]
@@ -1054,7 +1055,7 @@ export const getDebts = (restaurantId: string) =>
   supabase
     .from('orders')
     .select(
-      'id, order_number, created_at, total, payment_status, customer_name, ' +
+      'id, order_number, created_at, total, payment_status, customer_id, customer_name, ' +
         'customers(name), debt_payments(amount)',
     )
     .eq('restaurant_id', restaurantId)
