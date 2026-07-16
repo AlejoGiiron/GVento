@@ -424,6 +424,8 @@ export interface SalesHistoryRow {
   customer_name: string | null
   total: number
   payment_status: string   // 'paid' | 'pending' | 'partial' — el fiado no tiene fila en payments
+  cancelled_at: string | null   // no null = venta anulada
+  cancel_reason: string | null
   payments: { method: Enums<'payment_method'>; amount: number }[]
   profiles: { full_name: string | null } | null
 }
@@ -433,7 +435,7 @@ export const getSalesHistory = ({
 }: SalesHistoryFilters) => {
   const paymentsSel = method ? 'payments!inner(method, amount)' : 'payments(method, amount)'
   const select =
-    `id, order_number, created_at, type, customer_name, total, payment_status, ` +
+    `id, order_number, created_at, type, customer_name, total, payment_status, cancelled_at, cancel_reason, ` +
     `${paymentsSel}, profiles!orders_created_by_fkey(full_name)`
 
   let q = supabase
@@ -464,8 +466,11 @@ export interface SaleDetailRow {
   waiter_name: string | null
   total: number
   payment_status: string
+  cancelled_at: string | null
+  cancel_reason: string | null
   payments: { method: Enums<'payment_method'>; amount: number }[]
   profiles: { full_name: string | null } | null
+  canceller: { full_name: string | null } | null   // quién anuló (orders_cancelled_by_fkey)
   order_items: {
     id: string
     qty: number
@@ -486,8 +491,10 @@ export const getSaleDetail = (orderId: string) =>
     .from('orders')
     .select(`
       id, order_number, created_at, type, customer_name, customer_phone, notes, waiter_name, total, payment_status,
+      cancelled_at, cancel_reason,
       payments(method, amount),
       profiles!orders_created_by_fkey(full_name),
+      canceller:profiles!orders_cancelled_by_fkey(full_name),
       order_items(
         id, qty, unit_price, notes,
         products(name),
@@ -496,6 +503,44 @@ export const getSaleDetail = (orderId: string) =>
     `)
     .eq('id', orderId)
     .single()
+
+// Ventas ANULADAS en un rango (sin filtro de método). Para la sección
+// "Anuladas (N)" del historial cuando hay un filtro de método activo: una
+// anulada perdió sus payments → no tiene método → no puede bucketizarse; se
+// muestra aparte. Son pocas (índice parcial idx_orders_cancelled). Trae quién
+// anuló (canceller) y el motivo para la auditoría. Ordenadas por número desc.
+export const getCancelledSales = (restaurantId: string, from?: string, to?: string) => {
+  let q = supabase
+    .from('orders')
+    .select(
+      `id, order_number, created_at, type, customer_name, total, payment_status, ` +
+        `cancelled_at, cancel_reason, ` +
+        `payments(method, amount), profiles!orders_created_by_fkey(full_name), ` +
+        `canceller:profiles!orders_cancelled_by_fkey(full_name)`,
+    )
+    .eq('restaurant_id', restaurantId)
+    .not('order_number', 'is', null)
+    .not('cancelled_at', 'is', null)
+
+  if (from) q = q.gte('created_at', from)
+  if (to) q = q.lte('created_at', to)
+
+  return q.order('order_number', { ascending: false })
+}
+
+// --- Anulación de venta (RPC atómica register_sale_void) ---
+
+export interface SaleVoidResult {
+  order_id: string
+  was_fiado: boolean
+  payments_deleted: number
+  stock_returned: number
+}
+
+// Anula una venta del turno actual: revierte stock, borra payments y marca la
+// orden. Las 6 guardas viven en la RPC (server-side); acá solo se invoca.
+export const registerSaleVoid = (orderId: string, reason: string) =>
+  supabase.rpc('register_sale_void', { p_order_id: orderId, p_reason: reason })
 
 // --- Order Items ---
 
@@ -557,6 +602,7 @@ export const getShiftSalesCount = async (restaurantId: string, from: string): Pr
     .eq('restaurant_id', restaurantId)
     .eq('total', 0)
     .not('order_number', 'is', null)
+    .is('cancelled_at', null)   // una venta gratis anulada NO cuenta
     .gte('created_at', from)
   if (e2) throw e2
   for (const o of free ?? []) ids.add(o.id as string)
@@ -597,6 +643,7 @@ export const getShiftVouchersTotal = async (restaurantId: string, from: string):
     .eq('discount_kind', 'vale')
     .eq('total', 0)
     .not('order_number', 'is', null)
+    .is('cancelled_at', null)   // un vale gratis anulado NO cuenta
     .gte('created_at', from)
   if (e3) throw e3
   sum += (free ?? []).reduce((s, o) => s + (o.discount_amount ?? 0), 0)
@@ -1060,6 +1107,7 @@ export const getDebts = (restaurantId: string) =>
     )
     .eq('restaurant_id', restaurantId)
     .in('payment_status', ['pending', 'partial'])
+    .is('cancelled_at', null)   // una venta fiada anulada sale de Cartera
     .order('created_at', { ascending: false })
 
 // Historial de abonos de una orden (mayor append-only), más reciente primero.

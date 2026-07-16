@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { loginAsOwner } from './helpers/auth'
+import { openTableAndAddItems } from './helpers/tables'
 import { openShiftIfClosed, closeShiftIfOpen } from './helpers/shift'
 
 // Vale descuento / ruletazo. Corre en LAB. Cubre: vale en Mesa y POS (persiste
@@ -108,12 +109,7 @@ async function setupMesaWithItem(page: Page, mesaName: string) {
   await page.getByRole('button', { name: 'Crear mesa' }).click()
   await expect(page.getByText(mesaName)).toBeVisible()
 
-  await page.goto('/mesas')
-  await page.getByRole('button', { name: new RegExp(mesaName) }).click()
-  await page.getByRole('button', { name: 'Abrir mesa' }).click()
-
-  await page.getByRole('button', { name: new RegExp(mesaName) }).click()
-  await page.getByRole('button', { name: 'Agregar ítems' }).click()
+  await openTableAndAddItems(page, mesaName)
   await page.getByRole('button').filter({ has: page.getByText(PRODUCT, { exact: true }) }).first().click()
   await expect(page.getByTestId('item-config-modal')).toBeVisible()
   await page.getByTestId('item-config-confirm').click()

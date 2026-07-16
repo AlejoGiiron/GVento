@@ -1,12 +1,14 @@
 import { useState, useMemo } from 'react'
 import {
   Search, X, ChevronLeft, ChevronRight, Printer, Receipt,
-  Store, Bike, UtensilsCrossed, Calendar,
+  Store, Bike, UtensilsCrossed, Calendar, Ban, AlertTriangle,
 } from 'lucide-react'
 import { useRestaurantConfig } from '@/hooks/useRestaurantConfig'
+import { usePermissions } from '@/hooks/usePermissions'
+import { useCashShift } from '@/hooks/useCashShift'
 import {
-  useSalesHistory, useSaleDetail, SALES_PAGE_SIZE,
-  type SalesHistoryRow,
+  useSalesHistory, useSaleDetail, useVoidSale, useCancelledSales, SALES_PAGE_SIZE,
+  type SalesHistoryRow, type CancelledSaleRow,
 } from '@/hooks/useSalesHistory'
 import { printSaleTicket } from '@/lib/printer'
 import type { Enums } from '@/types/database.types'
@@ -75,7 +77,10 @@ function paymentMethodsOf(row: { payments: { method: PayMethod }[] }): PayMethod
 // hoy); mixto → "Efectivo + Nequi". Una venta a fiado NO tiene fila en
 // `payments` (la liquidación vive en debt_payments), así que se deriva del
 // payment_status para que no aparezca como venta sin método.
-function methodDisplay(row: { payment_status: string; total: number; payments: { method: PayMethod }[] }): string {
+function methodDisplay(row: { payment_status: string; total: number; payments: { method: PayMethod }[]; cancelled_at?: string | null }): string {
+  // Una venta anulada no tiene "método" útil (sus payments se borraron): se
+  // rotula como tal para no leerse como venta viva sin método.
+  if (row.cancelled_at) return 'Anulada'
   const methods = paymentMethodsOf(row)
   if (methods.length > 0) return methods.map((m) => METHOD_LABEL[m]).join(' + ')
   // Venta GRATIS (vale 100%): total 0, sin filas en payments, saldada ('paid').
@@ -91,6 +96,36 @@ function methodDisplay(row: { payment_status: string; total: number; payments: {
 function SaleDetailModal({ orderId, onClose }: { orderId: string; onClose: () => void }) {
   const { sale, isLoading } = useSaleDetail(orderId)
   const { restaurant } = useRestaurantConfig()
+  const { can } = usePermissions()
+  const { currentShift } = useCashShift()
+  const voidMutation = useVoidSale()
+  const [voiding, setVoiding] = useState(false)   // diálogo de motivo abierto
+  const [reason, setReason] = useState('')
+
+  // Elegibilidad de anulación (misma lógica que las guardas de la RPC; la RPC
+  // re-valida server-side, esto es solo conveniencia de UI):
+  //   can('ventas.anular') ∧ turno abierto ∧ venta del turno actual ∧ no anulada.
+  const isVoided = !!sale?.cancelled_at
+  const canVoid = can('ventas.anular')
+  const shiftOpen = !!currentShift
+  const inCurrentShift =
+    !!sale && !!currentShift &&
+    new Date(sale.created_at).getTime() >= new Date(currentShift.opened_at).getTime()
+  const voidEligible = shiftOpen && inCurrentShift
+  // Tooltip = mensaje EXACTO de la RPC según el motivo del bloqueo.
+  const voidBlockedReason = !shiftOpen
+    ? 'No hay un turno de caja abierto'
+    : !inCurrentShift
+      ? 'Esta venta pertenece a un turno cerrado y no puede anularse; para corregirla se necesita una devolución'
+      : ''
+
+  const confirmVoid = () => {
+    if (!sale || !reason.trim()) return
+    voidMutation.mutate(
+      { orderId: sale.id, reason: reason.trim() },
+      { onSuccess: () => { setVoiding(false); setReason('') } },
+    )
+  }
 
   const subtotal = useMemo(() => {
     if (!sale) return 0
@@ -150,6 +185,24 @@ function SaleDetailModal({ orderId, onClose }: { orderId: string; onClose: () =>
             {sale && (
               <div style={{ fontSize: 11.5, color: '#64748b', marginTop: 2 }}>
                 {formatDateTime(sale.created_at)} · {ORDER_TYPE[sale.type as OrderType].label}
+              </div>
+            )}
+            {isVoided && sale && (
+              <div style={{ marginTop: 8 }}>
+                <span
+                  data-testid="sale-voided-badge"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', borderRadius: 7, padding: '4px 10px', fontSize: 12, fontWeight: 700 }}
+                >
+                  <Ban size={13} /> Venta anulada
+                </span>
+                <div style={{ fontSize: 11.5, color: '#64748b', marginTop: 4 }}>
+                  {formatDateTime(sale.cancelled_at!)} · {sale.canceller?.full_name ?? '—'}
+                </div>
+                {sale.cancel_reason && (
+                  <div style={{ fontSize: 11.5, color: '#475569', marginTop: 1 }}>
+                    Motivo: <span style={{ fontWeight: 600, color: '#0f172a' }}>{sale.cancel_reason}</span>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -241,7 +294,30 @@ function SaleDetailModal({ orderId, onClose }: { orderId: string; onClose: () =>
         </div>
 
         {/* Footer */}
-        <div style={{ padding: '14px 22px', borderTop: '1px solid #f1f5f9', display: 'flex', justifyContent: 'flex-end' }}>
+        <div style={{ padding: '14px 22px', borderTop: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+          {/* Anular: solo con permiso y venta aún no anulada. Deshabilitado (no
+              oculto) cuando no es del turno actual, con el motivo en el tooltip. */}
+          <div>
+            {canVoid && !isVoided && sale && (
+              <button
+                data-testid="sale-void-button"
+                disabled={!voidEligible}
+                title={voidEligible ? 'Anular esta venta' : voidBlockedReason}
+                onClick={() => setVoiding(true)}
+                style={{
+                  padding: '11px 18px', borderRadius: 9,
+                  border: `1.5px solid ${voidEligible ? '#fecaca' : '#e5e7eb'}`,
+                  background: voidEligible ? '#fff' : '#f8fafc',
+                  cursor: voidEligible ? 'pointer' : 'not-allowed',
+                  fontSize: 13.5, fontWeight: 700,
+                  color: voidEligible ? '#b91c1c' : '#cbd5e1',
+                  display: 'flex', alignItems: 'center', gap: 7,
+                }}
+              >
+                <Ban size={15} /> Anular venta
+              </button>
+            )}
+          </div>
           <button
             data-testid="sale-reprint"
             disabled={!sale}
@@ -257,6 +333,71 @@ function SaleDetailModal({ orderId, onClose }: { orderId: string; onClose: () =>
             <Printer size={15} /> Reimprimir ticket
           </button>
         </div>
+
+        {/* Diálogo de anulación — motivo OBLIGATORIO + confirmación explícita */}
+        {voiding && sale && (
+          <div
+            style={{ position: 'absolute', inset: 0, background: 'rgba(15,23,42,.55)', display: 'grid', placeItems: 'center', zIndex: 60 }}
+            onClick={() => { if (!voidMutation.isPending) { setVoiding(false); setReason('') } }}
+          >
+            <div
+              data-testid="sale-void-dialog"
+              style={{ background: '#fff', borderRadius: 12, width: 420, maxWidth: '92%', boxShadow: '0 25px 50px -12px rgba(0,0,0,.25)', overflow: 'hidden' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ padding: '18px 22px', display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                <div style={{ width: 40, height: 40, borderRadius: 10, background: '#fef2f2', color: '#dc2626', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+                  <AlertTriangle size={20} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a' }}>
+                    Anular {sale.order_number != null ? `venta #${sale.order_number}` : 'venta'}
+                  </div>
+                  <div style={{ fontSize: 12.5, color: '#64748b', marginTop: 3, lineHeight: 1.4 }}>
+                    Devuelve el stock al inventario y la saca del cuadre del turno. La venta queda registrada como anulada (no se borra). Esta acción no se puede deshacer.
+                  </div>
+                </div>
+              </div>
+              <div style={{ padding: '0 22px 4px' }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: '#334155', display: 'block', marginBottom: 6 }}>
+                  Motivo <span style={{ color: '#dc2626' }}>*</span>
+                </label>
+                <textarea
+                  data-testid="sale-void-reason"
+                  autoFocus
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  placeholder="Ej: error del cajero, producto equivocado…"
+                  rows={3}
+                  style={{ width: '100%', border: '1.5px solid #e2e8f0', borderRadius: 8, padding: '9px 11px', fontSize: 13, color: '#0f172a', outline: 'none', boxSizing: 'border-box', resize: 'vertical', fontFamily: 'Inter, system-ui, sans-serif' }}
+                />
+              </div>
+              <div style={{ padding: '14px 22px 20px', display: 'flex', gap: 10 }}>
+                <button
+                  onClick={() => { setVoiding(false); setReason('') }}
+                  disabled={voidMutation.isPending}
+                  style={{ flex: 1, padding: '11px', border: '1.5px solid #e5e7eb', background: '#fff', borderRadius: 9, cursor: 'pointer', fontSize: 13.5, fontWeight: 600, color: '#334155' }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  data-testid="sale-void-confirm"
+                  disabled={!reason.trim() || voidMutation.isPending}
+                  onClick={confirmVoid}
+                  style={{
+                    flex: 2, padding: '11px', border: 'none', borderRadius: 9,
+                    background: !reason.trim() || voidMutation.isPending ? '#cbd5e1' : '#dc2626',
+                    cursor: !reason.trim() || voidMutation.isPending ? 'not-allowed' : 'pointer',
+                    fontSize: 13.5, fontWeight: 700, color: '#fff',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+                  }}
+                >
+                  {voidMutation.isPending ? 'Anulando…' : <><Ban size={15} /> Confirmar anulación</>}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -281,6 +422,11 @@ export function SalesHistoryPage() {
   const { rows, count, pageCount, isLoading, isFetching } = useSalesHistory({
     from, to, method: method || null, search, page,
   })
+
+  // Sección "Anuladas": solo con filtro de método activo (sin filtro las
+  // anuladas ya salen inline). Una anulada perdió sus payments → sin método →
+  // no bucketizable; se muestra aparte. No toca la query paginada.
+  const { rows: cancelledRows } = useCancelledSales({ from, to, enabled: !!method })
 
   // Cualquier cambio de filtro vuelve a la primera página.
   const resetPage = () => setPage(0)
@@ -363,6 +509,59 @@ export function SalesHistoryPage() {
 
       {/* List */}
       <div style={{ flex: 1, overflow: 'auto', padding: '12px 24px 24px' }}>
+        {/* Sección Anuladas — solo con filtro de método activo. Las anuladas no
+            tienen método (payments borrados) → van aparte, no en el bucket. */}
+        {method && cancelledRows.length > 0 && (
+          <div data-testid="cancelled-sales-section" style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <Ban size={14} color="#b91c1c" />
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: '#b91c1c', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                Anuladas ({cancelledRows.length})
+              </span>
+              <span style={{ fontSize: 11.5, color: '#94a3b8' }}>
+                sin método — no se filtran por método de pago
+              </span>
+            </div>
+            <div style={{ background: '#fff', border: '1px solid #fecaca', borderRadius: 12, overflow: 'hidden' }}>
+              {cancelledRows.map((row: CancelledSaleRow) => (
+                <button
+                  key={row.id}
+                  data-testid="cancelled-sale-row"
+                  onClick={() => setDetailId(row.id)}
+                  style={{
+                    width: '100%', textAlign: 'left', display: 'grid',
+                    gridTemplateColumns: '90px 1fr 130px', gap: 12, alignItems: 'center',
+                    padding: '13px 16px', borderBottom: '1px solid #fef2f2',
+                    background: '#fff', border: 'none', cursor: 'pointer',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = '#fef2f2')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = '#fff')}
+                >
+                  <span style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', fontFamily: 'monospace' }}>
+                    #{row.order_number}
+                  </span>
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{ display: 'block', fontSize: 13, color: '#0f172a', fontFamily: 'monospace' }}>
+                      {formatDateTime(row.cancelled_at ?? row.created_at)}
+                    </span>
+                    <span style={{ display: 'block', fontSize: 12, color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {row.canceller?.full_name ?? '—'}{row.cancel_reason ? ` · ${row.cancel_reason}` : ''}
+                    </span>
+                  </span>
+                  <span style={{ textAlign: 'right' }}>
+                    <span
+                      data-testid="sale-voided-badge"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', borderRadius: 6, padding: '3px 8px', fontSize: 11.5, fontWeight: 700 }}
+                    >
+                      <Ban size={11} /> Anulada
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {isLoading ? (
           <div style={{ padding: 50, textAlign: 'center', color: '#94a3b8', fontSize: 13.5 }}>
             Cargando ventas...
@@ -418,7 +617,16 @@ export function SalesHistoryPage() {
                     </span>
                   </span>
                   <span data-testid="sale-row-method" style={{ fontSize: 12.5, color: '#475569' }}>
-                    {methodDisplay(row)}
+                    {row.cancelled_at ? (
+                      <span
+                        data-testid="sale-voided-badge"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', borderRadius: 6, padding: '3px 8px', fontSize: 11.5, fontWeight: 700 }}
+                      >
+                        <Ban size={11} /> Anulada
+                      </span>
+                    ) : (
+                      methodDisplay(row)
+                    )}
                   </span>
                   <span style={{ textAlign: 'right', fontSize: 14, fontWeight: 700, color: '#0f172a', fontFamily: 'monospace' }}>
                     {formatCOP(row.total)}

@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { loginAsOwner } from './helpers/auth'
+import { openTableAndAddItems } from './helpers/tables'
 import { openShiftIfClosed, closeShiftIfOpen } from './helpers/shift'
 
 // Cocina por sede (uses_kitchen) + por producto (routes_to_kitchen).
@@ -68,14 +69,10 @@ test.describe.serial('Cocina por sede y por producto', () => {
     await page.getByRole('button', { name: 'Crear mesa' }).click()
     await expect(page.getByText(MESA)).toBeVisible()
 
-    // Abrir la mesa.
-    await page.goto('/mesas')
-    await page.getByRole('button', { name: new RegExp(MESA) }).click()
-    await page.getByRole('button', { name: 'Abrir mesa' }).click()
+    // Abrir la mesa y abrir el picker.
+    await openTableAndAddItems(page, MESA)
 
     // Agregar Cerveza (enruta) + Agua (NO enruta).
-    await page.getByRole('button', { name: new RegExp(MESA) }).click()
-    await page.getByRole('button', { name: 'Agregar ítems' }).click()
     await pickProduct(page, ROUTES)
     await pickProduct(page, NO_ROUTES)
     await page.getByRole('button', { name: 'Agregar a la mesa' }).click()
@@ -141,8 +138,14 @@ test.describe.serial('Cocina por sede y por producto', () => {
       // Abrir la mesa de la sede sin cocina y verificar que NO hay botón "Cocina".
       await page.getByRole('button', { name: /Mesa 1/ }).click()
       const abrir = page.getByRole('button', { name: 'Abrir mesa' })
-      if (await abrir.count()) await abrir.click()
-      await page.getByRole('button', { name: /Mesa 1/ }).click()
+      if (await abrir.count()) {
+        await abrir.click()
+        // Esperar a que Mesa 1 refleje "Ocupada" (fin del refetch) ANTES de
+        // re-clickear; si no, el re-click reabre el OpenTableModal (mesa 'free'
+        // stale) y "Agregar ítems" nunca aparece.
+        await expect(page.getByRole('button', { name: /Mesa 1/ })).toContainText('Ocupada', { timeout: 15_000 })
+        await page.getByRole('button', { name: /Mesa 1/ }).click()
+      }
 
       // El panel cargó (Agregar ítems visible) pero el botón "Cocina" no existe.
       await expect(page.getByRole('button', { name: 'Agregar ítems' })).toBeVisible()
