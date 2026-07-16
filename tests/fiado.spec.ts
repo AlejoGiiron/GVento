@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { loginAsOwner, loginAsCashier } from './helpers/auth'
+import { openTableAndAddItems } from './helpers/tables'
 import { openShiftIfClosed, closeShiftIfOpen } from './helpers/shift'
 
 // Producto compuesto seeded (Lab Coctel = 18.000) que descuenta 1 "Lab Vaso"
@@ -96,6 +97,10 @@ async function saldarFiado(page: Page, customer: string, orderNumber: number) {
 
 // Lee los 3 KPIs de la cabecera de Cartera.
 async function readKpis(page: Page) {
+  // Dejar asentar el refetch de Cartera antes de leer: si se leen mientras la
+  // query aún carga, devuelven "0" (baseline en falso) → el delta contra el
+  // 'after' no cuadra. Esperar red inactiva los estabiliza.
+  await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
   return {
     porCobrar: parseCOP(await page.getByTestId('kpi-por-cobrar-value').innerText()),
     clientes: Number(await page.getByTestId('kpi-clientes-deuda-value').innerText()),
@@ -312,14 +317,10 @@ test.describe.serial('Fiado / Cartera', () => {
     await page.getByRole('button', { name: 'Crear mesa' }).click()
     await expect(page.getByText(MESA)).toBeVisible()
 
-    // Abrir la mesa.
-    await page.goto('/mesas')
-    await page.getByRole('button', { name: new RegExp(MESA) }).click()
-    await page.getByRole('button', { name: 'Abrir mesa' }).click()
+    // Abrir la mesa y abrir el picker.
+    await openTableAndAddItems(page, MESA)
 
     // Agregar 1 Lab Coctel a la mesa → AQUÍ se descuenta el stock del insumo.
-    await page.getByRole('button', { name: new RegExp(MESA) }).click()
-    await page.getByRole('button', { name: 'Agregar ítems' }).click()
     await page.getByRole('button').filter({ has: page.getByText(PRODUCT, { exact: true }) }).first().click()
     await expect(page.getByTestId('item-config-modal')).toBeVisible()
     await page.getByTestId('item-config-confirm').click()
