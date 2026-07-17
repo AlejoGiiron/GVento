@@ -167,6 +167,7 @@ begin
       "mesas.gestionar","mesas.cobrar","cocina.acceder","delivery.gestionar",
       "productos.ver","productos.editar",
       "reportes.financiero","reportes.stock",
+      "ventas.historial","ventas.anular",
       "config.acceder","usuarios.gestionar","compras.gestionar","fiado.gestionar"
     ]'::jsonb)
   on conflict (organization_id, name)
