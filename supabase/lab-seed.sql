@@ -178,7 +178,8 @@ begin
     (v_org, 'cajero', true, '[
       "pos.vender","pos.descuento","pos.anular",
       "caja.abrir","caja.cerrar","caja.movimientos",
-      "mesas.cobrar","delivery.gestionar","fiado.gestionar"
+      "mesas.cobrar","delivery.gestionar","fiado.gestionar",
+      "ventas.historial"
     ]'::jsonb)
   on conflict (organization_id, name)
     do update set permissions = excluded.permissions, is_system = true

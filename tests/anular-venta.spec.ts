@@ -276,17 +276,19 @@ test.describe.serial('Anulación de ventas', () => {
   })
 
   // ── RECHAZOS (server-side) ──────────────────────────────────────────────────
-  test('rechazo: sin permiso (cajero) → RPC niega + sin acceso de UI para anular', async ({ page }) => {
+  test('rechazo: sin permiso (cajero) → RPC niega + botón anular no visible en el historial', async ({ page }) => {
     await ensureShift()
-    const { id } = await createSale({ items: [{ product_id: P_SIMPLE, qty: 1, unit_price: 5000 }], total: 5000 })
+    const { id, number } = await createSale({ items: [{ product_id: P_SIMPLE, qty: 1, unit_price: 5000 }], total: 5000 })
     // Garantía server-side: la RPC niega al cajero (sin ventas.anular).
     const { error } = await voidRpc(await dbCajero(), id)
     expect(error?.message ?? '').toContain('No autorizado')
-    // UI: el cajero no tiene ventas.historial → la ruta está gateada, no hay
-    // camino de UI para anular (ni siquiera ve el historial).
+    // UI (barrera en el lugar correcto): el cajero SÍ ve el historial (tiene
+    // ventas.historial, igual que en prod) y abre el detalle de la venta, pero
+    // el botón "Anular venta" NO se renderiza (sin ventas.anular). Está en la
+    // pantalla de anular y aun así no puede.
     await loginAsCashier(page)
-    await page.goto('/historial')
-    await expect(page.getByTestId('sales-search')).toHaveCount(0)
+    await openSaleDetail(page, number)
+    await expect(page.getByTestId('sale-void-button')).toHaveCount(0)
     // limpieza: anular de verdad como owner (no dejar la venta viva)
     await voidRpc(await db(), id)
   })
