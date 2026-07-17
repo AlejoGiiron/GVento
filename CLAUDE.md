@@ -190,17 +190,41 @@ Resumen rápido:
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: Vale descuento / ruletazo
-  (rama feature/vale-descuento, sesión 2026-07-03) — migración orders-discount-vale.sql
-  APLICADA en LAB; descuento REAL persistido en orders (monto+tipo+kind+razón), vale como modo
-  del descuento (Mesa + POS), venta gratis (vale 100% → sin payment), vale informativo en el
-  arqueo (vouchers_total) + KPI "Regalado en vales" en Reportes. tests/vale-descuento.spec.ts
-  8/8 + arqueo 4/4 + pago-mixto 7/7 + pos 6/6 + reportes 5/5 verde en lab. tsc 0 + build verde.
-  (Antes en esta sesión y YA EN main: impresión unificada + pago mixto + arqueo multi-método —
-  release promovido a main 37d0eee, pusheado a origin.)
-Siguiente: mergear feature/vale-descuento a develop. Pendiente en G-10 (prod) cuando toque
-  desplegar: register-sale-payment.sql, shift-reconciliation.sql, orders-discount-vale.sql;
-  regenerar database.types.ts cuando se resuelva el acceso de management del CLI (deuda).
+Última fase completada: **Anulación de ventas del turno actual** (sesión 2026-07-16,
+  rama feature/anular-venta → mergeada a develop y **promovida a main/PROD**, release 25db982).
+  RPC atómica register_sale_void (6 guardas server-side, reversión de stock por espejo, borra
+  payments, marca anulada con rastro), permiso ventas.anular (owner por "*" + admin), índice
+  único de turno abierto por sede, exclusión de anuladas en Cartera y arqueo (por cancelled_at),
+  UI en historial (botón gateado + solo turno actual, diálogo de motivo, badge Anulada, sección
+  Anuladas bajo filtro de método). tests/anular-venta.spec.ts 17/17 + **suite full 143/143 verde**.
+
+**PRODUCCIÓN (main, desplegado en Vercel) incluye:**
+  - Anulación de ventas del turno actual (esta sesión)
+  - Cartera fiado maestro-detalle por cliente
+  - Imágenes de producto completas (no recortadas)
+  - Previo ya en prod: arqueo multi-método, pago mixto, vale/ruletazo, fix compras no toca caja,
+    onboarding Salchimelo.
+
+**develop = main** (sincronizados; NO hay trabajo pendiente sin desplegar).
+
+⚠️ **BD ÚNICA COMPARTIDA (aprendizaje clave):** LAB / G-10 / Salchimelo son ORGANIZACIONES dentro
+  de UNA sola base. Las migraciones (funciones/columnas/índices/permisos globales) al aplicarse
+  "en LAB" quedan aplicadas para TODAS las orgs. No hay "aplicar en G-10 aparte": un deploy de
+  feature con migración aditiva = **solo frontend** (el SQL ya está puesto al probarlo). Ojo: los
+  permisos de rol POR ORG (ej. lab-seed re-siembra solo LAB) sí son por-org — mantener lab-seed
+  sincronizado con las migraciones de permisos o el re-seed los pisa en LAB.
+
+**Deudas vigentes (abiertas):**
+  - Regenerar `database.types.ts` con `supabase gen types` cuando se resuelva el acceso de
+    management del CLI — hoy `register_sale_void` + columnas `cancelled_at/by/reason` están a mano
+    (verificadas), como `register_sale_payment` y las de vale/arqueo.
+  - Rotar la password de BD del proyecto (quedó expuesta).
+  - Endurecimiento anotado: gates de enum `get_my_role()` → `has_permission()`; RPC de cierre de
+    turno con recompute server-side del esperado; atomicidad del descuento de vale en Mesa.
+
+**Nota de proceso (para el próximo deploy):** este release SALTÓ la corrida full pre-main y se
+  validó con smoke en prod (OK). Para el próximo: **correr `pnpm test:e2e` completo sobre develop
+  ANTES de promover a main**.
 
 ### Detalle Vale descuento / ruletazo (F, sesión 2026-07-03, rama feature/vale-descuento)
 - **Migración `supabase/orders-discount-vale.sql`** (APLICADA en LAB): `orders` +4 columnas
