@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { createClient } from '@supabase/supabase-js'
 import { loginAsOwner } from './helpers/auth'
+import { openTableAndAddItems } from './helpers/tables'
 import { openShiftIfClosed, closeShiftIfOpen } from './helpers/shift'
 
 // Pago mixto (dividir el cobro entre varios métodos). Corre contra el LAB.
@@ -258,14 +259,10 @@ test.describe.serial('Pago mixto (pago dividido)', () => {
     await page.getByRole('button', { name: 'Crear mesa' }).click()
     await expect(page.getByText(MESA)).toBeVisible()
 
-    // Abrir la mesa.
-    await page.goto('/mesas')
-    await page.getByRole('button', { name: new RegExp(MESA) }).click()
-    await page.getByRole('button', { name: 'Abrir mesa' }).click()
+    // Abrir la mesa y abrir el picker.
+    await openTableAndAddItems(page, MESA)
 
     // Agregar 1 Lab Coctel → AQUÍ baja el stock del insumo (una vez).
-    await page.getByRole('button', { name: new RegExp(MESA) }).click()
-    await page.getByRole('button', { name: 'Agregar ítems' }).click()
     await page.getByRole('button').filter({ has: page.getByText(PRODUCT, { exact: true }) }).first().click()
     await expect(page.getByTestId('item-config-modal')).toBeVisible()
     await page.getByTestId('item-config-confirm').click()

@@ -473,6 +473,9 @@ export type Database = {
       }
       orders: {
         Row: {
+          cancel_reason: string | null
+          cancelled_at: string | null
+          cancelled_by: string | null
           courier_id: string | null
           created_at: string
           created_by: string
@@ -498,6 +501,9 @@ export type Database = {
           waiter_name: string | null
         }
         Insert: {
+          cancel_reason?: string | null
+          cancelled_at?: string | null
+          cancelled_by?: string | null
           courier_id?: string | null
           created_at?: string
           created_by: string
@@ -523,6 +529,9 @@ export type Database = {
           waiter_name?: string | null
         }
         Update: {
+          cancel_reason?: string | null
+          cancelled_at?: string | null
+          cancelled_by?: string | null
           courier_id?: string | null
           created_at?: string
           created_by?: string
@@ -548,6 +557,13 @@ export type Database = {
           waiter_name?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "orders_cancelled_by_fkey"
+            columns: ["cancelled_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "orders_courier_id_fkey"
             columns: ["courier_id"]
@@ -1395,6 +1411,10 @@ export type Database = {
       }
       register_sale_payment: {
         Args: { p_order_id: string; p_payments: Json }
+        Returns: Json
+      }
+      register_sale_void: {
+        Args: { p_order_id: string; p_reason: string }
         Returns: Json
       }
     }
