@@ -207,6 +207,34 @@ Resumen rápido:
 
 **develop = main** (sincronizados; NO hay trabajo pendiente sin desplegar).
 
+🔒 **Bloque de seguridad RBAC (sesión 2026-07-31) — SQL YA APLICADO Y RIGIENDO EN LAS 3 ORGS.**
+  Auditoría disparada por un hallazgo de G-Mura (`is_active` no aplicado server-side). En G-Vento
+  el hueco existía **y era peor**: la policy `"profiles: editar el propio"` no acotaba COLUMNAS, así
+  que cualquier autenticado podía escribir su propio `role_id` (el UUID del rol owner es legible por
+  `"roles: ver los de la org"`) → comodín `*` → acceso total; y su propio `organization_id` →
+  `get_my_organization_id()` apunta a otra org → con `usuarios.gestionar` se auto-inserta
+  `user_stores` hacia una sede ajena y cambia su sede activa → **datos de G-10 o Salchimelo**.
+  Dos migraciones NUEVAS, ambas aplicadas por el usuario en el SQL Editor:
+  - `supabase/protect-profile-self-escalation.sql` — trigger BEFORE UPDATE
+    `trg_protect_profile_self_escalation`: rechaza cambios a `role_id`, `role`, `is_active` y
+    `organization_id` cuando `new.id = auth.uid()`. Patrón de `protect_owner_role`
+    (`current_user = 'authenticated'` → seeds, `handle_new_user` y service_role pasan).
+    `IS DISTINCT FROM` (no `<>`) es OBLIGATORIO: `role_id`/`organization_id` son nullables y
+    PostgREST manda solo las columnas del `.update()` completando el resto de NEW desde OLD — por
+    eso el cambio de sede activa (update de `restaurant_id` solo) no se ve afectado.
+  - `supabase/profiles-is-active-enforced.sql` — `and is_active` en las CUATRO funciones base:
+    `has_permission`, `get_my_restaurant_id`, `get_my_role`, `get_my_organization_id`.
+    `get_my_organization_id` entró a propósito: sin él un desactivado sigue leyendo `roles`, que es
+    la materia prima de la escalada. Verificado antes de aplicar: cero perfiles inactivos y owner
+    activo en las 3 orgs (si algún owner quedara inactivo, se recupera SOLO por SQL Editor).
+  - `tests/rbac-escalada.spec.ts` (6): los 3 rechazos assertean el MENSAJE del trigger, no
+    `bloqueado()` laxo — un rechazo por RLS con cero filas sería verde por la razón equivocada
+    (patrón anular-venta:279). Probado empíricamente: el BEFORE UPDATE dispara ANTES del WITH CHECK.
+    Snapshot en `beforeAll` + restore en `afterAll` para no dejar el lab con el cajero desactivado.
+  - **Suite full 149/149 verde** con P1+P2 ya rigiendo → el filtro `is_active` es un no-op.
+  - Aprendizaje: `permissions` es **jsonb**, no array PG → `.contains('permissions', '["*"]')`;
+    pasar `['*']` lo serializa como `{*}` y Postgres devuelve `22P02 Token "*" is invalid`.
+
 ⚠️ **BD ÚNICA COMPARTIDA (aprendizaje clave):** LAB / G-10 / Salchimelo son ORGANIZACIONES dentro
   de UNA sola base. Las migraciones (funciones/columnas/índices/permisos globales) al aplicarse
   "en LAB" quedan aplicadas para TODAS las orgs. No hay "aplicar en G-10 aparte": un deploy de
@@ -221,6 +249,22 @@ Resumen rápido:
   - Rotar la password de BD del proyecto (quedó expuesta).
   - Endurecimiento anotado: gates de enum `get_my_role()` → `has_permission()`; RPC de cierre de
     turno con recompute server-side del esperado; atomicidad del descuento de vale en Mesa.
+  - **Un admin puede seguir promoviendo a OTRO usuario a owner.** El trigger
+    `protect_profile_self_escalation` solo blinda la fila PROPIA (`new.id = auth.uid()`); la policy
+    `"profiles: admin edita cualquiera"` (gate por enum `get_my_role() = 'admin'`) sigue permitiendo
+    asignar cualquier `role_id` a un tercero. Es el diseño intencional de la sección Usuarios, pero
+    significa que un admin con una segunda cuenta bajo su control llega al comodín `*` igual.
+    Cerrarlo pide gatear la asignación de `role_id` **por permiso, no por enum** — encaja con la
+    deuda ya anotada de `get_my_role()` → `has_permission()`, resolver ambas en la misma pasada.
+  - **UX del desactivado con sesión viva (pasada de APP, no SQL):** tras la P2 de `is_active`
+    efectivo, un usuario desactivado que conserve su JWT verá la app **en blanco** (cero filas en
+    todo, porque `get_my_restaurant_id()` devuelve null) en vez de un mensaje. Lo arreglan el
+    chequeo de `is_active` en el login (`AuthContext`/`LoginPage`) y el baneo en `auth.users` al
+    desactivar (requiere Edge Function con service role: el navegador no puede banear).
+  - **Toggle de `is_active` sobre la fila propia:** con el trigger P1 aplicado, un admin que se
+    desactive/reactive a sí mismo desde ConfigPage recibe el toast genérico "Error al actualizar el
+    usuario". El rechazo es correcto; falta ocultar el toggle en la fila propia. Misma pasada de app
+    que la deuda anterior.
 
 **Nota de proceso (para el próximo deploy):** este release SALTÓ la corrida full pre-main y se
   validó con smoke en prod (OK). Para el próximo: **correr `pnpm test:e2e` completo sobre develop
