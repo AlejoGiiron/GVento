@@ -276,3 +276,57 @@ test('el admin puede asignar role_id a OTRO usuario de su sede', async () => {
   await restore(cajeroSnap)
   expect((await readProfile(cajeroSnap.id)).role_id).toBe(cajeroSnap.role_id)
 })
+
+// ── Capa de APP (UX del desactivado) ────────────────────────────────────────
+
+test('el desactivado NO entra: la sesión se corta con mensaje', async ({ page }) => {
+  // Server-side el acceso ya está cerrado (P2): get_my_restaurant_id() devuelve
+  // null y la RLS no da ni una fila. Sin este chequeo el usuario entraba igual y
+  // veía la app EN BLANCO, sin explicación. Esto verifica la capa de UX.
+  const off = await owner
+    .from('profiles')
+    .update({ is_active: false })
+    .eq('id', cajeroSnap.id)
+    .select(SNAP_COLS)
+  expect(bloqueado(off), 'el owner debe poder desactivar a un empleado').toBe(false)
+
+  try {
+    const { email, password } = cashierCreds()
+    await page.goto('/login')
+    await page.locator('input[autocomplete="email"]').fill(email)
+    await page.locator('input[autocomplete="current-password"]').fill(password)
+    await page.getByRole('button', { name: 'Ingresar' }).click()
+
+    // El login de auth SÍ funciona (auth.users está intacto: el baneo sigue
+    // pendiente). Lo que corta es AuthContext al leer el profile inactivo.
+    await expect(
+      page.getByText('Tu usuario está desactivado. Contactá al administrador.'),
+    ).toBeVisible({ timeout: 15_000 })
+
+    // Y no queda dentro de la app.
+    await expect(page).toHaveURL(/\/login/, { timeout: 15_000 })
+  } finally {
+    await restore(cajeroSnap)
+  }
+  expect((await readProfile(cajeroSnap.id)).is_active).toBe(true)
+})
+
+test('Configuración: el toggle de is_active NO se ofrece en la fila propia', async ({ page }) => {
+  // El trigger rechaza la auto-desactivación, así que ofrecer el botón solo
+  // producía el toast genérico de error. Las filas ajenas lo conservan.
+  const { email, password } = ownerCreds()
+  await page.goto('/login')
+  await page.locator('input[autocomplete="email"]').fill(email)
+  await page.locator('input[autocomplete="current-password"]').fill(password)
+  await page.getByRole('button', { name: 'Ingresar' }).click()
+  await expect(page).toHaveURL(/\/ventas/, { timeout: 15_000 })
+
+  await page.goto('/configuracion')
+  await page.getByRole('button', { name: 'Usuarios' }).click()
+  await expect(page.getByRole('heading', { name: 'Usuarios', exact: true })).toBeVisible()
+
+  // Exactamente una fila (la propia) sin toggle...
+  await expect(page.getByTestId('user-toggle-self')).toHaveCount(1)
+  // ...y al menos una fila ajena que sí lo tiene (cajero.test / mozo.test).
+  expect(await page.getByTitle(/^(Desactivar|Activar)$/).count()).toBeGreaterThan(0)
+})

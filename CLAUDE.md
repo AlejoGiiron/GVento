@@ -205,7 +205,9 @@ Resumen rápido:
   - Previo ya en prod: arqueo multi-método, pago mixto, vale/ruletazo, fix compras no toca caja,
     onboarding Salchimelo.
 
-**develop = main** (sincronizados; NO hay trabajo pendiente sin desplegar).
+**develop ADELANTADO de main** por el bloque de seguridad RBAC (ver abajo): SQL **ya aplicado**
+  en la BD compartida + tests + documentación. **NO hay frontend pendiente de desplegar** — el
+  release a Vercel no cambia nada de la app. Promover a main solo para re-sincronizar las ramas.
 
 🔒 **Bloque de seguridad RBAC (sesión 2026-07-31) — SQL YA APLICADO Y RIGIENDO EN LAS 3 ORGS.**
   Auditoría disparada por un hallazgo de G-Mura (`is_active` no aplicado server-side). En G-Vento
@@ -234,6 +236,19 @@ Resumen rápido:
   - **Suite full 149/149 verde** con P1+P2 ya rigiendo → el filtro `is_active` es un no-op.
   - Aprendizaje: `permissions` es **jsonb**, no array PG → `.contains('permissions', '["*"]')`;
     pasar `['*']` lo serializa como `{*}` y Postgres devuelve `22P02 Token "*" is invalid`.
+  - **Pasada de APP (misma sesión, sin SQL nuevo):** (a) `create-user` verifica `is_active` del
+    LLAMANTE y pasó su gate de enum `role === 'admin'` a `has_permission('usuarios.gestionar')` vía
+    RPC con el cliente del llamante — cierra la persistencia "te desactivan, te creás otra cuenta";
+    (b) `AuthContext.fetchProfile` corta la sesión con mensaje si el perfil está inactivo (antes:
+    app en blanco sin explicación) — funciona gracias a la policy aditiva `"profiles: ver el propio"`
+    (`id = auth.uid()`), la única que le deja leer su fila tras P2; (c) ConfigPage oculta el toggle
+    de `is_active` en la fila propia (testid `user-toggle-self`). `tests/rbac-escalada.spec.ts`
+    pasó de 6 a 8 casos. Queda pendiente solo el baneo en `auth.users` (ver deudas).
+  - 🚨 **`create-user` NO surte efecto hasta REDESPLEGAR la Edge Function.** El repo tiene el
+    fuente; en producción corre la versión desplegada. Hace falta
+    `supabase functions deploy create-user` (o subirla desde el Dashboard si muerde el 403 de
+    management del CLI, ver deuda). **Hasta ese deploy, el hueco de persistencia sigue ABIERTO en
+    prod.** Los ítems (b) y (c) sí viajan con el build del frontend.
 
 ⚠️ **BD ÚNICA COMPARTIDA (aprendizaje clave):** LAB / G-10 / Salchimelo son ORGANIZACIONES dentro
   de UNA sola base. Las migraciones (funciones/columnas/índices/permisos globales) al aplicarse
@@ -256,15 +271,13 @@ Resumen rápido:
     significa que un admin con una segunda cuenta bajo su control llega al comodín `*` igual.
     Cerrarlo pide gatear la asignación de `role_id` **por permiso, no por enum** — encaja con la
     deuda ya anotada de `get_my_role()` → `has_permission()`, resolver ambas en la misma pasada.
-  - **UX del desactivado con sesión viva (pasada de APP, no SQL):** tras la P2 de `is_active`
-    efectivo, un usuario desactivado que conserve su JWT verá la app **en blanco** (cero filas en
-    todo, porque `get_my_restaurant_id()` devuelve null) en vez de un mensaje. Lo arreglan el
-    chequeo de `is_active` en el login (`AuthContext`/`LoginPage`) y el baneo en `auth.users` al
-    desactivar (requiere Edge Function con service role: el navegador no puede banear).
-  - **Toggle de `is_active` sobre la fila propia:** con el trigger P1 aplicado, un admin que se
-    desactive/reactive a sí mismo desde ConfigPage recibe el toast genérico "Error al actualizar el
-    usuario". El rechazo es correcto; falta ocultar el toggle en la fila propia. Misma pasada de app
-    que la deuda anterior.
+  - **Baneo en `auth.users` al desactivar — PENDIENTE (lo único que queda del bloque is_active).**
+    Hoy desactivar escribe el flag; la cuenta de `auth.users` sigue viva, así que el desactivado
+    puede volver a loguearse y obtener un JWT válido. `AuthContext` lo detecta y le corta la sesión
+    con mensaje, y la RLS no le da ni una fila — pero el token se emite igual. Cerrarlo requiere
+    mover el toggle a una **Edge Function con service role** (`admin.auth.admin.updateUserById` con
+    `ban_duration`): el navegador no puede banear. Prioridad baja: con P1+P2 el desactivado ya no
+    accede a datos.
 
 **Nota de proceso (para el próximo deploy):** este release SALTÓ la corrida full pre-main y se
   validó con smoke en prod (OK). Para el próximo: **correr `pnpm test:e2e` completo sobre develop
