@@ -1,5 +1,6 @@
 import { createContext, useEffect, useState, useCallback, type ReactNode } from 'react'
 import type { User } from '@supabase/supabase-js'
+import { toast } from 'react-hot-toast'
 import { supabase } from '@/lib/supabase'
 import { useCartStore } from '@/stores/cartStore'
 import type { Tables } from '@/types/database.types'
@@ -38,6 +39,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.error('fetchProfile falló; se conserva el profile previo:', error.message)
       return
     }
+
+    // Usuario desactivado: se corta la sesión con un mensaje. Sin esto entraba
+    // igual y veía la app EN BLANCO — tras el endurecimiento de is_active,
+    // get_my_restaurant_id() devuelve null y la RLS no le da ni una fila, sin
+    // ninguna explicación. El acceso a datos ya está cerrado server-side; esto
+    // es la capa de UX. (El baneo en auth.users sigue pendiente: ver deuda.)
+    if (!data.is_active) {
+      await supabase.auth.signOut()
+      setProfile(null)
+      setUser(null)
+      toast.error('Tu usuario está desactivado. Contactá al administrador.')
+      return
+    }
+
     setProfile(data)
   }, [])
 

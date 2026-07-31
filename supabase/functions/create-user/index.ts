@@ -32,15 +32,29 @@ serve(async (req) => {
     const { data: { user }, error: authErr } = await caller.auth.getUser()
     if (authErr || !user) return json({ error: 'No autorizado' }, 401)
 
-    // Verifica que el llamante sea admin del restaurante
+    // Verifica que el llamante esté ACTIVO y tenga permiso sobre el restaurante.
     const { data: callerProfile, error: profErr } = await admin
       .from('profiles')
-      .select('role, restaurant_id')
+      .select('is_active, restaurant_id')
       .eq('id', user.id)
       .single()
 
     if (profErr || !callerProfile) return json({ error: 'Perfil no encontrado' }, 403)
-    if (callerProfile.role !== 'admin') return json({ error: 'Se requiere rol admin' }, 403)
+
+    // is_active explícito ANTES del permiso: un admin desactivado con sesión viva
+    // podía crear usuarios nuevos vía service role (persistencia: te desactivan,
+    // te creás otra cuenta). has_permission ya filtra is_active por su cuenta,
+    // pero este chequeo da el mensaje correcto en vez de "sin permiso".
+    if (!callerProfile.is_active)
+      return json({ error: 'Tu usuario está desactivado' }, 403)
+
+    // Gate por PERMISO RBAC, no por el enum legacy `role`. Se ejecuta con el
+    // cliente del LLAMANTE: has_permission() resuelve por auth.uid().
+    const { data: puede, error: permErr } = await caller.rpc('has_permission', {
+      perm: 'usuarios.gestionar',
+    })
+    if (permErr) return json({ error: 'No se pudo verificar el permiso' }, 403)
+    if (!puede) return json({ error: 'Se requiere el permiso usuarios.gestionar' }, 403)
 
     // Parsea y valida el cuerpo
     const { email, password, full_name, role, restaurant_id } = await req.json()
