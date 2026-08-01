@@ -168,7 +168,17 @@ test('el cajero NO puede cambiar su propio organization_id (aislamiento multi-te
     .eq('id', cajeroSnap.id)
     .select(SNAP_COLS)
 
-  expectRechazoDelTrigger(res, /No podes cambiar tu propia organizacion/i)
+  // DOS triggers lo rechazan y cualquiera de los dos es válido; lo que NO se
+  // acepta es un bloqueo sin mensaje (RLS con cero filas). Gana el que dispare
+  // primero, y los BEFORE ROW van por orden alfabético de nombre:
+  // 'trg_profiles_org_consistency' < 'trg_protect_profile_self_escalation',
+  // así que hoy contesta el del invariante de organización. No se fija el orden
+  // a propósito: el invariante VALIDA en vez de forzar justamente para que el
+  // rechazo no dependa de quién corra primero.
+  expectRechazoDelTrigger(
+    res,
+    /No podes cambiar tu propia organizacion|no corresponde a la organizacion de su sede/i,
+  )
 
   const after = await readProfile(cajeroSnap.id)
   expect(after.organization_id).toBe(cajeroSnap.organization_id)
