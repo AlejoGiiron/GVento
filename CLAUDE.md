@@ -312,6 +312,15 @@ Resumen rápido:
        DESCARTADO pasar `role_id` por metadata: convertiría la deuda del enum `role` en escalada
        directa a owner (ver la nota de `raw_user_meta_data` en Deudas).
     Los ítems (b) y (c) de la pasada de app SÍ viajan con el build del frontend.
+  - ⏳ **LO ÚNICO DEL BLOQUE QUE NO ESTÁ CERRADO EN PRODUCCIÓN (2 ítems):**
+    1. **Redeploy de la Edge Function `create-user`** — `is_active` del llamante (ya en el repo) +
+       `role_id` server-side con compensación (diseñado, sin escribir). Ver el 🚨 de arriba.
+    2. **Apagar el signup público en el Dashboard de Supabase** — verificado que NADA del código usa
+       `signUp` (solo `signInWithPassword`/`signOut`/`getSession`/`onAuthStateChange`) y que la Edge
+       Function usa la API admin, indiferente a ese toggle. Apagarlo no rompe ningún flujo y cierra
+       el vector de `raw_user_meta_data` → enum `role` descrito en Deudas.
+    Todo lo demás del bloque (P1 escalada, P2 `is_active`, invariante de `organization_id` + su fix
+    de `SECURITY DEFINER`) está APLICADO y rigiendo en la BD compartida, con suite full 151/151.
 
 ⚠️ **BD ÚNICA COMPARTIDA (aprendizaje clave):** LAB / G-10 / Salchimelo son ORGANIZACIONES dentro
   de UNA sola base. Las migraciones (funciones/columnas/índices/permisos globales) al aplicarse

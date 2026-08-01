@@ -503,7 +503,32 @@ delete from public.stock_movements
    where o.name = 'LAB'
  );
 
--- 8. Mesas de LAB de vuelta a 'free' (los tests las dejan ocupadas/pide cuenta).
+-- 8. Clientes de fiado de LAB.
+--
+--    HUECO DETECTADO (2026-07-31): esta sección purgaba lo transaccional pero
+--    NO los clientes, así que cada corrida de fiado.spec / anular-venta.spec
+--    dejaba los suyos. Se acumularon 46 (E2E Fiado…, E2E Grupo…, AV Fiado…) y
+--    rompieron anular-venta:355, que asumía UNA sola fila en la Cartera.
+--
+--    ORDEN CRÍTICO: va DESPUÉS del paso 4 (borrado de orders) a propósito.
+--    `orders.customer_id` es ON DELETE **SET NULL** (fiado-clientes.sql:79), así
+--    que borrar clientes con órdenes vivas NO falla: las deja con customer_id
+--    NULL, y un fiado pendiente sin cliente aparece en la Cartera como una fila
+--    fantasma "Cliente" que ya ningún seed limpia. Así nacieron los 2 huérfanos
+--    que encontramos. Purgadas las órdenes primero, no queda nada que huerfanar.
+--
+--    Se borran TODOS los clientes de las sedes de LAB, no solo los del prefijo
+--    E2E/AV: en un laboratorio que se resiembra desde cero un cliente sin
+--    órdenes no es dato, es residuo. El filtro que garantiza no tocar G-10 ni
+--    Salchimelo es el de ORGANIZACIÓN, nunca el patrón de nombre.
+delete from public.customers
+ where restaurant_id in (
+   select r.id from public.restaurants r
+   join public.organizations o on o.id = r.organization_id
+   where o.name = 'LAB'
+ );
+
+-- 9. Mesas de LAB de vuelta a 'free' (los tests las dejan ocupadas/pide cuenta).
 update public.tables set status = 'free'
  where restaurant_id in (
    select r.id from public.restaurants r
@@ -575,6 +600,9 @@ select 'limpieza LAB' as check,
   (select count(*) from public.stock_movements sm
      join public.restaurants r on r.id = sm.restaurant_id
      join public.organizations o on o.id = r.organization_id where o.name = 'LAB') as stock_movements,
+  (select count(*) from public.customers cu
+     join public.restaurants r on r.id = cu.restaurant_id
+     join public.organizations o on o.id = r.organization_id where o.name = 'LAB') as customers,
   (select count(*) from public.tables t
      join public.restaurants r on r.id = t.restaurant_id
      join public.organizations o on o.id = r.organization_id
