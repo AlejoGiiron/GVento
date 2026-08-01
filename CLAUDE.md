@@ -244,11 +244,51 @@ Resumen rápido:
     (`id = auth.uid()`), la única que le deja leer su fila tras P2; (c) ConfigPage oculta el toggle
     de `is_active` en la fila propia (testid `user-toggle-self`). `tests/rbac-escalada.spec.ts`
     pasó de 6 a 8 casos. Queda pendiente solo el baneo en `auth.users` (ver deudas).
-  - 🚨 **`create-user` NO surte efecto hasta REDESPLEGAR la Edge Function.** El repo tiene el
-    fuente; en producción corre la versión desplegada. Hace falta
+  - **`organization_id` de profiles — `supabase/profiles-organization-invariant.sql`, APLICADA y
+    verificada en la BD compartida (rige para LAB / G-10 / Salchimelo).** Hallazgo: `organization_id`
+    NO se seteaba en NINGÚN paso del flujo normal (ni `handle_new_user`, ni la metadata de
+    `create-user`, ni el UPDATE de `useUsers`, que solo escribe `role_id`) → **todo usuario creado
+    desde la app nacía con `organization_id` NULL**. Los perfiles sanos lo tienen porque los sembró
+    `onboard-org` / `multi-tenant-rbac` / `lab-seed`. Rompía la UI entera: `usePermissions` lee su
+    rol de `roles`, cuya RLS es `organization_id = get_my_organization_id()` → con NULL da NULL (no
+    TRUE) → cero filas → `permissions = []` → sidebar vacío y toda ruta con permiso rebotando.
+    **Asimetría clave:** `has_permission()` NO filtra por organización, así que server-side los
+    permisos SÍ funcionaban — el usuario quedaba roto en la UI, no en la API.
+    La migración hace tres cosas, en este orden dentro de la transacción:
+    (1) `handle_new_user` DERIVA `organization_id` de la sede (se arregla ahí y no en la Edge
+    Function porque cubre todos los caminos: Dashboard, signUp, scripts) + 3 guardas con `raise`
+    explícito — sin `restaurant_id` en metadata (con `hint` de qué poner), sede inexistente, y sede
+    sin organización. NO introduce un modo de fallo nuevo: `profiles.restaurant_id` ya es NOT NULL
+    (`schema.sql:57`), así que crear desde el Dashboard sin metadata YA abortaba; solo mejora el
+    mensaje. (2) backfill derivando de la sede. (3) trigger `trg_profiles_org_consistency`.
+    - **El trigger VALIDA, no fuerza** — decisión de diseño, no detalle: si forzara
+      `new.organization_id`, y `trg_protect_profile_self_escalation` disparara primero (no vería
+      cambio de org y dejaría pasar), el forzado reescribiría la organización EN SILENCIO →
+      reintroduce el salto de org que tapa P1. Validando, el rechazo ocurre en cualquier orden de
+      disparo y no dependemos del orden alfabético de los BEFORE ROW.
+    - **NO se acota a `current_user = 'authenticated'`** (a diferencia del trigger de escalada): es
+      un invariante de DATOS, no una regla de autorización; vale también para seeds y service_role.
+    - Efecto colateral DESEADO: cambiar de sede a otra organización queda imposible a nivel BD.
+    - `restaurants.organization_id` es NULLABLE (`multi-tenant-rbac.sql:112`) → una sede sin
+      organización dejaría sus perfiles INACTUALIZABLES bajo el trigger. Verificación previa
+      bloqueante incluida en el archivo (debe dar 0 filas).
+  - 🚨 **DOS cambios de `create-user` esperando UN SOLO redeploy.** El repo tiene el fuente; en
+    producción corre la versión desplegada. Ambos viajan juntos en
     `supabase functions deploy create-user` (o subirla desde el Dashboard si muerde el 403 de
-    management del CLI, ver deuda). **Hasta ese deploy, el hueco de persistencia sigue ABIERTO en
-    prod.** Los ítems (b) y (c) sí viajan con el build del frontend.
+    management del CLI, ver deuda):
+    1. **YA EN EL REPO, sin desplegar:** `is_active` del llamante + gate por
+       `has_permission('usuarios.gestionar')`. **Hasta el deploy el hueco de persistencia sigue
+       ABIERTO en prod** (un admin desactivado con sesión viva puede crear usuarios).
+    2. **DISEÑADO pero NO escrito todavía (punto 6, hueco de `role_id`):** hoy crear usuario son 2
+       pasos sin atomicidad — la Edge Function crea la cuenta y **el navegador** asigna `role_id`
+       después (`useUsers.ts:64`). Si el segundo falla o se cierra la pestaña, queda un perfil SIN
+       ROL y por lo tanto **sin ningún permiso** (`has_permission` hace JOIN contra `roles`). Fix
+       acordado: la Edge Function hace el UPDATE de `role_id` ella misma con service role, valida
+       que el rol sea de la organización del llamante, y **compensa con `deleteUser` si el UPDATE
+       falla** (cascadea a `profiles`, no deja residuo). `useUsers` pierde su segundo paso.
+       DESCARTADO pasar `role_id` por metadata: convertiría la deuda del enum `role` en escalada
+       directa a owner (ver la nota de `raw_user_meta_data` en Deudas).
+    Los ítems (b) y (c) de la pasada de app SÍ viajan con el build del frontend.
 
 ⚠️ **BD ÚNICA COMPARTIDA (aprendizaje clave):** LAB / G-10 / Salchimelo son ORGANIZACIONES dentro
   de UNA sola base. Las migraciones (funciones/columnas/índices/permisos globales) al aplicarse
@@ -271,6 +311,18 @@ Resumen rápido:
     significa que un admin con una segunda cuenta bajo su control llega al comodín `*` igual.
     Cerrarlo pide gatear la asignación de `role_id` **por permiso, no por enum** — encaja con la
     deuda ya anotada de `get_my_role()` → `has_permission()`, resolver ambas en la misma pasada.
+  - ⚠️ **`handle_new_user` CONFÍA en `raw_user_meta_data` para el enum `role`** — canal que en un
+    `signUp` ABIERTO controla el propio usuario:
+    `coalesce(new.raw_user_meta_data->>'role', 'waiter')::user_role`. Con auto-registro habilitado,
+    alguien podría registrarse pidiendo `role: 'admin'` y quedarse con los gates legacy
+    `get_my_role() in ('admin','cashier')` que siguen vivos (RLS de payments/orders/cash_shifts,
+    policy `"profiles: admin edita cualquiera"`). **Por eso NUNCA meter `role_id` en la metadata:**
+    convertiría esta deuda en escalada directa a owner (por eso el fix de `organization_id` lo
+    DERIVA de la sede en vez de recibirlo). Nada en el código usa `signUp` — toda creación pasa por
+    la Edge Function `create-user` (`admin.auth.admin.createUser`, API admin, indiferente al toggle
+    de signup público) — así que apagar el auto-registro en el Dashboard no rompe ningún flujo.
+    **Si alguien lo reactiva, este vector vuelve.** Cierre definitivo: eliminar el enum `role` y
+    dejar solo `has_permission` (ver deuda de gates de enum).
   - **Baneo en `auth.users` al desactivar — PENDIENTE (lo único que queda del bloque is_active).**
     Hoy desactivar escribe el flag; la cuenta de `auth.users` sigue viva, así que el desactivado
     puede volver a loguearse y obtener un JWT válido. `AuthContext` lo detecta y le corta la sesión
