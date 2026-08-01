@@ -272,6 +272,29 @@ Resumen rápido:
     - `restaurants.organization_id` es NULLABLE (`multi-tenant-rbac.sql:112`) → una sede sin
       organización dejaría sus perfiles INACTUALIZABLES bajo el trigger. Verificación previa
       bloqueante incluida en el archivo (debe dar 0 filas).
+    - 🔴 **`enforce_profile_organization` DEBE ser `SECURITY DEFINER` — NO se lo quiten.** La
+      primera versión aplicada NO lo era, y fue un bug real que atrapó la suite
+      (`supabase/fix-enforce-profile-organization-definer.sql`, migración de corrección, APLICADA).
+      Sin `definer` la función corre con los privilegios de quien dispara el UPDATE, así que su
+      `select` sobre `restaurants` **pasa por RLS**. Tras el endurecimiento de `is_active`, un
+      usuario desactivado obtiene NULL de `get_my_restaurant_id()` Y de `get_my_organization_id()`
+      → no ve NINGUNA sede → `if not found` → rechazaba con
+      `'profiles.restaurant_id (<uuid>) no corresponde a ninguna sede'` sobre una sede que EXISTE.
+      **El invariante estaba evaluando datos filtrados por quién mira, no los datos reales** — y un
+      invariante de datos no puede depender de la visibilidad del observador: la organización de una
+      sede es la misma la mire quien la mire. Mismo motivo por el que `get_my_restaurant_id` /
+      `get_my_role` / `has_permission` son definer. El modo de fallo era *fail-closed* (rechazaba de
+      más, nunca de menos: sin bypass), pero dejaba una bomba de tiempo — cualquier ajuste futuro a
+      las policies de `restaurants` empezaría a rechazar updates de perfiles válidos con un mensaje
+      que apunta al lugar equivocado. `protect_profile_self_escalation` y `protect_owner_role` en
+      cambio NO necesitan definer: solo leen `OLD`/`NEW`, no tocan tablas.
+    - Cómo se detectó, y por qué la aserción del spec es así: `tests/rbac-escalada.spec.ts` exige el
+      **mensaje** del trigger en los rechazos, no un "bloqueado" laxo. Con `bloqueado()` (error O
+      cero filas) este bug habría pasado EN VERDE. Mismo patrón que anular-venta:279.
+      Consecuencia del tercer trigger: en el caso `organization_id`, los BEFORE ROW disparan por
+      orden alfabético y `trg_profiles_org_consistency` < `trg_protect_profile_self_escalation`, así
+      que hoy contesta el del invariante — el spec acepta CUALQUIERA de los dos mensajes a propósito,
+      porque el invariante VALIDA en vez de forzar justamente para no depender del orden.
   - 🚨 **DOS cambios de `create-user` esperando UN SOLO redeploy.** El repo tiene el fuente; en
     producción corre la versión desplegada. Ambos viajan juntos en
     `supabase functions deploy create-user` (o subirla desde el Dashboard si muerde el 403 de
