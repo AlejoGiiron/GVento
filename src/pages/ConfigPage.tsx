@@ -559,6 +559,7 @@ function CreateUserModal({ onClose }: { onClose: () => void }) {
 function SectionUsers() {
   const { users, isLoading, updateUser, isUpdating } = useUsers()
   const { roles } = useRoles()
+  const { profile } = useAuth()
   const [showCreate, setShowCreate] = useState(false)
 
   if (isLoading) return <Skeleton />
@@ -679,14 +680,27 @@ function SectionUsers() {
               {user.is_active ? 'Activo' : 'Inactivo'}
             </span>
 
-            <button
-              onClick={() => updateUser(user.id, { is_active: !user.is_active })}
-              disabled={isUpdating}
-              title={user.is_active ? 'Desactivar' : 'Activar'}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: user.is_active ? '#10b981' : '#94a3b8', display: 'flex', alignItems: 'center' }}
-            >
-              {user.is_active ? <ToggleRight size={24} /> : <ToggleLeft size={24} />}
-            </button>
+            {/* Nadie se activa ni se desactiva a sí mismo: el trigger de BD
+                trg_protect_profile_self_escalation lo rechaza, así que ofrecer
+                la acción solo produce el toast genérico de error. */}
+            {user.id === profile?.id ? (
+              <span
+                data-testid="user-toggle-self"
+                title="No podés activar ni desactivar tu propio usuario"
+                style={{ fontSize: 11, color: '#94a3b8' }}
+              >
+                —
+              </span>
+            ) : (
+              <button
+                onClick={() => updateUser(user.id, { is_active: !user.is_active })}
+                disabled={isUpdating}
+                title={user.is_active ? 'Desactivar' : 'Activar'}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: user.is_active ? '#10b981' : '#94a3b8', display: 'flex', alignItems: 'center' }}
+              >
+                {user.is_active ? <ToggleRight size={24} /> : <ToggleLeft size={24} />}
+              </button>
+            )}
           </div>
         ))}
       </div>

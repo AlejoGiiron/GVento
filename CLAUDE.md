@@ -190,17 +190,213 @@ Resumen rápido:
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: Vale descuento / ruletazo
-  (rama feature/vale-descuento, sesión 2026-07-03) — migración orders-discount-vale.sql
-  APLICADA en LAB; descuento REAL persistido en orders (monto+tipo+kind+razón), vale como modo
-  del descuento (Mesa + POS), venta gratis (vale 100% → sin payment), vale informativo en el
-  arqueo (vouchers_total) + KPI "Regalado en vales" en Reportes. tests/vale-descuento.spec.ts
-  8/8 + arqueo 4/4 + pago-mixto 7/7 + pos 6/6 + reportes 5/5 verde en lab. tsc 0 + build verde.
-  (Antes en esta sesión y YA EN main: impresión unificada + pago mixto + arqueo multi-método —
-  release promovido a main 37d0eee, pusheado a origin.)
-Siguiente: mergear feature/vale-descuento a develop. Pendiente en G-10 (prod) cuando toque
-  desplegar: register-sale-payment.sql, shift-reconciliation.sql, orders-discount-vale.sql;
-  regenerar database.types.ts cuando se resuelva el acceso de management del CLI (deuda).
+Última fase completada: **Bloque de seguridad RBAC** (sesión 2026-07-31/08-01, detalle completo
+  más abajo con el 🔒). SQL aplicado en la BD compartida + Edge Function `create-user` desplegada
+  + frontend promovido a main. Suite full **156 (155 passed + 1 skipped)**.
+
+Fase previa: **Anulación de ventas del turno actual** (sesión 2026-07-16,
+  rama feature/anular-venta → mergeada a develop y **promovida a main/PROD**, release 25db982).
+  RPC atómica register_sale_void (6 guardas server-side, reversión de stock por espejo, borra
+  payments, marca anulada con rastro), permiso ventas.anular (owner por "*" + admin), índice
+  único de turno abierto por sede, exclusión de anuladas en Cartera y arqueo (por cancelled_at),
+  UI en historial (botón gateado + solo turno actual, diálogo de motivo, badge Anulada, sección
+  Anuladas bajo filtro de método). tests/anular-venta.spec.ts 17/17 + **suite full 143/143 verde**.
+
+**PRODUCCIÓN (main, desplegado en Vercel) incluye:**
+  - **Bloque de seguridad RBAC completo** (esta sesión): corte de sesión al usuario desactivado con
+    mensaje, toggle de `is_active` oculto en la fila propia, y `useUsers` mandando `role_id` a la
+    Edge Function en UN solo paso. Este último es el que **activa** el fix de `role_id` que ya
+    estaba desplegado del lado de la función: hasta este release, crear usuario seguían siendo 2
+    pasos con el navegador asignando el rol.
+  - Anulación de ventas del turno actual
+  - Cartera fiado maestro-detalle por cliente
+  - Imágenes de producto completas (no recortadas)
+  - Previo ya en prod: arqueo multi-método, pago mixto, vale/ruletazo, fix compras no toca caja,
+    onboarding Salchimelo.
+
+**develop = main** (sincronizados; el bloque de seguridad se promovió completo).
+  Precondición cumplida antes de promover, según la nota de proceso: `pnpm test:e2e` full sobre
+  develop → 155 passed + 1 skipped.
+
+🔒 **Bloque de seguridad RBAC (sesión 2026-07-31) — SQL YA APLICADO Y RIGIENDO EN LAS 3 ORGS.**
+  Auditoría disparada por un hallazgo de G-Mura (`is_active` no aplicado server-side). En G-Vento
+  el hueco existía **y era peor**: la policy `"profiles: editar el propio"` no acotaba COLUMNAS, así
+  que cualquier autenticado podía escribir su propio `role_id` (el UUID del rol owner es legible por
+  `"roles: ver los de la org"`) → comodín `*` → acceso total; y su propio `organization_id` →
+  `get_my_organization_id()` apunta a otra org → con `usuarios.gestionar` se auto-inserta
+  `user_stores` hacia una sede ajena y cambia su sede activa → **datos de G-10 o Salchimelo**.
+  Dos migraciones NUEVAS, ambas aplicadas por el usuario en el SQL Editor:
+  - `supabase/protect-profile-self-escalation.sql` — trigger BEFORE UPDATE
+    `trg_protect_profile_self_escalation`: rechaza cambios a `role_id`, `role`, `is_active` y
+    `organization_id` cuando `new.id = auth.uid()`. Patrón de `protect_owner_role`
+    (`current_user = 'authenticated'` → seeds, `handle_new_user` y service_role pasan).
+    `IS DISTINCT FROM` (no `<>`) es OBLIGATORIO: `role_id`/`organization_id` son nullables y
+    PostgREST manda solo las columnas del `.update()` completando el resto de NEW desde OLD — por
+    eso el cambio de sede activa (update de `restaurant_id` solo) no se ve afectado.
+  - `supabase/profiles-is-active-enforced.sql` — `and is_active` en las CUATRO funciones base:
+    `has_permission`, `get_my_restaurant_id`, `get_my_role`, `get_my_organization_id`.
+    `get_my_organization_id` entró a propósito: sin él un desactivado sigue leyendo `roles`, que es
+    la materia prima de la escalada. Verificado antes de aplicar: cero perfiles inactivos y owner
+    activo en las 3 orgs (si algún owner quedara inactivo, se recupera SOLO por SQL Editor).
+  - `tests/rbac-escalada.spec.ts` (6): los 3 rechazos assertean el MENSAJE del trigger, no
+    `bloqueado()` laxo — un rechazo por RLS con cero filas sería verde por la razón equivocada
+    (patrón anular-venta:279). Probado empíricamente: el BEFORE UPDATE dispara ANTES del WITH CHECK.
+    Snapshot en `beforeAll` + restore en `afterAll` para no dejar el lab con el cajero desactivado.
+  - **Suite full 149/149 verde** con P1+P2 ya rigiendo → el filtro `is_active` es un no-op.
+  - Aprendizaje: `permissions` es **jsonb**, no array PG → `.contains('permissions', '["*"]')`;
+    pasar `['*']` lo serializa como `{*}` y Postgres devuelve `22P02 Token "*" is invalid`.
+  - **Pasada de APP (misma sesión, sin SQL nuevo):** (a) `create-user` verifica `is_active` del
+    LLAMANTE y pasó su gate de enum `role === 'admin'` a `has_permission('usuarios.gestionar')` vía
+    RPC con el cliente del llamante — cierra la persistencia "te desactivan, te creás otra cuenta";
+    (b) `AuthContext.fetchProfile` corta la sesión con mensaje si el perfil está inactivo (antes:
+    app en blanco sin explicación) — funciona gracias a la policy aditiva `"profiles: ver el propio"`
+    (`id = auth.uid()`), la única que le deja leer su fila tras P2; (c) ConfigPage oculta el toggle
+    de `is_active` en la fila propia (testid `user-toggle-self`). `tests/rbac-escalada.spec.ts`
+    pasó de 6 a 8 casos. Queda pendiente solo el baneo en `auth.users` (ver deudas).
+  - **`organization_id` de profiles — `supabase/profiles-organization-invariant.sql`, APLICADA y
+    verificada en la BD compartida (rige para LAB / G-10 / Salchimelo).** Hallazgo: `organization_id`
+    NO se seteaba en NINGÚN paso del flujo normal (ni `handle_new_user`, ni la metadata de
+    `create-user`, ni el UPDATE de `useUsers`, que solo escribe `role_id`) → **todo usuario creado
+    desde la app nacía con `organization_id` NULL**. Los perfiles sanos lo tienen porque los sembró
+    `onboard-org` / `multi-tenant-rbac` / `lab-seed`. Rompía la UI entera: `usePermissions` lee su
+    rol de `roles`, cuya RLS es `organization_id = get_my_organization_id()` → con NULL da NULL (no
+    TRUE) → cero filas → `permissions = []` → sidebar vacío y toda ruta con permiso rebotando.
+    **Asimetría clave:** `has_permission()` NO filtra por organización, así que server-side los
+    permisos SÍ funcionaban — el usuario quedaba roto en la UI, no en la API.
+    La migración hace tres cosas, en este orden dentro de la transacción:
+    (1) `handle_new_user` DERIVA `organization_id` de la sede (se arregla ahí y no en la Edge
+    Function porque cubre todos los caminos: Dashboard, signUp, scripts) + 3 guardas con `raise`
+    explícito — sin `restaurant_id` en metadata (con `hint` de qué poner), sede inexistente, y sede
+    sin organización. NO introduce un modo de fallo nuevo: `profiles.restaurant_id` ya es NOT NULL
+    (`schema.sql:57`), así que crear desde el Dashboard sin metadata YA abortaba; solo mejora el
+    mensaje. (2) backfill derivando de la sede. (3) trigger `trg_profiles_org_consistency`.
+    - **El trigger VALIDA, no fuerza** — decisión de diseño, no detalle: si forzara
+      `new.organization_id`, y `trg_protect_profile_self_escalation` disparara primero (no vería
+      cambio de org y dejaría pasar), el forzado reescribiría la organización EN SILENCIO →
+      reintroduce el salto de org que tapa P1. Validando, el rechazo ocurre en cualquier orden de
+      disparo y no dependemos del orden alfabético de los BEFORE ROW.
+    - **NO se acota a `current_user = 'authenticated'`** (a diferencia del trigger de escalada): es
+      un invariante de DATOS, no una regla de autorización; vale también para seeds y service_role.
+    - Efecto colateral DESEADO: cambiar de sede a otra organización queda imposible a nivel BD.
+    - `restaurants.organization_id` es NULLABLE (`multi-tenant-rbac.sql:112`) → una sede sin
+      organización dejaría sus perfiles INACTUALIZABLES bajo el trigger. Verificación previa
+      bloqueante incluida en el archivo (debe dar 0 filas).
+    - 🔴 **`enforce_profile_organization` DEBE ser `SECURITY DEFINER` — NO se lo quiten.** La
+      primera versión aplicada NO lo era, y fue un bug real que atrapó la suite
+      (`supabase/fix-enforce-profile-organization-definer.sql`, migración de corrección, APLICADA).
+      Sin `definer` la función corre con los privilegios de quien dispara el UPDATE, así que su
+      `select` sobre `restaurants` **pasa por RLS**. Tras el endurecimiento de `is_active`, un
+      usuario desactivado obtiene NULL de `get_my_restaurant_id()` Y de `get_my_organization_id()`
+      → no ve NINGUNA sede → `if not found` → rechazaba con
+      `'profiles.restaurant_id (<uuid>) no corresponde a ninguna sede'` sobre una sede que EXISTE.
+      **El invariante estaba evaluando datos filtrados por quién mira, no los datos reales** — y un
+      invariante de datos no puede depender de la visibilidad del observador: la organización de una
+      sede es la misma la mire quien la mire. Mismo motivo por el que `get_my_restaurant_id` /
+      `get_my_role` / `has_permission` son definer. El modo de fallo era *fail-closed* (rechazaba de
+      más, nunca de menos: sin bypass), pero dejaba una bomba de tiempo — cualquier ajuste futuro a
+      las policies de `restaurants` empezaría a rechazar updates de perfiles válidos con un mensaje
+      que apunta al lugar equivocado. `protect_profile_self_escalation` y `protect_owner_role` en
+      cambio NO necesitan definer: solo leen `OLD`/`NEW`, no tocan tablas.
+    - Cómo se detectó, y por qué la aserción del spec es así: `tests/rbac-escalada.spec.ts` exige el
+      **mensaje** del trigger en los rechazos, no un "bloqueado" laxo. Con `bloqueado()` (error O
+      cero filas) este bug habría pasado EN VERDE. Mismo patrón que anular-venta:279.
+      Consecuencia del tercer trigger: en el caso `organization_id`, los BEFORE ROW disparan por
+      orden alfabético y `trg_profiles_org_consistency` < `trg_protect_profile_self_escalation`, así
+      que hoy contesta el del invariante — el spec acepta CUALQUIERA de los dos mensajes a propósito,
+      porque el invariante VALIDA en vez de forzar justamente para no depender del orden.
+  - ✅ **`create-user` DESPLEGADA en producción (2026-08-01)** con los dos cambios en una sola
+    pasada, vía el **editor del Dashboard** (Edge Functions → la función → *Deploy updates*; el CLI
+    muerde con el 403 de management, ver deuda). Estrategia de deploy usada, reutilizable: se subió
+    primero con OTRO NOMBRE (`create-user-next`), se validó con el spec apuntado por
+    `E2E_CREATE_USER_FN`, y recién después se pisó `create-user`. Cada función es un endpoint
+    independiente, así que el staging no lo ve nadie — ni la UI, ni G-10, ni Salchimelo.
+    ⚠️ **El editor del Dashboard NO versiona ni permite rollback**: revertir es pegar el código
+    anterior a mano. El fuente previo se recupera con
+    `git show 56012cd:supabase/functions/create-user/index.ts`.
+    Lo que quedó desplegado:
+    1. `is_active` del llamante + gate por `has_permission('usuarios.gestionar')` en vez del enum
+       `role === 'admin'` — cierra la persistencia "te desactivan, te creás otra cuenta".
+    2. `role_id` server-side (punto 6): antes eran 2 pasos sin atomicidad — la función creaba la
+       cuenta y **el navegador** asignaba `role_id` después. Si ese paso fallaba o se cerraba la
+       pestaña, quedaba un perfil SIN ROL y por lo tanto **sin ningún permiso** (`has_permission`
+       hace JOIN contra `roles`): el caso Katherine. Ahora la función valida que el rol exista y
+       sea de la organización del llamante, hace el UPDATE con service role y **compensa con
+       `deleteUser` si falla** (cascadea a `profiles`). `useUsers` perdió su segundo paso.
+       DESCARTADO pasar `role_id` por metadata: convertiría la deuda del enum `role` en escalada
+       directa a owner (ver la nota de `raw_user_meta_data` en Deudas).
+    `tests/create-user.spec.ts` (5) cubre el flujo, que tenía cobertura CERO. Nombre de función por
+    env (`E2E_CREATE_USER_FN`) para correr el MISMO spec contra staging y contra prod.
+    ⚠️ **La rama de compensación (`deleteUser`) NO tiene cobertura**: con la validación del rol
+    ANTES de `createUser`, el caso "role_id inexistente" ejercita el rechazo temprano. Esa rama solo
+    corre si falla el UPDATE con un rol válido, que no hay forma limpia de forzar desde afuera.
+    Queda como defensa en profundidad sin test directo.
+    **PENDIENTE: promover el frontend a `main`** (`useUsers` sin su segundo paso). Ver el 🔀.
+  - 🔀 **ORDEN DEL DEPLOY — NO ES INDISTINTO: FUNCIÓN PRIMERO, FRONTEND DESPUÉS.**
+    Es asimétrico y la dirección equivocada rompe en silencio:
+    - **Función → frontend (CORRECTO):** el frontend viejo no manda `role_id` y sigue haciendo su
+      segundo paso (`updateProfile`); la función nueva ignora el campo ausente y funciona igual.
+      Sin regresión en ningún momento.
+    - **Frontend → función (ROMPE):** el frontend nuevo manda `role_id` y **ya no hace el segundo
+      paso**; la función vieja no conoce ese campo y lo descarta → **todos los usuarios creados
+      nacen SIN ROL**, es decir sin ningún permiso. Y no falla nada visible: el alta "sale bien".
+    Por eso `role_id` se dejó OPCIONAL en la Edge Function: es lo que hace segura la ventana entre
+    ambos deploys. Hoy `develop` está adelantado de `main`, así que el orden natural favorece —
+    pero es una trampa real el día que alguien promueva `main` sin recordar esto.
+  - ⏳ **LO ÚNICO DEL BLOQUE QUE NO ESTÁ CERRADO EN PRODUCCIÓN (1 ítem):**
+    **Apagar el signup público en el Dashboard de Supabase.** Verificado que NADA del código usa
+    `signUp` (solo `signInWithPassword`/`signOut`/`getSession`/`onAuthStateChange`) y que la Edge
+    Function usa la API admin, indiferente a ese toggle. Apagarlo no rompe ningún flujo y cierra el
+    vector de `raw_user_meta_data` → enum `role` descrito en Deudas.
+    Todo lo demás del bloque está APLICADO y rigiendo: P1 escalada, P2 `is_active`, invariante de
+    `organization_id` + su fix de `SECURITY DEFINER` (en la BD compartida, las 3 orgs) y la Edge
+    Function `create-user` (desplegada 2026-08-01). **Suite full 156: 155 passed + 1 skipped**
+    (la limpieza del spec de create-user hace skip sin `E2E_SERVICE_ROLE_KEY`).
+    Aparte del bloque de seguridad, queda promover el frontend a `main` — ver el 🔀 del orden.
+
+⚠️ **BD ÚNICA COMPARTIDA (aprendizaje clave):** LAB / G-10 / Salchimelo son ORGANIZACIONES dentro
+  de UNA sola base. Las migraciones (funciones/columnas/índices/permisos globales) al aplicarse
+  "en LAB" quedan aplicadas para TODAS las orgs. No hay "aplicar en G-10 aparte": un deploy de
+  feature con migración aditiva = **solo frontend** (el SQL ya está puesto al probarlo). Ojo: los
+  permisos de rol POR ORG (ej. lab-seed re-siembra solo LAB) sí son por-org — mantener lab-seed
+  sincronizado con las migraciones de permisos o el re-seed los pisa en LAB.
+
+**Deudas vigentes (abiertas):**
+  - Regenerar `database.types.ts` con `supabase gen types` cuando se resuelva el acceso de
+    management del CLI — hoy `register_sale_void` + columnas `cancelled_at/by/reason` están a mano
+    (verificadas), como `register_sale_payment` y las de vale/arqueo.
+  - Rotar la password de BD del proyecto (quedó expuesta).
+  - Endurecimiento anotado: gates de enum `get_my_role()` → `has_permission()`; RPC de cierre de
+    turno con recompute server-side del esperado; atomicidad del descuento de vale en Mesa.
+  - **Un admin puede seguir promoviendo a OTRO usuario a owner.** El trigger
+    `protect_profile_self_escalation` solo blinda la fila PROPIA (`new.id = auth.uid()`); la policy
+    `"profiles: admin edita cualquiera"` (gate por enum `get_my_role() = 'admin'`) sigue permitiendo
+    asignar cualquier `role_id` a un tercero. Es el diseño intencional de la sección Usuarios, pero
+    significa que un admin con una segunda cuenta bajo su control llega al comodín `*` igual.
+    Cerrarlo pide gatear la asignación de `role_id` **por permiso, no por enum** — encaja con la
+    deuda ya anotada de `get_my_role()` → `has_permission()`, resolver ambas en la misma pasada.
+  - ⚠️ **`handle_new_user` CONFÍA en `raw_user_meta_data` para el enum `role`** — canal que en un
+    `signUp` ABIERTO controla el propio usuario:
+    `coalesce(new.raw_user_meta_data->>'role', 'waiter')::user_role`. Con auto-registro habilitado,
+    alguien podría registrarse pidiendo `role: 'admin'` y quedarse con los gates legacy
+    `get_my_role() in ('admin','cashier')` que siguen vivos (RLS de payments/orders/cash_shifts,
+    policy `"profiles: admin edita cualquiera"`). **Por eso NUNCA meter `role_id` en la metadata:**
+    convertiría esta deuda en escalada directa a owner (por eso el fix de `organization_id` lo
+    DERIVA de la sede en vez de recibirlo). Nada en el código usa `signUp` — toda creación pasa por
+    la Edge Function `create-user` (`admin.auth.admin.createUser`, API admin, indiferente al toggle
+    de signup público) — así que apagar el auto-registro en el Dashboard no rompe ningún flujo.
+    **Si alguien lo reactiva, este vector vuelve.** Cierre definitivo: eliminar el enum `role` y
+    dejar solo `has_permission` (ver deuda de gates de enum).
+  - **Baneo en `auth.users` al desactivar — PENDIENTE (lo único que queda del bloque is_active).**
+    Hoy desactivar escribe el flag; la cuenta de `auth.users` sigue viva, así que el desactivado
+    puede volver a loguearse y obtener un JWT válido. `AuthContext` lo detecta y le corta la sesión
+    con mensaje, y la RLS no le da ni una fila — pero el token se emite igual. Cerrarlo requiere
+    mover el toggle a una **Edge Function con service role** (`admin.auth.admin.updateUserById` con
+    `ban_duration`): el navegador no puede banear. Prioridad baja: con P1+P2 el desactivado ya no
+    accede a datos.
+
+**Nota de proceso (para el próximo deploy):** este release SALTÓ la corrida full pre-main y se
+  validó con smoke en prod (OK). Para el próximo: **correr `pnpm test:e2e` completo sobre develop
+  ANTES de promover a main**.
 
 ### Detalle Vale descuento / ruletazo (F, sesión 2026-07-03, rama feature/vale-descuento)
 - **Migración `supabase/orders-discount-vale.sql`** (APLICADA en LAB): `orders` +4 columnas

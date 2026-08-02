@@ -352,7 +352,11 @@ test.describe.serial('Anulación de ventas', () => {
     // Anular → getDebts excluye por cancelled_at → el cliente ya NO aparece.
     expect((await voidRpc(await db(), id)).error).toBeNull()
     await page.goto('/fiado')
-    await expect(page.getByTestId('customer-row')).toBeVisible()   // la lista cargó
+    // .first(): la Cartera puede tener más de un cliente con fiado abierto (otros
+    // specs, residuo del lab). Sin él, el locator matchea N filas y viola el modo
+    // estricto de Playwright. Solo se comprueba que la lista cargó; lo que prueba
+    // el test es el toHaveCount(0) de la línea siguiente.
+    await expect(page.getByTestId('customer-row').first()).toBeVisible()
     await expect(page.getByTestId('customer-row').filter({ hasText: cliente })).toHaveCount(0)
   })
 
