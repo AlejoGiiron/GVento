@@ -887,7 +887,10 @@ export const createUser = (params: {
   email: string
   password: string
   full_name: string
+  /** Rol enum legacy que consume el trigger handle_new_user. */
   role: 'admin' | 'cashier' | 'waiter'
+  /** Rol RBAC. Lo asigna la propia Edge Function, en el mismo request. */
+  role_id: string | null
   restaurant_id: string
 }) => supabase.functions.invoke('create-user', { body: params })
 
