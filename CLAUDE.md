@@ -295,23 +295,33 @@ Resumen rápido:
       orden alfabético y `trg_profiles_org_consistency` < `trg_protect_profile_self_escalation`, así
       que hoy contesta el del invariante — el spec acepta CUALQUIERA de los dos mensajes a propósito,
       porque el invariante VALIDA en vez de forzar justamente para no depender del orden.
-  - 🚨 **DOS cambios de `create-user` esperando UN SOLO redeploy.** El repo tiene el fuente; en
-    producción corre la versión desplegada. Ambos viajan juntos en
-    `supabase functions deploy create-user` (o subirla desde el Dashboard si muerde el 403 de
-    management del CLI, ver deuda):
-    1. **YA EN EL REPO, sin desplegar:** `is_active` del llamante + gate por
-       `has_permission('usuarios.gestionar')`. **Hasta el deploy el hueco de persistencia sigue
-       ABIERTO en prod** (un admin desactivado con sesión viva puede crear usuarios).
-    2. **DISEÑADO pero NO escrito todavía (punto 6, hueco de `role_id`):** hoy crear usuario son 2
-       pasos sin atomicidad — la Edge Function crea la cuenta y **el navegador** asigna `role_id`
-       después (`useUsers.ts:64`). Si el segundo falla o se cierra la pestaña, queda un perfil SIN
-       ROL y por lo tanto **sin ningún permiso** (`has_permission` hace JOIN contra `roles`). Fix
-       acordado: la Edge Function hace el UPDATE de `role_id` ella misma con service role, valida
-       que el rol sea de la organización del llamante, y **compensa con `deleteUser` si el UPDATE
-       falla** (cascadea a `profiles`, no deja residuo). `useUsers` pierde su segundo paso.
+  - ✅ **`create-user` DESPLEGADA en producción (2026-08-01)** con los dos cambios en una sola
+    pasada, vía el **editor del Dashboard** (Edge Functions → la función → *Deploy updates*; el CLI
+    muerde con el 403 de management, ver deuda). Estrategia de deploy usada, reutilizable: se subió
+    primero con OTRO NOMBRE (`create-user-next`), se validó con el spec apuntado por
+    `E2E_CREATE_USER_FN`, y recién después se pisó `create-user`. Cada función es un endpoint
+    independiente, así que el staging no lo ve nadie — ni la UI, ni G-10, ni Salchimelo.
+    ⚠️ **El editor del Dashboard NO versiona ni permite rollback**: revertir es pegar el código
+    anterior a mano. El fuente previo se recupera con
+    `git show 56012cd:supabase/functions/create-user/index.ts`.
+    Lo que quedó desplegado:
+    1. `is_active` del llamante + gate por `has_permission('usuarios.gestionar')` en vez del enum
+       `role === 'admin'` — cierra la persistencia "te desactivan, te creás otra cuenta".
+    2. `role_id` server-side (punto 6): antes eran 2 pasos sin atomicidad — la función creaba la
+       cuenta y **el navegador** asignaba `role_id` después. Si ese paso fallaba o se cerraba la
+       pestaña, quedaba un perfil SIN ROL y por lo tanto **sin ningún permiso** (`has_permission`
+       hace JOIN contra `roles`): el caso Katherine. Ahora la función valida que el rol exista y
+       sea de la organización del llamante, hace el UPDATE con service role y **compensa con
+       `deleteUser` si falla** (cascadea a `profiles`). `useUsers` perdió su segundo paso.
        DESCARTADO pasar `role_id` por metadata: convertiría la deuda del enum `role` en escalada
        directa a owner (ver la nota de `raw_user_meta_data` en Deudas).
-    Los ítems (b) y (c) de la pasada de app SÍ viajan con el build del frontend.
+    `tests/create-user.spec.ts` (5) cubre el flujo, que tenía cobertura CERO. Nombre de función por
+    env (`E2E_CREATE_USER_FN`) para correr el MISMO spec contra staging y contra prod.
+    ⚠️ **La rama de compensación (`deleteUser`) NO tiene cobertura**: con la validación del rol
+    ANTES de `createUser`, el caso "role_id inexistente" ejercita el rechazo temprano. Esa rama solo
+    corre si falla el UPDATE con un rol válido, que no hay forma limpia de forzar desde afuera.
+    Queda como defensa en profundidad sin test directo.
+    **PENDIENTE: promover el frontend a `main`** (`useUsers` sin su segundo paso). Ver el 🔀.
   - 🔀 **ORDEN DEL DEPLOY — NO ES INDISTINTO: FUNCIÓN PRIMERO, FRONTEND DESPUÉS.**
     Es asimétrico y la dirección equivocada rompe en silencio:
     - **Función → frontend (CORRECTO):** el frontend viejo no manda `role_id` y sigue haciendo su
@@ -323,15 +333,16 @@ Resumen rápido:
     Por eso `role_id` se dejó OPCIONAL en la Edge Function: es lo que hace segura la ventana entre
     ambos deploys. Hoy `develop` está adelantado de `main`, así que el orden natural favorece —
     pero es una trampa real el día que alguien promueva `main` sin recordar esto.
-  - ⏳ **LO ÚNICO DEL BLOQUE QUE NO ESTÁ CERRADO EN PRODUCCIÓN (2 ítems):**
-    1. **Redeploy de la Edge Function `create-user`** — `is_active` del llamante (ya en el repo) +
-       `role_id` server-side con compensación (diseñado, sin escribir). Ver el 🚨 de arriba.
-    2. **Apagar el signup público en el Dashboard de Supabase** — verificado que NADA del código usa
-       `signUp` (solo `signInWithPassword`/`signOut`/`getSession`/`onAuthStateChange`) y que la Edge
-       Function usa la API admin, indiferente a ese toggle. Apagarlo no rompe ningún flujo y cierra
-       el vector de `raw_user_meta_data` → enum `role` descrito en Deudas.
-    Todo lo demás del bloque (P1 escalada, P2 `is_active`, invariante de `organization_id` + su fix
-    de `SECURITY DEFINER`) está APLICADO y rigiendo en la BD compartida, con suite full 151/151.
+  - ⏳ **LO ÚNICO DEL BLOQUE QUE NO ESTÁ CERRADO EN PRODUCCIÓN (1 ítem):**
+    **Apagar el signup público en el Dashboard de Supabase.** Verificado que NADA del código usa
+    `signUp` (solo `signInWithPassword`/`signOut`/`getSession`/`onAuthStateChange`) y que la Edge
+    Function usa la API admin, indiferente a ese toggle. Apagarlo no rompe ningún flujo y cierra el
+    vector de `raw_user_meta_data` → enum `role` descrito en Deudas.
+    Todo lo demás del bloque está APLICADO y rigiendo: P1 escalada, P2 `is_active`, invariante de
+    `organization_id` + su fix de `SECURITY DEFINER` (en la BD compartida, las 3 orgs) y la Edge
+    Function `create-user` (desplegada 2026-08-01). **Suite full 156: 155 passed + 1 skipped**
+    (la limpieza del spec de create-user hace skip sin `E2E_SERVICE_ROLE_KEY`).
+    Aparte del bloque de seguridad, queda promover el frontend a `main` — ver el 🔀 del orden.
 
 ⚠️ **BD ÚNICA COMPARTIDA (aprendizaje clave):** LAB / G-10 / Salchimelo son ORGANIZACIONES dentro
   de UNA sola base. Las migraciones (funciones/columnas/índices/permisos globales) al aplicarse
