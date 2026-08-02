@@ -312,6 +312,17 @@ Resumen rápido:
        DESCARTADO pasar `role_id` por metadata: convertiría la deuda del enum `role` en escalada
        directa a owner (ver la nota de `raw_user_meta_data` en Deudas).
     Los ítems (b) y (c) de la pasada de app SÍ viajan con el build del frontend.
+  - 🔀 **ORDEN DEL DEPLOY — NO ES INDISTINTO: FUNCIÓN PRIMERO, FRONTEND DESPUÉS.**
+    Es asimétrico y la dirección equivocada rompe en silencio:
+    - **Función → frontend (CORRECTO):** el frontend viejo no manda `role_id` y sigue haciendo su
+      segundo paso (`updateProfile`); la función nueva ignora el campo ausente y funciona igual.
+      Sin regresión en ningún momento.
+    - **Frontend → función (ROMPE):** el frontend nuevo manda `role_id` y **ya no hace el segundo
+      paso**; la función vieja no conoce ese campo y lo descarta → **todos los usuarios creados
+      nacen SIN ROL**, es decir sin ningún permiso. Y no falla nada visible: el alta "sale bien".
+    Por eso `role_id` se dejó OPCIONAL en la Edge Function: es lo que hace segura la ventana entre
+    ambos deploys. Hoy `develop` está adelantado de `main`, así que el orden natural favorece —
+    pero es una trampa real el día que alguien promueva `main` sin recordar esto.
   - ⏳ **LO ÚNICO DEL BLOQUE QUE NO ESTÁ CERRADO EN PRODUCCIÓN (2 ítems):**
     1. **Redeploy de la Edge Function `create-user`** — `is_active` del llamante (ya en el repo) +
        `role_id` server-side con compensación (diseñado, sin escribir). Ver el 🚨 de arriba.

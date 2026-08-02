@@ -528,7 +528,33 @@ delete from public.customers
    where o.name = 'LAB'
  );
 
--- 9. Mesas de LAB de vuelta a 'free' (los tests las dejan ocupadas/pide cuenta).
+-- 9. Usuarios de prueba creados por tests/create-user.spec.ts.
+--
+--    Ese spec da de alta cuentas REALES en auth.users, y borrarlas exige service
+--    role (la anon key no puede, y profiles no tiene policy de DELETE), así que
+--    el propio spec no siempre puede limpiarlas. Se purgan acá.
+--
+--    DOBLE ACOTADO, y los dos importan:
+--      · patrón de email 'e2e-cu-%@gvento.test'  → solo cuentas del spec
+--      · organización LAB vía su profile          → jamás G-10 ni Salchimelo
+--    El patrón NO alcanza por sí solo y el de organización tampoco: sin el
+--    patrón, este DELETE se llevaría owner.test / cajero.test / mozo.test y
+--    dejaría el laboratorio inservible.
+--
+--    profiles.id referencia auth.users ON DELETE CASCADE → borrar la cuenta se
+--    lleva el perfil. Por eso se borra de auth.users y no de profiles.
+delete from auth.users u
+ where u.email like 'e2e-cu-%@gvento.test'
+   and exists (
+     select 1
+       from public.profiles p
+       join public.restaurants r   on r.id = p.restaurant_id
+       join public.organizations o on o.id = r.organization_id
+      where p.id = u.id
+        and o.name = 'LAB'
+   );
+
+-- 10. Mesas de LAB de vuelta a 'free' (los tests las dejan ocupadas/pide cuenta).
 update public.tables set status = 'free'
  where restaurant_id in (
    select r.id from public.restaurants r
