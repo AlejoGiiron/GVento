@@ -190,7 +190,11 @@ Resumen rápido:
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: **Anulación de ventas del turno actual** (sesión 2026-07-16,
+Última fase completada: **Bloque de seguridad RBAC** (sesión 2026-07-31/08-01, detalle completo
+  más abajo con el 🔒). SQL aplicado en la BD compartida + Edge Function `create-user` desplegada
+  + frontend promovido a main. Suite full **156 (155 passed + 1 skipped)**.
+
+Fase previa: **Anulación de ventas del turno actual** (sesión 2026-07-16,
   rama feature/anular-venta → mergeada a develop y **promovida a main/PROD**, release 25db982).
   RPC atómica register_sale_void (6 guardas server-side, reversión de stock por espejo, borra
   payments, marca anulada con rastro), permiso ventas.anular (owner por "*" + admin), índice
@@ -199,15 +203,20 @@ Resumen rápido:
   Anuladas bajo filtro de método). tests/anular-venta.spec.ts 17/17 + **suite full 143/143 verde**.
 
 **PRODUCCIÓN (main, desplegado en Vercel) incluye:**
-  - Anulación de ventas del turno actual (esta sesión)
+  - **Bloque de seguridad RBAC completo** (esta sesión): corte de sesión al usuario desactivado con
+    mensaje, toggle de `is_active` oculto en la fila propia, y `useUsers` mandando `role_id` a la
+    Edge Function en UN solo paso. Este último es el que **activa** el fix de `role_id` que ya
+    estaba desplegado del lado de la función: hasta este release, crear usuario seguían siendo 2
+    pasos con el navegador asignando el rol.
+  - Anulación de ventas del turno actual
   - Cartera fiado maestro-detalle por cliente
   - Imágenes de producto completas (no recortadas)
   - Previo ya en prod: arqueo multi-método, pago mixto, vale/ruletazo, fix compras no toca caja,
     onboarding Salchimelo.
 
-**develop ADELANTADO de main** por el bloque de seguridad RBAC (ver abajo): SQL **ya aplicado**
-  en la BD compartida + tests + documentación. **NO hay frontend pendiente de desplegar** — el
-  release a Vercel no cambia nada de la app. Promover a main solo para re-sincronizar las ramas.
+**develop = main** (sincronizados; el bloque de seguridad se promovió completo).
+  Precondición cumplida antes de promover, según la nota de proceso: `pnpm test:e2e` full sobre
+  develop → 155 passed + 1 skipped.
 
 🔒 **Bloque de seguridad RBAC (sesión 2026-07-31) — SQL YA APLICADO Y RIGIENDO EN LAS 3 ORGS.**
   Auditoría disparada por un hallazgo de G-Mura (`is_active` no aplicado server-side). En G-Vento
