@@ -28,6 +28,7 @@ import { ItemConfigModal } from '@/components/pos/ItemConfigModal'
 import { PaymentSplitEditor } from '@/components/pos/PaymentSplitEditor'
 import { CustomerPicker } from '@/components/fiado/CustomerPicker'
 import { printComanda } from '@/lib/printer'
+import { captureError } from '@/lib/sentry'
 import type { Enums } from '@/types/database.types'
 import type { ProductWithCategory, CartExtra } from '@/stores/cartStore'
 import { cartItemTotal } from '@/stores/cartStore'
@@ -701,6 +702,16 @@ function TableCheckoutModal({
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Error desconocido'
       toast.error(`Error al cobrar: ${msg}`)
+      // Cobro de mesa: mismo peso que el del POS. Además puede fallar DESPUÉS
+      // del pago (al marcar delivered o liberar la mesa), y ahí la plata ya
+      // entró — el estado inconsistente hay que verlo sí o sí.
+      captureError(err, 'cobro', {
+        origen: 'Mesa',
+        esFiado: isFiado,
+        pagoDividido: split,
+        conDescuento: discountAmt > 0,
+        esVale: isVale,
+      })
     } finally {
       setSubmitting(false)
     }

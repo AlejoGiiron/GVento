@@ -20,6 +20,7 @@ import { ItemConfigModal } from '@/components/pos/ItemConfigModal'
 import { PaymentSplitEditor } from '@/components/pos/PaymentSplitEditor'
 import { createOrder, addOrderItemsWithExtras, registerSalePayment, assignOrderNumber } from '@/lib/supabase-helpers'
 import type { SalePaymentPart } from '@/lib/supabase-helpers'
+import { captureError } from '@/lib/sentry'
 import { CustomerPicker } from '@/components/fiado/CustomerPicker'
 import { cashQuickAmounts } from '@/lib/cashRounding'
 import type { ProductWithCategory, CartItem, DiscountType, DiscountKind, HeldOrder } from '@/stores/cartStore'
@@ -928,6 +929,14 @@ function CheckoutModal({
       const msg = err instanceof Error ? err.message : (err as { message?: string })?.message ?? 'Error desconocido'
       toast.error(`Error al procesar el cobro: ${msg}`)
       console.error('[checkout]', err)
+      // El toast le dice al cajero que falló, pero no nos dice a nosotros por
+      // qué. Es el flujo que más importa: si esto se rompe, no se puede cobrar.
+      captureError(err, 'cobro', {
+        origen: 'POS',
+        esFiado: isFiado,
+        pagoDividido: split,
+        cantidadItems: items.length,
+      })
     } finally {
       setSubmitting(false)
     }

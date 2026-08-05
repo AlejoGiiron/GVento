@@ -8,6 +8,7 @@ import {
   type ProductComponentRow,
 } from '@/lib/supabase-helpers'
 import { useAuth } from '@/hooks/useAuth'
+import type { SentryArea } from '@/lib/sentry'
 
 /** Una fila de la receta tal como la edita el modal (antes de persistir). */
 export interface RecipeRow {
@@ -36,6 +37,7 @@ export function useProductComponents(parentId: string | null) {
 
   // Sincroniza la receta en BD con la lista objetivo (add/update/remove).
   const reconcile = useMutation({
+    meta: { area: 'inventario' satisfies SentryArea },
     mutationFn: async ({ parentId, rows }: { parentId: string; rows: RecipeRow[] }) => {
       if (!profile) throw new Error('Sin sesión')
       const { data: current, error: readErr } = await getProductComponents(parentId)

@@ -10,6 +10,7 @@ import {
 } from '@/lib/supabase-helpers'
 import { useAuth } from '@/hooks/useAuth'
 import type { Tables, TablesInsert } from '@/types/database.types'
+import type { SentryArea } from '@/lib/sentry'
 
 export function useProductMutations() {
   const queryClient = useQueryClient()
@@ -19,6 +20,7 @@ export function useProductMutations() {
     queryClient.invalidateQueries({ queryKey: ['products', profile?.restaurant_id] })
 
   const saveProduct = useMutation({
+    meta: { area: 'productos' satisfies SentryArea },
     mutationFn: async (data: TablesInsert<'products'>) => {
       const { data: result, error } = await upsertProduct(data)
       if (error) throw error
@@ -29,6 +31,7 @@ export function useProductMutations() {
   })
 
   const deactivateProduct = useMutation({
+    meta: { area: 'productos' satisfies SentryArea },
     mutationFn: async (productId: string) => {
       const { error } = await archiveProduct(productId)
       if (error) throw error
@@ -61,6 +64,7 @@ export function useCategoryMutations() {
   }
 
   const saveCategory = useMutation({
+    meta: { area: 'productos' satisfies SentryArea },
     mutationFn: async (data: TablesInsert<'categories'>) => {
       // Prevent deactivating a category that still has active products
       if (data.id && data.is_active === false) {
@@ -81,6 +85,7 @@ export function useCategoryMutations() {
   })
 
   const toggleCategoryActive = useMutation({
+    meta: { area: 'productos' satisfies SentryArea },
     mutationFn: async ({ category, active }: { category: Tables<'categories'>; active: boolean }) => {
       if (!active) {
         const { count, error: countErr } = await countActiveProductsByCategory(category.id)

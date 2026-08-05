@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { captureIssue } from './sentry'
 import type { Enums, Json, Tables, TablesInsert, TablesUpdate } from '@/types/database.types'
 
 // --- Profiles ---
@@ -397,10 +398,33 @@ export const assignOrderNumber = async (
   orderId: string,
   restaurantId: string,
 ): Promise<number | null> => {
+  // NO tumba el cobro (la venta ya está pagada y registrada), pero SÍ se
+  // reporta: una venta sin número no aparece en el Historial (ordena por
+  // número), no se puede reimprimir su ticket, y getShiftSalesCount cuenta las
+  // ventas gratis por `order_number not null`. Devolver null en silencio dejaba
+  // un cobro real con el registro incompleto y CERO señal de que pasó.
   const { data, error } = await nextOrderNumber(restaurantId)
-  if (error || typeof data !== 'number') return null
+  if (error || typeof data !== 'number') {
+    captureIssue('Venta cobrada sin número: falló next_order_number', 'numeracion', {
+      orderId,
+      restaurantId,
+      error,
+      tipoDeDato: typeof data,
+    })
+    return null
+  }
   const { error: setErr } = await setOrderNumber(orderId, data)
-  if (setErr) return null
+  if (setErr) {
+    // Peor caso: el contador de la sede YA avanzó pero la orden no lo guardó →
+    // hueco permanente en la numeración además de la venta sin número.
+    captureIssue('Venta cobrada sin número: falló el UPDATE del correlativo', 'numeracion', {
+      orderId,
+      restaurantId,
+      numeroPerdido: data,
+      error: setErr,
+    })
+    return null
+  }
   return data
 }
 

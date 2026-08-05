@@ -1,8 +1,11 @@
 import { useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, MutationCache } from '@tanstack/react-query'
+import * as Sentry from '@sentry/react'
 import { AuthProvider } from '@/contexts/AuthContext'
+import { ErrorFallback } from '@/components/ErrorFallback'
+import { captureError, type SentryArea } from '@/lib/sentry'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { LoginPage } from '@/pages/LoginPage'
@@ -21,7 +24,27 @@ import { ExpensesHistoryPage } from '@/pages/ExpensesHistoryPage'
 import { ConfigPage } from '@/pages/ConfigPage'
 
 function App() {
-  const [queryClient] = useState(() => new QueryClient())
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        // Reporte central de errores de MUTACIÓN. Cubre de una sola vez los
+        // `catch {} // error toast handled in hook` de los modales de caja,
+        // movimientos y categorías: el toast del hook explica al usuario, pero
+        // el objeto de error se descartaba y no quedaba rastro en ningún lado.
+        //
+        // Las QUERIES a propósito NO se reportan acá: fallan en masa cuando se
+        // cae la red (el bar sin internet) y ahogarían la cuota. Lo que importa
+        // —cobrar, cerrar turno, abrir caja— son todas mutaciones.
+        mutationCache: new MutationCache({
+          onError: (error, _vars, _ctx, mutation) => {
+            const area = (mutation.options.meta?.area as SentryArea) ?? 'venta'
+            captureError(error, area, {
+              mutationKey: mutation.options.mutationKey,
+            })
+          },
+        }),
+      }),
+  )
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -82,4 +105,14 @@ function App() {
   )
 }
 
-export default App
+/**
+ * ErrorBoundary de Sentry envolviendo la app entera: captura los errores de
+ * render, que de otro modo desmontan el árbol y dejan la pantalla en blanco.
+ *
+ * Va POR FUERA de App (y por lo tanto de los providers) a propósito: si el que
+ * revienta es el QueryClientProvider o el AuthProvider, un boundary interno se
+ * caería con ellos.
+ */
+export default Sentry.withErrorBoundary(App, {
+  fallback: ({ eventId }) => <ErrorFallback eventId={eventId ?? null} />,
+})

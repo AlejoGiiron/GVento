@@ -3,6 +3,12 @@ import type { User } from '@supabase/supabase-js'
 import { toast } from 'react-hot-toast'
 import { supabase } from '@/lib/supabase'
 import { useCartStore } from '@/stores/cartStore'
+import {
+  sentryEnabled,
+  setSentryUserContext,
+  clearSentryUserContext,
+  captureError,
+} from '@/lib/sentry'
 import type { Tables } from '@/types/database.types'
 
 type Profile = Tables<'profiles'>
@@ -24,6 +30,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
+  /**
+   * Resuelve los NOMBRES (no los UUID) de organización, sede y rol para
+   * etiquetar los errores. Un tag con UUID obliga a ir a la BD para entender
+   * de quién es el error; con nombres, "el cajero de Salchimelo no puede
+   * cobrar" se lee directo en Sentry.
+   *
+   * Deliberadamente fuera del camino crítico de `fetchProfile`: es telemetría.
+   * Si falla, se traga (no vale romper el login por no poder etiquetar) y los
+   * tags quedan en 'desconocida' — el error igual llega.
+   */
+  const applySentryTags = useCallback(async (userId: string) => {
+    if (!sentryEnabled) return
+    try {
+      const { data } = await supabase
+        .from('profiles')
+        .select('organizations(name), restaurants(name), roles(name)')
+        .eq('id', userId)
+        .single()
+      setSentryUserContext({
+        userId,
+        organizacion: data?.organizations?.name ?? null,
+        sede: data?.restaurants?.name ?? null,
+        rol: data?.roles?.name ?? null,
+      })
+    } catch {
+      // Sin nombres, pero con el id: el error sigue siendo atribuible.
+      setSentryUserContext({ userId, organizacion: null, sede: null, rol: null })
+    }
+  }, [])
+
   const fetchProfile = useCallback(async (userId: string) => {
     const { data, error } = await supabase
       .from('profiles')
@@ -37,6 +73,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // En el PRIMER fetch (login) no hay previo → queda null como antes y el
       // flujo de login continúa (isLoading se apaga en el .finally del caller).
       console.error('fetchProfile falló; se conserva el profile previo:', error.message)
+      // Se reporta igual: en producción nadie mira la consola. Si esto falla en
+      // el PRIMER fetch no hay profile previo que conservar → el usuario queda
+      // sin sede activa y la app inutilizable, sin ninguna señal para nosotros.
+      captureError(error, 'auth', { paso: 'fetchProfile' })
       return
     }
 
@@ -49,12 +89,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await supabase.auth.signOut()
       setProfile(null)
       setUser(null)
+      clearSentryUserContext()
       toast.error('Tu usuario está desactivado. Contactá al administrador.')
       return
     }
 
     setProfile(data)
-  }, [])
+    // Fire-and-forget: no bloquea el login (ver applySentryTags).
+    void applySentryTags(userId)
+  }, [applySentryTags])
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -82,6 +125,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         fetchProfile(session.user.id)
       } else {
         setProfile(null)
+        // El POS lo comparten varios cajeros en la misma pestaña: sin esto, los
+        // errores del siguiente turno se atribuirían al usuario anterior.
+        clearSentryUserContext()
       }
     })
 
@@ -92,6 +138,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut()
     setUser(null)
     setProfile(null)
+    clearSentryUserContext()
   }, [])
 
   // Re-carga el profile del usuario actual (p. ej. tras cambiar de sede activa).
