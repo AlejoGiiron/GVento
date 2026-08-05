@@ -7,6 +7,7 @@ import {
   createUser as createUserHelper,
 } from '@/lib/supabase-helpers'
 import type { Tables, TablesUpdate } from '@/types/database.types'
+import type { SentryArea } from '@/lib/sentry'
 
 export type UserRow = Tables<'profiles'>
 
@@ -30,6 +31,7 @@ export function useUsers() {
     queryClient.invalidateQueries({ queryKey: ['restaurant_users', restaurantId] })
 
   const updateMutation = useMutation({
+    meta: { area: 'config' satisfies SentryArea },
     mutationFn: async ({ userId, data }: { userId: string; data: TablesUpdate<'profiles'> }) => {
       const { data: updated, error } = await updateProfile(userId, data)
       if (error) throw error
@@ -40,6 +42,7 @@ export function useUsers() {
   })
 
   const createUserMutation = useMutation({
+    meta: { area: 'config' satisfies SentryArea },
     mutationFn: async (params: {
       email: string
       password: string

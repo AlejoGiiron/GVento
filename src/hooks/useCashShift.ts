@@ -15,6 +15,7 @@ import {
   createCashMovement,
   type ClosedShiftRow,
 } from '@/lib/supabase-helpers'
+import type { SentryArea } from '@/lib/sentry'
 import type { Tables, TablesInsert, Json } from '@/types/database.types'
 import type { ShiftReconciliation } from '@/lib/shiftCalc'
 
@@ -93,7 +94,12 @@ export function useCashShift() {
   const invalidateSales = () =>
     queryClient.invalidateQueries({ queryKey: ['shift_payments', currentShift?.id] })
 
+  // `meta.area` alimenta el reporte central de errores de mutación (App.tsx).
+  // Los modales de caja capturan con `catch {}` porque el toast lo muestra este
+  // hook — sin esto, el objeto de error se perdía y "Error al cerrar el turno"
+  // era todo el diagnóstico disponible.
   const openShiftMutation = useMutation({
+    meta: { area: 'caja' satisfies SentryArea },
     mutationFn: async (openingAmount: number) => {
       const { data, error } = await openShiftHelper({
         restaurant_id: restaurantId!,
@@ -108,6 +114,7 @@ export function useCashShift() {
   })
 
   const closeShiftMutation = useMutation({
+    meta: { area: 'caja' satisfies SentryArea },
     mutationFn: async (params: {
       closingAmount: number
       expectedAmount: number
@@ -145,6 +152,7 @@ export function useCashShift() {
   })
 
   const addMovementMutation = useMutation({
+    meta: { area: 'caja' satisfies SentryArea },
     mutationFn: async (
       movement: Pick<TablesInsert<'cash_movements'>, 'type' | 'amount' | 'reason'>,
     ) => {

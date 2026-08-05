@@ -6,6 +6,7 @@ import {
   type PurchaseInvoicePayload, type PurchaseItemPayload, type RegisterPurchaseResult,
 } from '@/lib/supabase-helpers'
 import { useAuth } from '@/hooks/useAuth'
+import type { SentryArea } from '@/lib/sentry'
 
 export type { PurchaseInvoiceListRow, PurchaseInvoiceDetailRow }
 
@@ -76,6 +77,7 @@ export function useRegisterPurchase() {
   const restaurantId = profile?.restaurant_id ?? null
 
   const mutation = useMutation({
+    meta: { area: 'compras' satisfies SentryArea },
     mutationFn: async (
       { invoice, items }: { invoice: PurchaseInvoicePayload; items: PurchaseItemPayload[] },
     ) => {
