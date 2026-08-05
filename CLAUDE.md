@@ -34,6 +34,31 @@ G-Vento es un sistema POS completo para restaurantes. Monorepo que incluye:
 - Mutaciones de BD siempre en hooks custom (useXMutations)
 - Las queries de Supabase van en src/hooks/, no en componentes
 
+## Comportamientos del negocio — NO son bugs, NO "arreglar"
+
+Cosas que parecen anomalías al mirar los datos pero son decisiones del cliente.
+**Leer esto ANTES de proponer un arreglo para algo que parezca un descuido.**
+
+### Mesas abiertas de larga duración = FLUJO INTENCIONAL
+
+G-10 y Salchimelo usan las mesas abiertas como **cuenta corriente interna**:
+consumo de empleados y cortesías. Se acostumbraron a manejarlo así y les
+funciona. La mesa de Camelo con $105.200 y 4 semanas abierta, o la de $130.000
+de Salchimelo, **son eso** — no son mesas olvidadas.
+
+- **NO implementar alertas** de mesas abiertas, ni reportes de antigüedad, ni
+  forzar su cierre. El dueño lo tiene claro de memoria y no quiere el reporte.
+- Un aviso nocturno sobre algo que el cajero hace **a propósito** es ruido puro,
+  y entrena a ignorar avisos — que es justo lo contrario de lo que buscamos con
+  la observabilidad (ver el filtrado de ruido en `src/lib/sentry.ts`).
+- Cualquier cambio en este flujo **se habla con el cliente primero.**
+- **Consecuencia conocida y ACEPTADA:** ese consumo descuenta inventario y no
+  aparece ni como venta ni como gasto. Está asumido; no es un hallazgo nuevo.
+
+Se anotó porque una sesión estuvo a punto de "descubrir" el problema y proponer
+arreglarlo. Si volvés a encontrarlo mirando datos, ya está resuelto: es así a
+propósito.
+
 ## Patrones aprendidos en desarrollo
 
 ### Modales con flujo de cobro y Realtime activo
@@ -365,6 +390,17 @@ Fase previa: **Anulación de ventas del turno actual** (sesión 2026-07-16,
     management del CLI — hoy `register_sale_void` + columnas `cancelled_at/by/reason` están a mano
     (verificadas), como `register_sale_payment` y las de vale/arqueo.
   - Rotar la password de BD del proyecto (quedó expuesta).
+  - **`orders.payment_status` tiene `default 'paid'`** (`fiado-clientes.sql:82`, agregada así para
+    no romper las ventas existentes al introducir el fiado). Consecuencias vigentes:
+    - Toda orden de **mesa abierta** nace con `payment_status='paid'` y `order_number` NULL. Por
+      eso una consulta forense de "ventas cobradas sin número" **NO puede filtrar por
+      `payment_status='paid'`**: daría un falso positivo por cada mesa abierta. La prueba real de
+      cobro es que exista fila en `payments`.
+    - Si una de esas mesas (las de cuenta corriente interna — ver "Comportamientos del negocio")
+      se cerrara **por error**, entraría al cuadre **como venta**, porque ya viene marcada como
+      saldada. **No hay que hacer nada hoy**: el flujo intencional no las cierra. Queda anotado
+      porque es lo primero a revisar si algún día se rediseña esta columna (p. ej. un default
+      `'pending'` con migración de datos, o un estado explícito para la cuenta corriente).
   - Endurecimiento anotado: gates de enum `get_my_role()` → `has_permission()`; RPC de cierre de
     turno con recompute server-side del esperado; atomicidad del descuento de vale en Mesa.
   - **Correlativo de venta atómico con el cobro (opción C) — el arreglo de FONDO de
