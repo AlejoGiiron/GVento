@@ -49,4 +49,4 @@ design_handoff_*/
 
 # Misc
 *.pem
-.vercel
+.vercelvite.config.ts.timestamp-*.mjs
