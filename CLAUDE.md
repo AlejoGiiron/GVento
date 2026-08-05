@@ -367,6 +367,33 @@ Fase previa: **Anulación de ventas del turno actual** (sesión 2026-07-16,
   - Rotar la password de BD del proyecto (quedó expuesta).
   - Endurecimiento anotado: gates de enum `get_my_role()` → `has_permission()`; RPC de cierre de
     turno con recompute server-side del esperado; atomicidad del descuento de vale en Mesa.
+  - **Correlativo de venta atómico con el cobro (opción C) — el arreglo de FONDO de
+    `assignOrderNumber`.** Hoy el número se asigna desde el navegador DESPUÉS de que la RPC de
+    cobro hizo commit. La sesión 2026-08-05 mitigó el fallo (reintento del UPDATE + aviso al
+    cajero con botón Reintentar + reporte a Sentry con `area: 'numeracion'`), pero la ventana
+    sigue: entre el commit del pago y el UPDATE del número se puede cerrar la pestaña o morir la
+    red, y la venta queda **cobrada sin número** → invisible en Historial, sin ticket
+    reimprimible, y sin contar en `getShiftSalesCount` (que cuenta las gratis por
+    `order_number not null`). Cierre: asignar el número DENTRO de `register_sale_payment`, que ya
+    es una transacción SECURITY DEFINER.
+    - 🔴 **`store_sequences` es una TABLA, no una sequence de Postgres — NO migrarla a una
+      sequence real "para optimizar".** Es justo lo que hace limpia a la opción C: al ser tabla,
+      el incremento vive DENTRO de la transacción, así que un rollback del cobro devuelve el
+      número y no deja hueco. Las sequences de PG son deliberadamente NO transaccionales
+      (`nextval` no se revierte, para no serializar escritores): con una sequence real, cada cobro
+      fallido quemaría un número para siempre. La contención de la fila es irrelevante a escala
+      de un restaurante.
+    - **Asimetría de reintento** (ya implementada, no perderla): `next_order_number` NO es
+      idempotente (cada llamada quema un número → reintentarla genera huecos); `setOrderNumber`
+      SÍ lo es. Por eso solo se reintenta el UPDATE, y `AssignOrderNumberResult.numeroReservado`
+      hace que el reintento manual reuse el número ya entregado en vez de pedir otro.
+    - Falta cubrir los dos caminos que no pasan por `register_sale_payment`: fiado (sin pago) y
+      venta gratis por vale del 100% (total 0).
+    - **Opción D (backfill diferido) DESCARTADA por ahora:** asignaría números fuera de orden
+      cronológico, y el cliente lo nota. Reconsiderar solo si aparece volumen real — la huella
+      son las órdenes con fila en `payments` y `order_number is null` (OJO: no filtrar por
+      `payment_status='paid'`, es el DEFAULT de la columna y toda mesa abierta lo cumple), más
+      `store_sequences.last_order_number - count(order_number)` como números quemados.
   - **Un admin puede seguir promoviendo a OTRO usuario a owner.** El trigger
     `protect_profile_self_escalation` solo blinda la fila PROPIA (`new.id = auth.uid()`); la policy
     `"profiles: admin edita cualquiera"` (gate por enum `get_my_role() = 'admin'`) sigue permitiendo
