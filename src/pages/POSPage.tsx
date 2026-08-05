@@ -18,8 +18,9 @@ import { useCashShift } from '@/hooks/useCashShift'
 import { OpenShiftModal } from '@/components/shift/OpenShiftModal'
 import { ItemConfigModal } from '@/components/pos/ItemConfigModal'
 import { PaymentSplitEditor } from '@/components/pos/PaymentSplitEditor'
-import { createOrder, addOrderItemsWithExtras, registerSalePayment, assignOrderNumber } from '@/lib/supabase-helpers'
+import { createOrder, addOrderItemsWithExtras, registerSalePayment, assignOrderNumber, retryOrderNumber } from '@/lib/supabase-helpers'
 import type { SalePaymentPart } from '@/lib/supabase-helpers'
+import { captureError } from '@/lib/sentry'
 import { CustomerPicker } from '@/components/fiado/CustomerPicker'
 import { cashQuickAmounts } from '@/lib/cashRounding'
 import type { ProductWithCategory, CartItem, DiscountType, DiscountKind, HeldOrder } from '@/stores/cartStore'
@@ -825,6 +826,10 @@ function CheckoutModal({
   const [submitting, setSubmitting] = useState(false)
   const [orderId, setOrderId] = useState<string | null>(null)
   const [orderNumber, setOrderNumber] = useState<number | null>(null)
+  // Número que la secuencia entregó pero no se pudo grabar: el reintento lo
+  // reusa en vez de pedir otro (ver AssignOrderNumberResult).
+  const [numeroReservado, setNumeroReservado] = useState<number | null>(null)
+  const [reintentandoNumero, setReintentandoNumero] = useState(false)
   // Fiado: cliente seleccionado (solo aplica si method === 'fiado').
   const [customerId, setCustomerId] = useState<string | null>(null)
   const [customerName, setCustomerName] = useState<string>('')
@@ -917,8 +922,9 @@ function CheckoutModal({
 
       // Numeración: es una venta real (cobrada o a fiado) → asignar número
       // correlativo. Si falla, no se tumba la venta (queda registrada igual).
-      const n = await assignOrderNumber(order.id, profile.restaurant_id)
-      setOrderNumber(n)
+      const num = await assignOrderNumber(order.id, profile.restaurant_id)
+      setOrderNumber(num.orderNumber)
+      setNumeroReservado(num.numeroReservado)
 
       if (isFiado) queryClient.invalidateQueries({ queryKey: ['debts'] })
       refetchSales()
@@ -928,8 +934,32 @@ function CheckoutModal({
       const msg = err instanceof Error ? err.message : (err as { message?: string })?.message ?? 'Error desconocido'
       toast.error(`Error al procesar el cobro: ${msg}`)
       console.error('[checkout]', err)
+      // El toast le dice al cajero que falló, pero no nos dice a nosotros por
+      // qué. Es el flujo que más importa: si esto se rompe, no se puede cobrar.
+      captureError(err, 'cobro', {
+        origen: 'POS',
+        esFiado: isFiado,
+        pagoDividido: split,
+        cantidadItems: items.length,
+      })
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  // Reintento a pedido del cajero cuando la venta quedó sin número. La venta YA
+  // está cobrada y registrada: esto solo completa el correlativo.
+  const handleRetryNumero = async () => {
+    if (!orderId || !profile) return
+    setReintentandoNumero(true)
+    try {
+      const num = await retryOrderNumber(orderId, profile.restaurant_id, numeroReservado)
+      setOrderNumber(num.orderNumber)
+      setNumeroReservado(num.numeroReservado)
+      if (num.orderNumber != null) toast.success(`Número asignado: venta #${num.orderNumber}`)
+      else toast.error('No se pudo asignar el número. La venta está cobrada igual.')
+    } finally {
+      setReintentandoNumero(false)
     }
   }
 
@@ -1209,9 +1239,45 @@ function CheckoutModal({
                 Vuelto: {formatCOP(receivedNum - total)}
               </div>
             )}
-            <div data-testid="success-order-number" style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace', marginBottom: 24 }}>
+            <div data-testid="success-order-number" style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace', marginBottom: orderNumber != null ? 24 : 12 }}>
               {orderNumber != null ? `Venta #${orderNumber}` : `#${orderId.slice(-8).toUpperCase()}`}
             </div>
+
+            {/* La venta se cobró, pero quedó sin correlativo. Antes esto fallaba
+                MUDO: la pantalla decía "¡Cobro exitoso!" y nadie se enteraba de
+                que la venta no iba a aparecer en el Historial ni se iba a poder
+                reimprimir. */}
+            {orderNumber == null && (
+              <div
+                data-testid="success-sin-numero"
+                style={{
+                  background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8,
+                  padding: '10px 12px', margin: '0 0 20px',
+                  fontSize: 12, color: '#92400e', lineHeight: 1.5,
+                }}
+              >
+                <div style={{ fontWeight: 600, marginBottom: 6 }}>
+                  Venta registrada — sin número asignado
+                </div>
+                <div style={{ marginBottom: 8 }}>
+                  El cobro está guardado. Falta el número para que aparezca en el
+                  historial y se pueda reimprimir.
+                </div>
+                <button
+                  onClick={handleRetryNumero}
+                  disabled={reintentandoNumero}
+                  data-testid="retry-order-number"
+                  style={{
+                    padding: '6px 14px', border: '1.5px solid #d97706', background: '#fff',
+                    borderRadius: 7, cursor: reintentandoNumero ? 'default' : 'pointer',
+                    fontSize: 12, fontWeight: 600, color: '#92400e',
+                    opacity: reintentandoNumero ? 0.6 : 1,
+                  }}
+                >
+                  {reintentandoNumero ? 'Reintentando…' : 'Reintentar'}
+                </button>
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
               <button
                 onClick={() => window.print()}

@@ -20,7 +20,7 @@ import {
   updateTableStatus, createOrder, addOrderItemsWithExtras,
   updateOrderTotal, updateOrderStatus, registerSalePayment,
   getTableActiveOrderCount, removeOrderItem, markItemsSentToKitchen,
-  assignOrderNumber, setOrderFiado, applyOrderDiscount,
+  assignOrderNumber, retryOrderNumber, setOrderFiado, applyOrderDiscount,
 } from '@/lib/supabase-helpers'
 import type { SalePaymentPart } from '@/lib/supabase-helpers'
 import { OpenShiftModal } from '@/components/shift/OpenShiftModal'
@@ -28,6 +28,7 @@ import { ItemConfigModal } from '@/components/pos/ItemConfigModal'
 import { PaymentSplitEditor } from '@/components/pos/PaymentSplitEditor'
 import { CustomerPicker } from '@/components/fiado/CustomerPicker'
 import { printComanda } from '@/lib/printer'
+import { captureError } from '@/lib/sentry'
 import type { Enums } from '@/types/database.types'
 import type { ProductWithCategory, CartExtra } from '@/stores/cartStore'
 import { cartItemTotal } from '@/stores/cartStore'
@@ -599,6 +600,10 @@ function TableCheckoutModal({
   const [received, setReceived] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [orderNumber, setOrderNumber] = useState<number | null>(null)
+  // Numero que la secuencia entrego pero no se pudo grabar: el reintento lo
+  // reusa en vez de pedir otro (ver AssignOrderNumberResult).
+  const [numeroReservado, setNumeroReservado] = useState<number | null>(null)
+  const [reintentandoNumero, setReintentandoNumero] = useState(false)
   // Fiado: cliente seleccionado (solo aplica si method === 'fiado').
   const [customerId, setCustomerId] = useState<string | null>(null)
   const [customerName, setCustomerName] = useState<string>('')
@@ -685,8 +690,9 @@ function TableCheckoutModal({
 
       // Numeración: es una venta real (cobrada o a fiado) → asignar número.
       // Si falla, no se tumba la venta (queda registrada igual).
-      const n = await assignOrderNumber(order.id, profile.restaurant_id)
-      setOrderNumber(n)
+      const num = await assignOrderNumber(order.id, profile.restaurant_id)
+      setOrderNumber(num.orderNumber)
+      setNumeroReservado(num.numeroReservado)
 
       refetchSales()
       if (isFiado) queryClient.invalidateQueries({ queryKey: ['debts'] })
@@ -701,8 +707,34 @@ function TableCheckoutModal({
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Error desconocido'
       toast.error(`Error al cobrar: ${msg}`)
+      // Cobro de mesa: mismo peso que el del POS. Además puede fallar DESPUÉS
+      // del pago (al marcar delivered o liberar la mesa), y ahí la plata ya
+      // entró — el estado inconsistente hay que verlo sí o sí.
+      captureError(err, 'cobro', {
+        origen: 'Mesa',
+        esFiado: isFiado,
+        pagoDividido: split,
+        conDescuento: discountAmt > 0,
+        esVale: isVale,
+      })
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  // Reintento a pedido del cajero cuando la venta quedó sin número. La venta YA
+  // está cobrada y la mesa liberada: esto solo completa el correlativo.
+  const handleRetryNumero = async () => {
+    if (!profile) return
+    setReintentandoNumero(true)
+    try {
+      const num = await retryOrderNumber(order.id, profile.restaurant_id, numeroReservado)
+      setOrderNumber(num.orderNumber)
+      setNumeroReservado(num.numeroReservado)
+      if (num.orderNumber != null) toast.success(`Número asignado: venta #${num.orderNumber}`)
+      else toast.error('No se pudo asignar el número. La venta está cobrada igual.')
+    } finally {
+      setReintentandoNumero(false)
     }
   }
 
@@ -944,9 +976,45 @@ function TableCheckoutModal({
             {method === 'efectivo' && receivedNum > total && (
               <div style={{ fontSize: 12, color: '#10b981', fontWeight: 600, marginBottom: 4 }}>Vuelto: {formatCOP(receivedNum - total)}</div>
             )}
-            <div data-testid="success-order-number" style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace', marginBottom: 24 }}>
+            <div data-testid="success-order-number" style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace', marginBottom: orderNumber != null ? 24 : 12 }}>
               {orderNumber != null ? `Venta #${orderNumber}` : `#${order.id.slice(-8).toUpperCase()}`}
             </div>
+
+            {/* La venta se cobró, pero quedó sin correlativo. Antes esto fallaba
+                MUDO: la pantalla decía "¡Cobro exitoso!" y nadie se enteraba de
+                que la venta no iba a aparecer en el Historial ni se iba a poder
+                reimprimir. */}
+            {orderNumber == null && (
+              <div
+                data-testid="success-sin-numero"
+                style={{
+                  background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8,
+                  padding: '10px 12px', margin: '0 0 20px',
+                  fontSize: 12, color: '#92400e', lineHeight: 1.5, textAlign: 'left',
+                }}
+              >
+                <div style={{ fontWeight: 600, marginBottom: 6 }}>
+                  Venta registrada — sin número asignado
+                </div>
+                <div style={{ marginBottom: 8 }}>
+                  El cobro está guardado. Falta el número para que aparezca en el
+                  historial y se pueda reimprimir.
+                </div>
+                <button
+                  onClick={handleRetryNumero}
+                  disabled={reintentandoNumero}
+                  data-testid="retry-order-number"
+                  style={{
+                    padding: '6px 14px', border: '1.5px solid #d97706', background: '#fff',
+                    borderRadius: 7, cursor: reintentandoNumero ? 'default' : 'pointer',
+                    fontSize: 12, fontWeight: 600, color: '#92400e',
+                    opacity: reintentandoNumero ? 0.6 : 1,
+                  }}
+                >
+                  {reintentandoNumero ? 'Reintentando…' : 'Reintentar'}
+                </button>
+              </div>
+            )}
             <button
               onClick={onComplete}
               style={{ padding: '11px 28px', border: 'none', background: '#10b981', borderRadius: 9, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#fff', boxShadow: '0 6px 16px rgba(16,185,129,.35)' }}

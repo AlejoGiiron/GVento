@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-hot-toast'
 import { adjustStock } from '@/lib/supabase-helpers'
 import { useAuth } from '@/hooks/useAuth'
+import type { SentryArea } from '@/lib/sentry'
 
 /**
  * Mutaciones de inventario. `adjust` llama a la RPC adjust_stock (atómica:
@@ -13,6 +14,7 @@ export function useInventory() {
   const { profile } = useAuth()
 
   const adjust = useMutation({
+    meta: { area: 'inventario' satisfies SentryArea },
     mutationFn: async ({ productId, qty, reason }: { productId: string; qty: number; reason: string }) => {
       const { error } = await adjustStock(productId, qty, reason)
       if (error) throw error

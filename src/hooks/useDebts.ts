@@ -5,6 +5,7 @@ import {
   type DebtRow, type DebtPaymentRow, type RegisterDebtPaymentResult,
 } from '@/lib/supabase-helpers'
 import { useAuth } from '@/hooks/useAuth'
+import type { SentryArea } from '@/lib/sentry'
 
 export type { DebtPaymentRow }
 
@@ -88,6 +89,7 @@ export function useRegisterDebtPayment() {
   const queryClient = useQueryClient()
 
   const mutation = useMutation({
+    meta: { area: 'fiado' satisfies SentryArea },
     mutationFn: async (
       { orderId, amount, paymentMethod }: { orderId: string; amount: number; paymentMethod: string },
     ) => {

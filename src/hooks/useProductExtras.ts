@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { getProductExtras, addProductExtra, removeProductExtra } from '@/lib/supabase-helpers'
+import type { SentryArea } from '@/lib/sentry'
 
 /**
  * Extras del catálogo asignados a un producto (relación product_extras).
@@ -21,6 +22,7 @@ export function useProductExtras(productId: string | null) {
   })
 
   const reconcile = useMutation({
+    meta: { area: 'productos' satisfies SentryArea },
     mutationFn: async ({ productId, extraIds }: { productId: string; extraIds: string[] }) => {
       const { data: current, error: readErr } = await getProductExtras(productId)
       if (readErr) throw readErr

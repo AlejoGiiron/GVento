@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { captureIssue } from './sentry'
 import type { Enums, Json, Tables, TablesInsert, TablesUpdate } from '@/types/database.types'
 
 // --- Profiles ---
@@ -390,18 +391,145 @@ export const nextOrderNumber = (restaurantId: string) =>
 export const setOrderNumber = (orderId: string, orderNumber: number) =>
   supabase.from('orders').update({ order_number: orderNumber }).eq('id', orderId)
 
+/**
+ * ─────────────────────────────────────────────────────────────────────────────
+ * ARREGLO DE FONDO PENDIENTE (opción C): asignar el correlativo DENTRO de
+ * `register_sale_payment`, no acá.
+ *
+ * Lo de abajo (reintento del UPDATE + aviso al cajero) reduce la ventana y la
+ * hace visible, pero NO la cierra: entre que la RPC de cobro hace commit y que
+ * el navegador graba el número hay un hueco donde se puede cerrar la pestaña,
+ * morir la red o cortarse la luz — y la venta queda cobrada sin número.
+ * `register_sale_payment` ya es una transacción SECURITY DEFINER: asignar el
+ * número ahí lo vuelve atómico con el pago y elimina la ventana en vez de
+ * reportarla.
+ *
+ * 🔴 `store_sequences` es una TABLA, no una sequence de Postgres — NO migrarla
+ *    a una sequence real "para optimizar". Esa diferencia es la que hace que la
+ *    opción C sea limpia: al ser una tabla, el incremento del contador vive
+ *    dentro de la transacción, así que un ROLLBACK del cobro devuelve también
+ *    el número y NO deja hueco. Las sequences de Postgres son deliberadamente
+ *    NO transaccionales (`nextval` no se revierte en un rollback, justamente
+ *    para no serializar a los escritores): con una sequence real, cada cobro
+ *    fallido quemaría un número para siempre. La contención extra de la fila no
+ *    es problema a escala de un restaurante.
+ *
+ * Falta cubrir los dos caminos que NO pasan por `register_sale_payment`:
+ * el fiado (no hay pago) y la venta gratis por vale del 100% (total 0).
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+export interface AssignOrderNumberResult {
+  /** Número asignado, o null si no se pudo. */
+  orderNumber: number | null
+  /**
+   * Número que la secuencia YA entregó pero que no se pudo grabar en la orden.
+   *
+   * Es la pieza que hace barato el reintento manual: si viene, hay que
+   * reintentar con ESTE número (`setOrderNumber` es idempotente) en vez de
+   * pedir otro. Sin esto, cada reintento llamaría de nuevo a
+   * `next_order_number` —que NO es idempotente— y quemaría un número más,
+   * agrandando el hueco que justamente estamos tratando de cerrar.
+   */
+  numeroReservado: number | null
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+/** Backoff del reintento del UPDATE: 3 intentos en total (~0,8 s peor caso). */
+const BACKOFF_UPDATE_MS = [200, 600]
+
+/**
+ * Graba el correlativo REINTENTANDO.
+ *
+ * ⚠️ Se reintenta SOLO este paso, nunca `next_order_number`. La asimetría es
+ * la que decide el diseño:
+ *   · `next_order_number` NO es idempotente — cada llamada incrementa el
+ *     contador de la sede, así que reintentarla genera huecos permanentes.
+ *   · `setOrderNumber` SÍ lo es — mismo número, misma fila: reintentar sale
+ *     gratis y no tiene efecto acumulativo.
+ * Cubre el caso dominante (un hipo de red en el UPDATE) que además es el modo
+ * de fallo PEOR, porque es el único que quema un número.
+ */
+const setOrderNumberConReintento = async (
+  orderId: string,
+  orderNumber: number,
+): Promise<{ ok: boolean; error: unknown; intentos: number }> => {
+  let ultimoError: unknown = null
+  for (let i = 0; i <= BACKOFF_UPDATE_MS.length; i++) {
+    const { error } = await setOrderNumber(orderId, orderNumber)
+    if (!error) return { ok: true, error: null, intentos: i + 1 }
+    ultimoError = error
+    if (i < BACKOFF_UPDATE_MS.length) await sleep(BACKOFF_UPDATE_MS[i])
+  }
+  return { ok: false, error: ultimoError, intentos: BACKOFF_UPDATE_MS.length + 1 }
+}
+
 // Asigna el número correlativo a una venta completada: pide el siguiente número
-// a la sede y lo graba en la orden. Devuelve el número o null si algo falla
-// (no debe tumbar el cobro: la venta ya quedó registrada con su pago).
+// a la sede y lo graba en la orden. NO tumba el cobro si falla (la venta ya
+// quedó registrada con su pago), pero SÍ lo reporta y deja al llamante la
+// posibilidad de reintentar.
 export const assignOrderNumber = async (
   orderId: string,
   restaurantId: string,
-): Promise<number | null> => {
+): Promise<AssignOrderNumberResult> => {
+  // Una venta sin número no aparece en el Historial (ordena por número), no se
+  // puede reimprimir su ticket, y getShiftSalesCount cuenta las ventas gratis
+  // por `order_number not null`. Devolver null en silencio dejaba un cobro real
+  // con el registro incompleto y CERO señal de que pasó.
   const { data, error } = await nextOrderNumber(restaurantId)
-  if (error || typeof data !== 'number') return null
-  const { error: setErr } = await setOrderNumber(orderId, data)
-  if (setErr) return null
-  return data
+  if (error || typeof data !== 'number') {
+    captureIssue('Venta cobrada sin número: falló next_order_number', 'numeracion', {
+      orderId,
+      restaurantId,
+      error,
+      tipoDeDato: typeof data,
+    })
+    // Sin número reservado: la secuencia no llegó a entregar nada, así que un
+    // reintento puede pedirlo de nuevo sin quemar de más.
+    return { orderNumber: null, numeroReservado: null }
+  }
+
+  const res = await setOrderNumberConReintento(orderId, data)
+  if (!res.ok) {
+    // Peor caso: el contador de la sede YA avanzó pero la orden no lo guardó →
+    // hueco permanente en la numeración además de la venta sin número.
+    captureIssue('Venta cobrada sin número: falló el UPDATE del correlativo', 'numeracion', {
+      orderId,
+      restaurantId,
+      numeroPerdido: data,
+      error: res.error,
+      intentos: res.intentos,
+    })
+    return { orderNumber: null, numeroReservado: data }
+  }
+  return { orderNumber: data, numeroReservado: null }
+}
+
+/**
+ * Reintento a pedido del cajero desde la pantalla de éxito.
+ *
+ * Reusa el número ya reservado si lo hay (no quema uno nuevo); si la secuencia
+ * nunca llegó a entregar, hace el flujo completo.
+ */
+export const retryOrderNumber = async (
+  orderId: string,
+  restaurantId: string,
+  numeroReservado: number | null,
+): Promise<AssignOrderNumberResult> => {
+  if (numeroReservado === null) return assignOrderNumber(orderId, restaurantId)
+
+  const res = await setOrderNumberConReintento(orderId, numeroReservado)
+  if (!res.ok) {
+    captureIssue('Reintento manual del correlativo falló', 'numeracion', {
+      orderId,
+      restaurantId,
+      numeroPerdido: numeroReservado,
+      error: res.error,
+      intentos: res.intentos,
+    })
+    return { orderNumber: null, numeroReservado }
+  }
+  return { orderNumber: numeroReservado, numeroReservado: null }
 }
 
 // --- Historial de ventas (ventas completadas, con número) ---
