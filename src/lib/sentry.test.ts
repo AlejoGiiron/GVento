@@ -147,3 +147,43 @@ describe('scrubValue — lo que SÍ debe llegar (o el error no sirve)', () => {
     expect(() => scrubValue(ciclo)).not.toThrow()
   })
 })
+
+/**
+ * Los marcadores internos que `scrubString` usa para salvar UUID, fechas ISO y
+ * correlativos de la pasada numérica van delimitados por NUL.
+ *
+ * Estos tests fijan esa decisión. Con delimitadores más "legibles" —espacios,
+ * por ejemplo— el marcador choca con el texto real del mensaje y lo corrompe:
+ * un `0` suelto se restaura como un UUID, y un índice sin valor emite
+ * literalmente `undefined`. Se descubrió al portar este módulo a G-Centro,
+ * donde el NUL se perdió al copiar el archivo y el bug apareció entero.
+ */
+describe('scrubValue — integridad de los marcadores internos', () => {
+  const UUID = '3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d'
+  const NUL = String.fromCharCode(0)
+
+  it('no confunde un dígito suelto del mensaje con un marcador', () => {
+    expect(scrubStr(`reintento 0 de 3 para la orden ${UUID}`)).toBe(
+      `reintento 0 de 3 para la orden ${UUID}`,
+    )
+  })
+
+  it('nunca emite `undefined` por un índice que no existe', () => {
+    expect(scrubStr('código 7 rechazado')).toBe('código 7 rechazado')
+  })
+
+  it('un NUL en la entrada no puede falsificar un marcador', () => {
+    // Si el texto de origen pudiera inyectar un marcador, podría extraer un
+    // valor guardado que no le corresponde.
+    expect(scrubStr(`${NUL}0${NUL} dato ${UUID}`)).toBe(`0 dato ${UUID}`)
+  })
+
+  it('soporta más de mil marcadores en un mismo string', () => {
+    // El índice cruza los 4 dígitos y queda al alcance de RE_NUM_LARGO
+    // (`\b\d{4,}\b`), que lo convertiría en `[monto]` y rompería la
+    // restauración. Improbable en la práctica, pero es exactamente el tipo de
+    // borde que nadie vuelve a mirar.
+    const entrada = Array.from({ length: 1001 }, () => UUID).join(' ')
+    expect(scrubStr(entrada)).toBe(entrada)
+  })
+})
