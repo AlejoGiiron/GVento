@@ -49,4 +49,7 @@ design_handoff_*/
 
 # Misc
 *.pem
-.vercelvite.config.ts.timestamp-*.mjs
+.vercel
+
+# Temporal que genera vite al cargar vite.config.ts
+vite.config.ts.timestamp-*.mjs
