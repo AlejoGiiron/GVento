@@ -75,6 +75,77 @@ Ejemplo: TablesPage usa `checkoutOrder` en lugar de `selectedOrder` para control
 `TableCheckoutModal`. Si `selectedOrder` se vuelve null por Realtime durante el cobro,
 el modal no se desmonta.
 
+### Filtros de privacidad: ALLOWLIST por clave, nunca deny-list
+
+**Un filtro de privacidad por deny-list no puede funcionar: un nombre propio es
+irreconocible por regex, y las columnas nuevas fugan calladas. El filtro es
+allowlist por clave; el modo de fallo es opacidad (`[Filtrado]`), nunca fuga.**
+
+El ejemplo que lo fijó (sesión 2026-08-05, `src/lib/sentry.ts`). `customers.document`
+y `suppliers.document` (cédula/NIT) no estaban en la lista de claves sensibles. Es
+texto libre con placeholder "C.C. / NIT", así que un cajero escribe ahí lo que sea.
+Medido contra el código real, no teorizado:
+
+```
+document: '900123456'              -> "[monto]"                 redactado, mal etiquetado
+document: 900123456   (number)     -> 900123456                 FUGA
+document: 'CC 79123456 Juan Perez' -> "CC [monto] Juan Perez"    FUGA del nombre
+```
+
+Los tres son la misma falla de categoría, no tres bugs:
+1. **El corte por tipo** (`if (typeof value === 'number') return value`) corría ANTES
+   de mirar la clave ⇒ toda la maquinaria numérica vivía dentro del redactor de
+   strings y solo alcanzaba lo que ya era string. `numeric(12,2)` vuelve de PostgREST
+   como number de JS ⇒ **toda columna monetaria del esquema estaba fugando**.
+   Agregar `document` a la lista no cerraba nada: cerraba esa clave.
+2. **No existe detector de nombres propios y no puede existir.** Cualquier filtro
+   sobre CONTENIDO necesita reconocer la PII. Solo una regla sobre la POSICIÓN
+   (qué clave) ataja un nombre. Este es el argumento decisivo, no una preferencia.
+3. La excepción numérica (`IDENTIFICADOR_NUMERICO`) era **inerte**: dejaba pasar
+   numbers bajo claves de confianza, pero los numbers ya pasaban bajo TODAS.
+   Su test pasaba con la lista vacía — verificaba una regla que no decidía nada.
+
+Reglas que quedan (ver el bloque de diseño en `src/lib/sentry.ts`):
+- **Allowlist por clave, evaluado en la HOJA, con recursión siempre.** Un objeto bajo
+  clave desconocida no se colapsa: se recorre. Conservar la forma del árbol es media
+  respuesta en triage.
+- **Redacción TIPADA** (`[Filtrado:number]`, `[Filtrado:string(24)]`, `[Filtrado:array(3)]`).
+  Es lo que hace vivible el allowlist: "¿vino null o 0?", "¿el array volvió vacío?"
+  se responden sin un byte de PII. Sin esto alguien afloja el filtro a los 3 meses.
+- **La denylist se queda, evaluada primero** (`allowlist ∧ ¬denylist`). Redundante a
+  propósito: un chequeo fail-closed extra no cuesta nada.
+- **Nada de exceptuar SUBÁRBOLES enteros.** `tags` y `user` estaban exentos con el
+  argumento "los construimos nosotros y ya están curados" — la misma suposición que
+  falló con `document`. Hoy pasan por su allowlist interno. `stacktrace` es la única
+  excepción de subárbol que queda, documentada y con el porqué (romper la
+  symbolication es peor que la opacidad).
+- **Alcance:** el allowlist va sobre `extra` y los contextos que seteamos nosotros.
+  El envelope del SDK sigue por deny-list + redactor de prosa: allowlistear claves
+  que define el SDK rompería el agrupamiento, y **un evento que Sentry no puede
+  procesar es peor que uno opaco**.
+- **Los arrays no tienen clave.** Bajo clave permitida heredan la forma del padre;
+  bajo clave desconocida se colapsan a `[Filtrado:array(n)]`. Recursar dejaría salir
+  cada string suelto — medido: `['Juan Perez']` salía intacto.
+
+**Los tests son ADVERSARIALES, no de cobertura.** Los 16 tests viejos estaban en
+verde y aun así el filtro fugaba: probaban lo que el filtro cubre, no lo que no
+cubre. `src/lib/sentry.test.ts` parte de una **tabla de columnas derivada del
+esquema real** y verifica que NADA de esas columnas sale, en 4 posiciones (primer
+nivel, anidada a 3, dentro de un array, y como string cuando el ejemplo es número).
+📌 **Agregar una columna al esquema obliga a agregarla a esa tabla, en la misma
+sesión.** Si no la agregás, el allowlist igual la redacta —ese es el punto de
+invertirlo— pero perdés la verificación.
+
+Efecto colateral que conviene saber: la deny-list también **costaba** diagnóstico.
+`error.code` de un PostgrestError (`'23505'`) salía como `"[monto]"` porque son 5
+dígitos. Con el allowlist llega intacto. El caso adverso real es el arqueo: se dejan
+pasar las DIFERENCIAS, nunca los absolutos; los importes se miran contra la BD con
+el `shift_id`, que sí viaja (regla del proyecto: confirmar contra la BD).
+
+⚠️ **`gcentro/src/lib/sentry.ts` sigue con la deny-list y por lo tanto sigue
+fugando.** Se decidió arreglarlo en su propio hilo. La divergencia está declarada en
+el encabezado de `src/lib/sentry.ts` para que no sea silenciosa.
+
 ## Aprendizajes de proyectos hermanos (G-Quota)
 
 Reglas duras traídas de G-Quota — aplican a todo el trabajo en este repo:
