@@ -1,3 +1,40 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+ * ⚠️  ESTE ARCHIVO ESTÁ DUPLICADO A PROPÓSITO
+ *
+ * Existe una copia casi idéntica en G-Centro:
+ *     gcentro/src/lib/sentry.ts
+ *
+ * No es un descuido ni un candidato a extraer a un paquete compartido: los dos
+ * repos son independientes y el monorepo se descartó con razón. La duplicación
+ * se acepta, pero explícita.
+ *
+ * REGLA: todo cambio en este archivo obliga a revisar el otro EN LA MISMA
+ * SESIÓN. No "después", no "en el próximo bloque". Si divergen, divergen en
+ * silencio — y esto es código de privacidad: lo que se rompe acá no se nota
+ * hasta que ya salieron datos de un tercero a un servicio externo.
+ *
+ * Lo que NO es igual entre las dos copias, y está bien que no lo sea:
+ * las áreas de `SentryArea`, las claves de `CLAVE_SENSIBLE` y
+ * `IDENTIFICADOR_NUMERICO`, y el correlativo `#N` (solo G-Vento tiene ventas
+ * numeradas). El REDACTOR —`scrubString` y `scrubValue`— sí debe ser idéntico.
+ *
+ * ───────────────────────────────────────────────────────────────────────────
+ * LOS MARCADORES USAN `\u0000` Y NUNCA ESPACIOS
+ *
+ * `scrubString` guarda UUID y fechas ISO detrás de un marcador para que la
+ * pasada numérica no se los coma, y los restaura al final. Ese marcador va
+ * delimitado por NUL, escrito SIEMPRE como el escape `\u0000`.
+ *
+ * Con espacios (` 0 `) el marcador choca con el texto real del mensaje:
+ * un `0` suelto se restaura como un UUID y un índice sin valor emite
+ * literalmente `undefined`. Ya pasó.
+ *
+ * Y como BYTE literal —no como escape— el archivo contiene NUL, git lo trata
+ * como BINARIO, y los diffs de este módulo dejan de poder revisarse. Peor: el
+ * byte es invisible al copiar el archivo entre repos, que es exactamente la
+ * causa raíz de que esta función se rompiera al portarla. El escape es la
+ * única forma correcta.
+ * ═══════════════════════════════════════════════════════════════════════════ */
 /**
  * Sentry — reporte de errores (v1: SOLO errores).
  *
