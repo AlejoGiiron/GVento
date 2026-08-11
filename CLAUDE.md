@@ -350,16 +350,27 @@ Resumen rápido:
     `handleConfirm` y `setOrderFiado`). Una venta de delivery de contado lo deja NULL, y
     por eso la tarjeta muestra "Cliente sin nombre".
   El POS marca el tipo "Delivery" con el botón que cicla `orderType` y **no pide dirección
-  ni teléfono en ningún momento** — no existe el paso de captura. Las columnas SÍ existen en
-  `orders` (ver `database.types.ts`), así que el trabajo pendiente es de captura, no de
-  esquema.
-  **NO borrar esos botones**: si el cliente confirma que quiere despachar domicilios desde
-  esta pantalla, se necesitan tal cual están. Decisión pendiente de confirmar con el cliente
-  (2026-08-07): *¿los domicilios se cargan al POS solo como venta —y entonces la pantalla de
-  Delivery está bien vacía— o esperan despachar desde ahí?* Si es lo segundo, capturar
-  dirección/teléfono al elegir "Delivery" es una FUNCIONALIDAD nueva, no un arreglo de UI, y
-  recién ahí tiene sentido rejerarquizar la tarjeta (orden propuesto: dirección > teléfono >
-  nombre; el repartidor necesita llegar y avisar).
+  ni teléfono en ningún momento** — no existe el paso de captura.
+
+  ✅ **DECIDIDO POR EL CLIENTE (2026-08-10) — NO se construye la captura.** Los domicilios se
+  reciben **por WhatsApp** y se cargan al POS **solo como venta**. La pantalla de Delivery es
+  para **despachar** (mover el pedido por los 3 estados), no para capturar datos del cliente.
+  **NO falta capturar dirección ni teléfono; no es una deuda.** Que la tarjeta muestre
+  "Cliente sin nombre" y sin dirección es el estado ESPERADO, no un bug — la dirección vive en
+  el WhatsApp del que despacha.
+
+  🔻 **Consecuencia que hay que aceptar explícitamente:** con esa decisión, "Llamar" y "Mapa"
+  quedan **permanentemente inalcanzables** — dependen de dos columnas que ya nadie va a
+  escribir. El argumento original para conservarlos ("si el cliente confirma que quiere
+  despachar desde acá, se necesitan") **ya no los sostiene**: el cliente confirmó que despacha
+  desde acá Y que no quiere la captura. Hoy siguen en el código sin decisión de borrarlos —
+  **si los tocás, esto es lo que hay que saber**; el orden de tarjeta que se había propuesto
+  (dirección > teléfono > nombre) queda descartado por la misma razón.
+
+  Lo ÚNICO que sigue abierto de esta pantalla es **cosmético**: el chip "N activos" de la barra
+  superior, que se solapa con "N nuevos" (`activeCount = nuevos + en camino`, así que con 0 en
+  camino los dos números coinciden por casualidad) y además repite el contador que cada columna
+  ya muestra en su badge.
 ### Testing — laboratorio (LAB) MONTADO
 - **✅ Laboratorio listo.** Existe la organización **LAB** (Supabase separado de
   producción) con **2 sedes**, los usuarios **owner.test** (rol owner) y
@@ -583,18 +594,17 @@ desarrollo que dependen de esto.
     ANTES de `createUser`, el caso "role_id inexistente" ejercita el rechazo temprano. Esa rama solo
     corre si falla el UPDATE con un rol válido, que no hay forma limpia de forzar desde afuera.
     Queda como defensa en profundidad sin test directo.
-    **PENDIENTE: promover el frontend a `main`** (`useUsers` sin su segundo paso). Ver el 🔀.
-  - 🔀 **ORDEN DEL DEPLOY — NO ES INDISTINTO: FUNCIÓN PRIMERO, FRONTEND DESPUÉS.**
-    Es asimétrico y la dirección equivocada rompe en silencio:
-    - **Función → frontend (CORRECTO):** el frontend viejo no manda `role_id` y sigue haciendo su
-      segundo paso (`updateProfile`); la función nueva ignora el campo ausente y funciona igual.
-      Sin regresión en ningún momento.
-    - **Frontend → función (ROMPE):** el frontend nuevo manda `role_id` y **ya no hace el segundo
-      paso**; la función vieja no conoce ese campo y lo descarta → **todos los usuarios creados
-      nacen SIN ROL**, es decir sin ningún permiso. Y no falla nada visible: el alta "sale bien".
-    Por eso `role_id` se dejó OPCIONAL en la Edge Function: es lo que hace segura la ventana entre
-    ambos deploys. Hoy `develop` está adelantado de `main`, así que el orden natural favorece —
-    pero es una trampa real el día que alguien promueva `main` sin recordar esto.
+    El frontend de `useUsers` (sin su segundo paso) viajó en el release **344787b**.
+  - ✅ **ORDEN DEL DEPLOY (función primero, frontend después) — RESUELTO, YA NO APLICA.**
+    La secuencia se completó: `create-user` se desplegó y verificó el 2026-08-01 (primero como
+    `create-user-next`, después sobre la real) y el frontend de `useUsers` salió en 344787b. Con
+    los dos lados desplegados **la ventana peligrosa está cerrada y no hay coreografía que
+    respetar**: los próximos deploys de features son frontend puro.
+    Se deja el porqué —no la instrucción— por si alguien vuelve a tocar `create-user`: el riesgo
+    era asimétrico. Frontend nuevo + función vieja rompía en SILENCIO (el frontend manda `role_id`
+    y ya no hace el segundo paso; la función vieja descarta el campo → usuarios creados SIN ROL, y
+    el alta "sale bien"). Por eso `role_id` quedó OPCIONAL en la Edge Function. **Si algún día se
+    cambia el contrato de `create-user`, vuelve a haber orden que respetar; hoy no.**
   - ⏳ **LO ÚNICO DEL BLOQUE QUE NO ESTÁ CERRADO EN PRODUCCIÓN (1 ítem):**
     **Apagar el signup público en el Dashboard de Supabase.** Verificado que NADA del código usa
     `signUp` (solo `signInWithPassword`/`signOut`/`getSession`/`onAuthStateChange`) y que la Edge
@@ -604,7 +614,7 @@ desarrollo que dependen de esto.
     `organization_id` + su fix de `SECURITY DEFINER` (en la BD compartida, las 3 orgs) y la Edge
     Function `create-user` (desplegada 2026-08-01). **Suite full 156: 155 passed + 1 skipped**
     (la limpieza del spec de create-user hace skip sin `E2E_SERVICE_ROLE_KEY`).
-    Aparte del bloque de seguridad, queda promover el frontend a `main` — ver el 🔀 del orden.
+    (El frontend de `useUsers` ya se promovió: release 344787b.)
 
 ⚠️ **BD ÚNICA COMPARTIDA (aprendizaje clave):** LAB / G-10 / Salchimelo son ORGANIZACIONES dentro
   de UNA sola base. Las migraciones (funciones/columnas/índices/permisos globales) al aplicarse
