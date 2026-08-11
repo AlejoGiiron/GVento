@@ -59,6 +59,46 @@ Se anotó porque una sesión estuvo a punto de "descubrir" el problema y propone
 arreglarlo. Si volvés a encontrarlo mirando datos, ya está resuelto: es así a
 propósito.
 
+## Ideas de producto — NO son pendientes, NO construir
+
+Esta sección NO es backlog. Nada de acá está aprobado ni pedido: son ideas
+evaluadas y **conscientemente pospuestas**. No aparecen en "Deudas vigentes" a
+propósito — una deuda es algo que YA rompe algo; esto no rompe nada hoy.
+No empezar a construirlo por encontrarlo escrito acá.
+
+### Pedidos entre negocios (decidido 2026-08-07: NO se construye ahora)
+
+**Caso:** un cliente en G-10 (coctelería, sin cocina) quiere comer; G-10 le pide
+la comida a Salchimelo. **Hoy se resuelve por WhatsApp y funciona.**
+
+**Por qué NO ahora** — el dolor hoy es CERO y la ambición es alta. Construir sin
+dolor real significa diseñar contra un caso hipotético. Y es la funcionalidad
+más riesgosa considerada hasta ahora: rompe el aislamiento entre organizaciones,
+acopla dos clientes entre sí, y **no hay forma de cobrarla todavía**.
+
+**Por qué es interesante a futuro:** es un efecto de red — cada cliente nuevo
+vale más si puede conectarse con los que ya están. Difícil de copiar.
+
+**Alternativas evaluadas, de menor a mayor acoplamiento:**
+- **A. Nada (WhatsApp)** — línea base actual.
+- **B. Producto "pedido externo"** en el negocio que pide; los sistemas nunca se
+  hablan. Cero riesgo, pero no notifica al otro lado.
+- **C. Notificación de una vía por Edge Function** — el pedido aparece en el otro
+  negocio. Cruza el mínimo (ítems, nota, origen). SIN relajar RLS: canal
+  explícito y auditado, no una política que deje ver otra organización.
+  ← **la mejor si se retoma.**
+- **D. Catálogo compartido** — más cómodo, más superficie de riesgo.
+- **E. El otro negocio como proveedor** (reusando el módulo de compras existente).
+
+🔴 **REGLA SI SE RETOMA: nunca por RLS relajada.** El aislamiento entre
+organizaciones es la promesa central del multi-tenant y costó una sesión entera
+endurecerlo (ver el bloque de seguridad RBAC). Cualquier cruce va por un canal
+explícito, estrecho y auditado.
+
+**Lo único que aplica MIENTRAS TANTO (gratis, sin construir nada):** al tocar
+delivery, órdenes o catálogo, no tomar decisiones que hagan IMPOSIBLE un pedido
+con origen externo. No construir — solo no bloquear.
+
 ## Patrones aprendidos en desarrollo
 
 ### Modales con flujo de cobro y Realtime activo
@@ -146,6 +186,40 @@ el `shift_id`, que sí viaja (regla del proyecto: confirmar contra la BD).
 fugando.** Se decidió arreglarlo en su propio hilo. La divergencia está declarada en
 el encabezado de `src/lib/sentry.ts` para que no sea silenciosa.
 
+### Auditar una suite por MUTACIÓN, no leyéndola
+
+**Si una suite pasa entera a la primera, sospechá. Mutá el sujeto bajo prueba a
+identidad y corré: los que sobreviven no lo están probando. Y ojo con la clase que
+el mutante NO detecta: aserciones que pasan por la razón equivocada. El contraste
+—positivo y negativo en la misma aserción— es lo que discrimina.**
+
+Es el método más reutilizable que salió de todo el bloque de Sentry, y no es
+específico de un filtro de privacidad: sirve para cualquier módulo con una suite
+grande. Cómo se aplica en concreto:
+
+1. **Mutar a identidad.** Hacer que las funciones exportadas devuelvan su entrada sin
+   tocarla (un `return value` al principio). El árbol tiene que estar limpio y todo
+   commiteado — se revierte con `git checkout <archivo>` cuando terminás.
+2. **Correr con reporte JSON** (`--reporter=json --outputFile=…`) y listar los que
+   PASAN. Esos son los sospechosos: pasaron con el sujeto apagado.
+3. **Clasificar los sobrevivientes.** No todos son defectos:
+   - Los tests que verifican **ausencia de redacción de más** (que el stack trace
+     sobreviva, que el envelope conserve lo que Sentry agrupa, que un `no throw`
+     no explote) **no pueden** fallar contra un no-op. Es inherente a su forma.
+     Son legítimos y hay que dejarlos MARCADOS para que la próxima auditoría no
+     los "arregle".
+   - El resto sí es deuda: o no prueban nada, o el nombre promete una verificación
+     que las aserciones no hacen.
+4. **Buscar aparte la clase que el mutante no ve:** aserciones que pasan por la razón
+   equivocada. El olor típico es una aserción que daría verdadera para CUALQUIER
+   entrada. La forma de probarlo es meter en esa posición un caso del signo opuesto
+   —un valor que DEBERÍA pasar— y ver si el test también lo "aprueba". Si aprueba
+   las dos cosas, no está midiendo lo que dice medir.
+
+Resultado real de aplicarlo a `sentry.test.ts` (2026-08-07): de 246 tests,
+**221 murieron con el mutante (correcto), 25 sobrevivieron** — 8 legítimos y 17 con
+defecto. Y la clase invisible al mutante sumó 58 más. Ver la deuda de la auditoría.
+
 ## Aprendizajes de proyectos hermanos (G-Quota)
 
 Reglas duras traídas de G-Quota — aplican a todo el trabajo en este repo:
@@ -206,8 +280,6 @@ Resumen rápido:
   tiene privilegios de management sobre el proyecto (es permiso de cuenta, no la password).
   Al resolverlo, correr `supabase gen types typescript --linked --schema public > src/types/database.types.ts`
   y confirmar diff nulo.
-- **Rotar la password de BD del proyecto (LAB):** quedó expuesta; pendiente de rotación en
-  Supabase (Dashboard → Database → reset password) y actualizar donde se use.
 - **RPC de cierre de turno con recompute server-side del esperado (endurecimiento):** hoy el
   cierre es un UPDATE cliente que confía en el esperado calculado en el navegador desde
   `salesSummary` (paridad con F1) y lo congela en `close_reconciliation`. Endurecimiento
@@ -250,6 +322,44 @@ Resumen rápido:
 - **BUG DE RAÍZ pendiente (observado, no exclusivo de G-Vento):** la caja debe ser POR SEDE
   y hay que **validar que no exista un turno abierto antes de abrir otro** (evitar dos
   turnos simultáneos). Revisar el flujo de apertura de caja con esta regla.
+- ⚠️ **`order_items.modifiers` (jsonb) está MUERTA — no la uses "porque está ahí".**
+  Existe en el esquema (`schema.sql:153`, `not null default '[]'`) y aparece en la lista
+  de columnas de `ORDER_WITH_RELATIONS` (`supabase-helpers.ts`), pero **cero lecturas y
+  cero escrituras** en toda la app: ningún componente la consulta ni la setea. Se creó
+  pensando en modificadores estructurados y **ese rol lo ocupó `extras`**, que sí tiene
+  tablas propias (`extras`, `product_extras`, `order_item_extras`), precio con snapshot y
+  descuento de inventario por insumo vinculado.
+  **La columna correcta para una observación de cocina es `order_items.notes` (text)**,
+  que está cableada de punta a punta: captura (POS y picker de Mesas), persistencia,
+  **comanda impresa** (`printer.ts`, indentada bajo su línea), recibo de venta, KDS (con
+  `⚠`), panel de mesa y tarjeta de delivery.
+  Meter texto libre en `modifiers` sería peor que en `notes`: jsonb sin forma ni
+  validación, y el filtro de PII lo colapsa a `[Filtrado:array(n)]` en Sentry (los arrays
+  bajo clave desconocida no se recorren — ver el bloque del allowlist), así que además
+  perderías el diagnóstico. Se anota porque es exactamente el tipo de columna que alguien
+  "descubre" a los seis meses y cree que hay que empezar a usar.
+- ⚠️ **Delivery: los botones "Llamar" y "Mapa" de la tarjeta son CÓDIGO INACTIVO.** No los
+  leas como funcionalidad existente al planificar sobre esa pantalla: están implementados
+  (`DeliveryPage.tsx`, bloque "Acciones de contacto") pero **nunca se renderizan**, porque
+  están condicionados a `order.customer_phone` y `order.delivery_address` y **la app no
+  escribe ninguna de las dos columnas en ningún lado**. Verificado contra el código, no
+  supuesto:
+  - `delivery_address` — cero escrituras. Solo lecturas en DeliveryPage.
+  - `customer_phone` — cero escrituras.
+  - `customer_name` — se escribe **únicamente en la venta a fiado** (`POSPage.tsx`
+    `handleConfirm` y `setOrderFiado`). Una venta de delivery de contado lo deja NULL, y
+    por eso la tarjeta muestra "Cliente sin nombre".
+  El POS marca el tipo "Delivery" con el botón que cicla `orderType` y **no pide dirección
+  ni teléfono en ningún momento** — no existe el paso de captura. Las columnas SÍ existen en
+  `orders` (ver `database.types.ts`), así que el trabajo pendiente es de captura, no de
+  esquema.
+  **NO borrar esos botones**: si el cliente confirma que quiere despachar domicilios desde
+  esta pantalla, se necesitan tal cual están. Decisión pendiente de confirmar con el cliente
+  (2026-08-07): *¿los domicilios se cargan al POS solo como venta —y entonces la pantalla de
+  Delivery está bien vacía— o esperan despachar desde ahí?* Si es lo segundo, capturar
+  dirección/teléfono al elegir "Delivery" es una FUNCIONALIDAD nueva, no un arreglo de UI, y
+  recién ahí tiene sentido rejerarquizar la tarjeta (orden propuesto: dirección > teléfono >
+  nombre; el repartidor necesita llegar y avisar).
 ### Testing — laboratorio (LAB) MONTADO
 - **✅ Laboratorio listo.** Existe la organización **LAB** (Supabase separado de
   producción) con **2 sedes**, los usuarios **owner.test** (rol owner) y
@@ -286,33 +396,52 @@ Resumen rápido:
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: **Bloque de seguridad RBAC** (sesión 2026-07-31/08-01, detalle completo
-  más abajo con el 🔒). SQL aplicado en la BD compartida + Edge Function `create-user` desplegada
-  + frontend promovido a main. Suite full **156 (155 passed + 1 skipped)**.
+Última fase completada: **Filtro de PII por allowlist en Sentry** (sesión 2026-08-05/06,
+  rama develop → promovida a main/PROD, release 344787b). Detalle de diseño en
+  "Filtros de privacidad: ALLOWLIST por clave" (arriba) y en el docblock de
+  `src/lib/sentry.ts`. Unit **261/261** · E2E full **160 passed + 1 skipped** · tsc 0 ·
+  eslint 0 · build verde.
 
-Fase previa: **Anulación de ventas del turno actual** (sesión 2026-07-16,
-  rama feature/anular-venta → mergeada a develop y **promovida a main/PROD**, release 25db982).
-  RPC atómica register_sale_void (6 guardas server-side, reversión de stock por espejo, borra
-  payments, marca anulada con rastro), permiso ventas.anular (owner por "*" + admin), índice
-  único de turno abierto por sede, exclusión de anuladas en Cartera y arqueo (por cancelled_at),
-  UI en historial (botón gateado + solo turno actual, diálogo de motivo, badge Anulada, sección
-  Anuladas bajo filtro de método). tests/anular-venta.spec.ts 17/17 + **suite full 143/143 verde**.
+**develop = main** (árbol idéntico; `main` solo tiene además el commit de merge del release).
+  Precondición de la nota de proceso CUMPLIDA: `pnpm test:e2e` full sobre develop ANTES de
+  promover.
 
 **PRODUCCIÓN (main, desplegado en Vercel) incluye:**
-  - **Bloque de seguridad RBAC completo** (esta sesión): corte de sesión al usuario desactivado con
-    mensaje, toggle de `is_active` oculto en la fila propia, y `useUsers` mandando `role_id` a la
-    Edge Function en UN solo paso. Este último es el que **activa** el fix de `role_id` que ya
-    estaba desplegado del lado de la función: hasta este release, crear usuario seguían siendo 2
-    pasos con el navegador asignando el rol.
-  - Anulación de ventas del turno actual
-  - Cartera fiado maestro-detalle por cliente
-  - Imágenes de producto completas (no recortadas)
-  - Previo ya en prod: arqueo multi-método, pago mixto, vale/ruletazo, fix compras no toca caja,
-    onboarding Salchimelo.
+  - **Sentry activo con el filtro de PII por allowlist** (esta sesión). Se cazó ANTES de que
+    hubiera fuga consumada: Sentry tenía 1 solo issue (un test directo) y CERO PII capturada.
+  - **Bloque de seguridad RBAC completo:** escalada por auto-edición de `profiles` cerrada
+    (trigger), `is_active` efectivo en las CUATRO funciones base, invariante
+    organización↔sede, y alta de usuarios ATÓMICA server-side (`create-user` asigna el
+    `role_id` con compensación por `deleteUser` si falla — cierra el caso "perfil sin rol").
+  - **Anulación de ventas** del turno actual (RPC atómica con 6 guardas server-side).
+  - **Cartera fiado** maestro-detalle por cliente.
+  - **Imágenes de producto** completas (no recortadas).
+  - **Arreglo de numeración (B+A):** reintento del UPDATE + aviso al cajero con botón
+    Reintentar + reporte a Sentry con `area: 'numeracion'`. Es MITIGACIÓN, no el arreglo de
+    fondo — ver la opción C en Deudas.
+  - Previo ya en prod: arqueo multi-método, pago mixto, vale/ruletazo, fix compras no toca
+    caja, onboarding Salchimelo.
 
-**develop = main** (sincronizados; el bloque de seguridad se promovió completo).
-  Precondición cumplida antes de promover, según la nota de proceso: `pnpm test:e2e` full sobre
-  develop → 155 passed + 1 skipped.
+## Infraestructura (fuera del repo, pero condiciona el trabajo)
+
+No vive en este repositorio y no se ve en el código, así que se anota acá: hay decisiones de
+desarrollo que dependen de esto.
+
+- **Servidor Ubuntu con Supabase self-hosted.** Cumple dos funciones: entorno de **staging**
+  y **destino de los backups** de producción.
+- **Ciclo nocturno en cron:** `backup de prod → restore sobre staging → lab-seed`.
+  - **Cada corrida PRUEBA que el backup es restaurable.** Ese es el punto del diseño, no un
+    efecto lateral: un backup que nunca se restauró no es un backup, es un archivo. Acá el
+    restore es parte del ciclo, así que un dump corrupto se descubre a la mañana siguiente y
+    no el día que haga falta de verdad.
+  - **El artefacto del dump es LO SAGRADO; el staging es DESECHABLE.** Si hay que elegir qué
+    proteger, es el dump. Staging se puede pisar entero sin pensarlo — de hecho se pisa todas
+    las noches. No guardar nada en staging que no se pueda regenerar.
+  - `lab-seed` corre al final: mantenerlo sincronizado con las migraciones de permisos (los
+    permisos por rol son POR ORG y el re-seed los pisa en LAB).
+- **Contraseña de BD del proyecto: ROTADA.** Cierra la deuda que estaba abierta desde que
+  quedó expuesta.
+- ⚠️ **Storage (imágenes de producto) NO entra en el ciclo de backup.** Ver Deudas.
 
 🔒 **Bloque de seguridad RBAC (sesión 2026-07-31) — SQL YA APLICADO Y RIGIENDO EN LAS 3 ORGS.**
   Auditoría disparada por un hallazgo de G-Mura (`is_active` no aplicado server-side). En G-Vento
@@ -457,10 +586,112 @@ Fase previa: **Anulación de ventas del turno actual** (sesión 2026-07-16,
   sincronizado con las migraciones de permisos o el re-seed los pisa en LAB.
 
 **Deudas vigentes (abiertas):**
+  - 🧹 **`eslint 0` ya no es cierto: 6 errores preexistentes** (constatado 2026-08-10).
+    Son AJENOS al trabajo de esa sesión: verificado stasheando los cambios, `eslint .` da
+    los mismos 12 problemas (6 errores + 6 warnings) con y sin ellos.
+    - `src/pages/KitchenPage.tsx:460` — `no-explicit-any`
+    - `tests/anular-venta.spec.ts:17` y `:150` — `no-unused-vars`
+    - `tests/arqueo.spec.ts:16` — `no-unused-vars`
+    - `tests/create-user.spec.ts:56` y `:66` — `no-explicit-any`
+    No se arreglaron (fuera de alcance). Queda anotado para que la próxima sesión no los
+    lea como regresión propia.
+  - ⏸️ **AUDITORÍA DEL FILTRO DE PII — DIAGNÓSTICO HECHO, SIN IMPLEMENTAR.**
+    (sesión 2026-08-07, PAUSADO por pedidos del cliente). Los cuatro hallazgos vienen
+    de la vuelta de G-Centro y están MEDIDOS contra el código real, no razonados. Nada
+    de esto es fuga consumada ni urgente: **no corresponde release de emergencia**.
+    Orden sugerido para retomar: 2b → 2a → 3 → 1 (el 1 va en el mismo commit que el
+    código para que la nota de divergencia quede coherente).
+    - **2b — `Date`/`Error`/`Map` salen como `{}`.** `typeof x === 'object'` es true
+      para todos y `Object.entries()` de un `Error` devuelve `[]` porque `message` y
+      `stack` son NO ENUMERABLES. No es fuga: es **mentira de diagnóstico**, misma
+      familia que el `hint: null` ya corregido. Pega donde más duele —
+      `TypeError: Failed to fetch` es el error más frecuente de esta app (el bar sin
+      internet). Un `PostgrestError` NO está afectado: es objeto plano y sus props
+      propias sobreviven (`code`/`details`/`hint` verificados).
+      **DECIDIDO:** emitir `[Filtrado:Date]`, `[Filtrado:Error]`, `[Filtrado:Map]`
+      (paridad con G-Centro) y, para `Error`, **preservar `name` + `message`, con el
+      `message` pasado por `scrubString`**. Eso nos separa de G-Centro en ese punto.
+      🔴 **PRIMERO auditar si la app interpola PII en `throw new Error` propios**
+      (`throw new Error(\`...${algo}\`)`): si lo hace, reconsiderar la preservación
+      del `message` — `scrubString` no detecta nombres propios.
+    - **2a — `RE_CODIGO` acepta cédulas, NIT y móviles.** Solo exige "sin espacios y
+      corto" (`^[A-Za-z0-9_.:/-]{1,48}$`), así que `'3001234567'`, `'JuanPerez'` y
+      `'juan.perez'` pasan verbatim bajo las 21 claves de forma `codigo`.
+      NO es la fuga de G-Centro: la nuestra ya valida cada hoja del array vía
+      `porForma`, así que `['cliente','Juan Perez']` (con espacio) SÍ se redacta.
+      **HOY INALCANZABLE:** ningún mutation del repo setea `mutationKey` (`App.tsx:42`
+      solo lo LEE) y ningún `queryKey` lleva texto libre — son slugs de tabla, UUID,
+      fechas, `page` y enums (verificado hook por hook). No urge.
+      **Endurecimiento decidido:** que `codigo` rechace corridas de **6+ dígitos**.
+      Deja pasar el corpus legítimo (`23505`, `409`, `PGRST116`,
+      `idx_orders_number_2026`) y bloquea cédula (8), NIT (9) y móvil (10). Es una
+      regla DISTINTA a la de G-Centro (constante de catálogo ≤64 sin espacios) porque
+      acá `error.code` numérico TIENE que pasar — es lo que se recuperó al invertir
+      el filtro.
+      Además: **un array en `tags` debe redactarse, no heredar la forma** (los tags de
+      Sentry son escalares; un array ahí ya está malformado).
+      Residuo ACEPTADO, no bug: `tags.sede = 'Juan Perez'` pasa — los tags llevan
+      nombres de negocio a propósito, y `etiqueta` ya rechaza corridas de 4+ dígitos.
+    - **3 — 75 de 246 tests con problema real.** Encontrado por MUTACIÓN (ver el
+      método arriba), no leyendo la suite.
+      - **Clase D (58) — la peor.** El bloque `«no sale dentro de un array»` mide el
+        COLAPSO del array, no la columna: `filas: [{…}]` sale `[Filtrado:array(1)]`
+        para CUALQUIER clave, así que la aserción `not.toContain(valor)` es verdadera
+        aunque la columna estuviera permitida (probado con `order_number`, que
+        debería viajar). **Una sola línea de código verificada 58 veces.** La posición
+        que sí discrimina es dentro de un array bajo clave PERMITIDA
+        (`qty: [{document:…}]`). Invisible al mutante — hay que buscarla aparte.
+      - **Clase A (15)** — el patrón INERTE replicado: los `«… viaja (decisión
+        deliberada)»` pasan con el filtro borrado. Es la misma forma del bug original
+        de `sentry.test.ts:134`; se mató una instancia y se crearon 15 del mismo molde
+        en el mismo commit. Arreglo: assertar el CONTRASTE en la misma aserción (la
+        clave permitida pasa Y el mismo valor bajo clave desconocida se redacta).
+      - **Clase B (1)** — `«el correlativo perdido llega diagnosticable y sin PII»`:
+        el nombre promete una verificación de ausencia de PII que las aserciones NO
+        hacen (son todas positivas).
+      - **Clase C (1)** — `«el stack trace pasa INTACTO — única excepción de
+        subárbol»`: afirma exclusividad y solo verifica identidad. Debe assertar, en
+        el mismo evento, que una rama hermana SÍ se redacta.
+      - **Los 8 sobrevivientes LEGÍTIMOS hay que MARCARLOS EN EL CÓDIGO** para que la
+        próxima auditoría no los "arregle": 3 de marcadores internos, 2 de robustez
+        (`no throw`), y los 3 anti-sobre-redacción (`envelope conserva lo que Sentry
+        necesita para agrupar`, `breadcrumb conserva ruta y código HTTP`, `conserva
+        UUID/ISO/#N`). Un test que existe para detectar redacción DE MÁS no puede
+        fallar contra un no-op: es inherente a su forma, no un defecto.
+    - **1 — reescribir el encabezado de `src/lib/sentry.ts`.** Hoy da una ORDEN
+      imperativa ("todo cambio obliga a revisar el otro EN LA MISMA SESIÓN") sobre un
+      flujo que ya no existe: los repos no se tocan entre sí, se sincronizan por
+      traspaso entre hilos. El archivo ya contiene esa regla Y su propia excepción al
+      lado, así que un lector nuevo concluye razonablemente que debe abrir G-Centro —
+      justo lo que no queremos. La divergencia se sigue declarando, pero como
+      INFORMACIÓN (qué está distinto hoy), no como instrucción.
+  - **La suposición viva de `scrubSobre`** (`src/lib/sentry.ts`, ya está en su docblock con la
+    instrucción exacta). En el modo SOBRE —el envelope del SDK— un STRING bajo clave desconocida
+    pasa solo por `scrubString`, o sea que un nombre propio saldría. Se sostiene porque los datos
+    de la app entran por `extra` (modo estricto) y `beforeBreadcrumb` ya borra `body` e `input`.
+    **Si alguien mete una fila de la BD en un breadcrumb o en un contexto del SDK, esta suposición
+    se cae:** rutear esa rama a `scrubEstricto` ANTES de hacerlo. Es deuda manejable justamente
+    porque está escrita — no la borres al "limpiar" el archivo.
+  - **`gcentro/src/lib/sentry.ts` sigue con la deny-list y por lo tanto sigue fugando.** Decisión
+    deliberada: se arregla en su propio hilo, no desde G-Vento. La divergencia está DECLARADA en
+    el encabezado de `src/lib/sentry.ts` (esa regla de duplicación existe para que las
+    divergencias no sean silenciosas, no para prohibirlas).
   - Regenerar `database.types.ts` con `supabase gen types` cuando se resuelva el acceso de
     management del CLI — hoy `register_sale_void` + columnas `cancelled_at/by/reason` están a mano
     (verificadas), como `register_sale_payment` y las de vale/arqueo.
-  - Rotar la password de BD del proyecto (quedó expuesta).
+  - **Abonos de fiado invisibles en el reporte Financiero (~$1.131.200 hoy).** El tab
+    Financiero se arma desde las vistas de ventas (`payments` de la orden), y un abono a una
+    venta a fiado vive en `debt_payments`, que no entra en ninguna de las 4 vistas de
+    `reports-views.sql`. Consecuencia: plata REALMENTE cobrada que no aparece en el reporte
+    del período en que entró. No es un error de cálculo, es una fuente de datos faltante —
+    el arqueo del turno sí los ve (el abono en efectivo genera su `cash_movement`), así que
+    el reporte y la caja NO cuadran entre sí y esa es la señal por la que se detectó.
+    Al arreglarlo, decidir explícitamente en qué fecha imputa el abono: la del abono (caja)
+    o la de la venta original (devengado). No son lo mismo y el cliente va a preguntar.
+  - **Storage (imágenes de producto) fuera del ciclo de backup.** El cron nocturno respalda
+    la BD; el bucket `restaurant-logos` y las imágenes de producto NO se respaldan. Un
+    restore deja la base íntegra con las imágenes rotas. Bajo impacto operativo (se vuelven
+    a subir), pero hay que saberlo ANTES de confiar en el restore como recuperación total.
   - **`orders.payment_status` tiene `default 'paid'`** (`fiado-clientes.sql:82`, agregada así para
     no romper las ventas existentes al introducir el fiado). Consecuencias vigentes:
     - Toda orden de **mesa abierta** nace con `payment_status='paid'` y `order_number` NULL. Por
