@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import {
-  Truck, Phone, MapPin, Clock, User, X, Check, ChevronRight,
+  Truck, MapPin, Clock, User, X, Check, ChevronRight,
   Pencil, Trash, RefreshCw, Settings, Package,
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
@@ -79,9 +79,6 @@ function formatClock(dateStr: string): string {
 function elapsedMinutes(dateStr: string): number {
   return Math.floor((Date.now() - new Date(dateStr).getTime()) / 60000)
 }
-
-const mapsLink = (address: string) =>
-  `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
 
 // ─── Assign courier modal ─────────────────────────────────────────
 
@@ -487,39 +484,9 @@ function DeliveryCard({
               <span style={{ fontSize: 12, color: '#64748b', lineHeight: 1.35 }}>{order.delivery_address}</span>
             </div>
           )}
-          {/* Acciones de contacto */}
-          {(order.customer_phone || order.delivery_address) && (
-            <div style={{ display: 'flex', gap: 6 }}>
-              {order.customer_phone && (
-                <a
-                  href={`tel:${order.customer_phone}`}
-                  style={{
-                    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
-                    padding: '7px 8px', border: '1px solid #bbf7d0', background: '#f0fdf4',
-                    borderRadius: 7, fontSize: 12, fontWeight: 600, color: '#065f46', textDecoration: 'none',
-                  }}
-                >
-                  <Phone size={12} /> {order.customer_phone}
-                </a>
-              )}
-              {order.delivery_address && (
-                <a
-                  href={mapsLink(order.delivery_address)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title="Abrir en mapas"
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
-                    padding: '7px 12px', border: '1px solid #bfdbfe', background: '#eff6ff',
-                    borderRadius: 7, fontSize: 12, fontWeight: 600, color: '#1e40af', textDecoration: 'none',
-                    flexShrink: 0,
-                  }}
-                >
-                  <MapPin size={12} /> Mapa
-                </a>
-              )}
-            </div>
-          )}
+          {/* Sin acciones de contacto: los domicilios llegan por WhatsApp y la
+              dirección/teléfono viven ahí, no en la orden (decidido con el cliente
+              2026-08-10). Ver la nota de Delivery en CLAUDE.md antes de reponerlas. */}
         </div>
 
         {/* Items */}
