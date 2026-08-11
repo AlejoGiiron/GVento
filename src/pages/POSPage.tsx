@@ -27,6 +27,10 @@ import type { ProductWithCategory, CartItem, DiscountType, DiscountKind, HeldOrd
 import type { Enums } from '@/types/database.types'
 
 type OrderType = 'dine_in' | 'takeaway' | 'delivery'
+
+// Tipo por defecto del POS: se aplica al montar Y al terminar cada venta.
+const DEFAULT_ORDER_TYPE: OrderType = 'takeaway'
+
 type PaymentMethodUI = 'efectivo' | 'tarjeta' | 'transferencia' | 'nequi' | 'fiado'
 
 const formatCOP = (n: number) =>
@@ -477,6 +481,7 @@ function CartPanel({
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div
+              data-testid="order-type-toggle"
               style={{
                 width: 36, height: 36, borderRadius: 10,
                 background: current.bg, color: current.fg,
@@ -491,7 +496,8 @@ function CartPanel({
               {current.icon}
             </div>
             <div>
-              <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', letterSpacing: -0.2 }}>
+              {/* testid: el texto solo ("Delivery") colisiona con el nav del sidebar. */}
+              <div data-testid="order-type-label" style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', letterSpacing: -0.2 }}>
                 {current.label}
               </div>
               <div style={{ fontSize: 11.5, color: '#64748b', fontFamily: 'monospace', marginTop: 1 }}>
@@ -1538,7 +1544,7 @@ function ResumeConflictDialog({ onKeep, onDiscardCurrent, onCancel }: {
 export function POSPage() {
   const [activeCat, setActiveCat] = useState<string | null>(null)
   const [query, setQuery] = useState('')
-  const [orderType, setOrderType] = useState<OrderType>('takeaway')
+  const [orderType, setOrderType] = useState<OrderType>(DEFAULT_ORDER_TYPE)
   const [checkout, setCheckout] = useState(false)
   const [showOpenShift, setShowOpenShift] = useState(false)
   const [notingIdx, setNotingIdx] = useState<number | null>(null)
@@ -1868,7 +1874,14 @@ export function POSPage() {
           iva={iva}
           orderType={orderType}
           onClose={() => setCheckout(false)}
-          onComplete={() => { setCheckout(false); clear() }}
+          // El tipo de venta vuelve al default tras CUALQUIER venta, no solo tras
+          // delivery. `orderType` es estado local de la página y `clear()` (del
+          // cartStore) no lo tocaba, así que quedaba pegado: la siguiente venta de
+          // mostrador se grababa como delivery y ensuciaba el desglose por canal
+          // del reporte Financiero. Un dato mal clasificado pesa más que el clic
+          // de más para quien hace varios domicilios seguidos (el selector cicla
+          // entre solo dos opciones, así que es exactamente un clic).
+          onComplete={() => { setCheckout(false); clear(); setOrderType(DEFAULT_ORDER_TYPE) }}
         />
       )}
     </div>
