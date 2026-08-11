@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import {
   UtensilsCrossed, Plus, Users, X, Check, Search,
   ChevronRight, Banknote, CreditCard, Building2, Smartphone,
-  Trash, Minus, Settings, Pencil,
+  Trash, Minus, Settings, Pencil, StickyNote,
   ReceiptText, RefreshCw, ChefHat, HandCoins, SplitSquareHorizontal,
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
@@ -27,7 +27,7 @@ import { OpenShiftModal } from '@/components/shift/OpenShiftModal'
 import { ItemConfigModal } from '@/components/pos/ItemConfigModal'
 import { PaymentSplitEditor } from '@/components/pos/PaymentSplitEditor'
 import { CustomerPicker } from '@/components/fiado/CustomerPicker'
-import { printComanda } from '@/lib/printer'
+import { printComanda, printSaleTicket } from '@/lib/printer'
 import { captureError } from '@/lib/sentry'
 import type { Enums } from '@/types/database.types'
 import type { ProductWithCategory, CartExtra } from '@/stores/cartStore'
@@ -333,6 +333,7 @@ function ProductPickerModal({
   const [query, setQuery] = useState('')
   const [activeCat, setActiveCat] = useState<string | null>(null)
   const [selection, setSelection] = useState<PickerItem[]>([])
+  const [notingIdx, setNotingIdx] = useState<number | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [configProduct, setConfigProduct] = useState<ProductWithCategory | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -371,6 +372,10 @@ function ProductPickerModal({
     setSelection((prev) => [...prev, { product, qty: 1, note: '', extras }])
     setConfigProduct(null)
   }
+
+  // Índice de la línea cuya observación se está editando (una a la vez).
+  const setNote = (idx: number, note: string) =>
+    setSelection((prev) => prev.map((x, i) => (i === idx ? { ...x, note } : x)))
 
   const setQty = (idx: number, qty: number) => {
     if (qty <= 0) {
@@ -519,27 +524,70 @@ function ProductPickerModal({
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
               {selection.map((x, idx) => (
                 <div key={idx} style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
+                  display: 'flex', flexDirection: 'column', gap: 4,
                   background: '#fff', border: '1px solid #e5e7eb',
                   borderRadius: 7, padding: '5px 8px',
                 }}>
-                  <span style={{ fontSize: 12, color: '#0f172a', fontWeight: 500 }}>
-                    {x.qty}× {x.product.name}
-                    {x.extras.length > 0 && (
-                      <span style={{ color: '#065f46' }}> · {x.extras.map((e) => `${e.name}×${e.qty}`).join(', ')}</span>
-                    )}
-                  </span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                    <button onClick={() => setQty(idx, x.qty - 1)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', display: 'grid', placeItems: 'center', padding: 2 }}>
-                      <Minus size={11} />
-                    </button>
-                    <button onClick={() => setQty(idx, x.qty + 1)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', display: 'grid', placeItems: 'center', padding: 2 }}>
-                      <Plus size={11} />
-                    </button>
-                    <button onClick={() => setSelection((p) => p.filter((_, i) => i !== idx))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', display: 'grid', placeItems: 'center', padding: 2 }}>
-                      <X size={11} />
-                    </button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 12, color: '#0f172a', fontWeight: 500 }}>
+                      {x.qty}× {x.product.name}
+                      {x.extras.length > 0 && (
+                        <span style={{ color: '#065f46' }}> · {x.extras.map((e) => `${e.name}×${e.qty}`).join(', ')}</span>
+                      )}
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                      {/* Observación para cocina (ej: "sin cebolla"). Va POR ÍTEM, no
+                          por orden: la comanda la imprime indentada bajo su línea, así
+                          que una nota por orden quedaría al pie y el cocinero no sabría
+                          a cuál plato aplica. El campo `note` de PickerItem ya viajaba
+                          a `order_items.notes` — lo que faltaba era la puerta. */}
+                      <button
+                        onClick={() => setNotingIdx(notingIdx === idx ? null : idx)}
+                        title="Observación para cocina"
+                        data-testid="picker-note-toggle"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: x.note ? '#854d0e' : '#64748b', display: 'grid', placeItems: 'center', padding: 2 }}
+                      >
+                        <StickyNote size={11} />
+                      </button>
+                      <button onClick={() => setQty(idx, x.qty - 1)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', display: 'grid', placeItems: 'center', padding: 2 }}>
+                        <Minus size={11} />
+                      </button>
+                      <button onClick={() => setQty(idx, x.qty + 1)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', display: 'grid', placeItems: 'center', padding: 2 }}>
+                        <Plus size={11} />
+                      </button>
+                      <button onClick={() => setSelection((p) => p.filter((_, i) => i !== idx))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', display: 'grid', placeItems: 'center', padding: 2 }}>
+                        <X size={11} />
+                      </button>
+                    </div>
                   </div>
+
+                  {notingIdx === idx ? (
+                    <input
+                      autoFocus
+                      data-testid="picker-note-input"
+                      value={x.note}
+                      onChange={(e) => setNote(idx, e.target.value)}
+                      onBlur={() => setNotingIdx(null)}
+                      onKeyDown={(e) => e.key === 'Enter' && setNotingIdx(null)}
+                      placeholder="Ej: sin cebolla"
+                      style={{
+                        width: '100%', minWidth: 160, border: '1.5px solid #10b981', outline: 'none',
+                        borderRadius: 6, padding: '4px 7px', fontSize: 11.5,
+                        fontFamily: 'Inter, sans-serif', boxSizing: 'border-box',
+                      }}
+                    />
+                  ) : x.note ? (
+                    <div
+                      data-testid="picker-note-chip"
+                      onClick={() => setNotingIdx(idx)}
+                      style={{
+                        fontSize: 11, color: '#854d0e', background: '#fef3c7',
+                        borderRadius: 5, padding: '2px 6px', cursor: 'pointer',
+                      }}
+                    >
+                      * {x.note}
+                    </div>
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -594,6 +642,7 @@ function TableCheckoutModal({
   const { profile } = useAuth()
   const { can } = usePermissions()
   const { refetchSales } = useCashShift()
+  const { restaurant } = useRestaurantConfig()
   const queryClient = useQueryClient()
   const [step, setStep] = useState<'method' | 'amount' | 'success'>('method')
   const [method, setMethod] = useState<PaymentMethodUI>('efectivo')
@@ -739,6 +788,35 @@ function TableCheckoutModal({
   }
 
   const methodLabel = ({ efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Transferencia', nequi: 'Nequi / QR', fiado: 'Fiado' } as Record<PaymentMethodUI, string>)[method]
+
+  // Recibo de la venta de mesa. Se arma desde la orden PERSISTIDA (no del carrito,
+  // que en Mesas no existe) — por eso sirve printSaleTicket y no el componente
+  // PrintTicket del POS, que lee del cartStore.
+  const handlePrintTicket = () => {
+    printSaleTicket({
+      restaurantName: restaurant?.name,
+      restaurantAddress: restaurant?.address,
+      orderNumber,
+      orderId: order.id,
+      type: order.type,
+      // En pago dividido no hay UN método: se omite la línea en vez de mentir con
+      // el primero. El desglose por método vive en el Historial.
+      method: split || isFiado ? null : methodMap[method as Exclude<PaymentMethodUI, 'fiado'>],
+      createdAt: order.created_at,
+      items: order.order_items.map((i) => ({
+        qty: i.qty,
+        name: i.products?.name ?? '—',
+        unitPrice: i.unit_price,
+        notes: i.notes,
+        extras: i.order_item_extras.map((e) => ({
+          name: e.extras?.name ?? 'Extra',
+          qty: e.qty,
+          unitPrice: e.unit_price,
+        })),
+      })),
+      total,
+    })
+  }
 
   // En paso success la mesa ya está cobrada: overlay click = onComplete (limpia estado)
   const overlayClick = step === 'success' ? onComplete : onClose
@@ -928,6 +1006,7 @@ function TableCheckoutModal({
               <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5 }}>Efectivo recibido</div>
               <input
                 autoFocus
+                data-testid="checkout-received"
                 value={received ? formatCOP(receivedNum) : ''}
                 onChange={(e) => setReceived(e.target.value)}
                 placeholder={formatCOP(total)}
@@ -1015,12 +1094,29 @@ function TableCheckoutModal({
                 </button>
               </div>
             )}
-            <button
-              onClick={onComplete}
-              style={{ padding: '11px 28px', border: 'none', background: '#10b981', borderRadius: 9, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#fff', boxShadow: '0 6px 16px rgba(16,185,129,.35)' }}
-            >
-              Listo
-            </button>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+              {/* Recibo de venta: el POS ya lo ofrecía y Mesas no. MANUAL (botón),
+                  igual que el POS — auto-imprimir gasta papel cuando el cliente no
+                  lo pide. Usa printSaleTicket, la misma función que la reimpresión
+                  del Historial, así el ticket sale byte-idéntico al reimpreso. */}
+              <button
+                onClick={handlePrintTicket}
+                data-testid="table-print-ticket"
+                style={{
+                  padding: '11px 20px', border: '1.5px solid #e5e7eb', background: '#fff',
+                  borderRadius: 9, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#334155',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                }}
+              >
+                <ReceiptText size={15} /> Imprimir
+              </button>
+              <button
+                onClick={onComplete}
+                style={{ padding: '11px 28px', border: 'none', background: '#10b981', borderRadius: 9, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#fff', boxShadow: '0 6px 16px rgba(16,185,129,.35)' }}
+              >
+                Listo
+              </button>
+            </div>
           </div>
         )}
       </div>

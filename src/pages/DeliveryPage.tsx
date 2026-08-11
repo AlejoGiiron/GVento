@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import {
-  Truck, Phone, MapPin, Clock, User, X, Check, ChevronRight,
+  Truck, MapPin, Clock, User, X, Check, ChevronRight,
   Pencil, Trash, RefreshCw, Settings, Package,
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { useAuth } from '@/hooks/useAuth'
 import { usePermissions } from '@/hooks/usePermissions'
+import { useScrollOverflow } from '@/hooks/useScrollOverflow'
 import {
   useDelivery,
   getDeliveryColumn,
@@ -78,9 +79,6 @@ function formatClock(dateStr: string): string {
 function elapsedMinutes(dateStr: string): number {
   return Math.floor((Date.now() - new Date(dateStr).getTime()) / 60000)
 }
-
-const mapsLink = (address: string) =>
-  `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
 
 // ─── Assign courier modal ─────────────────────────────────────────
 
@@ -409,11 +407,13 @@ function DeliveryCard({
     delivered:  null,
   }
 
-  const nextBg: Record<DeliveryColumn, string> = {
-    new:        '#f97316',
-    in_transit: '#10b981',
-    delivered:  '#10b981',
-  }
+  // El CTA de avanzar es SIEMPRE el verde del design system (#10b981), en las dos
+  // columnas. Antes el de "Nuevos" era naranja porque tomaba el color de la columna
+  // DESTINO ("En camino"): esa lógica no es inferible mirando la pantalla, estaba
+  // aplicada inconsistente (solo el verde llevaba shadow de CTA) y producía una
+  // barra naranja saturada al pie de cada tarjeta que se leía como elemento roto,
+  // no como botón. El naranja queda reservado a ESTADO: punto de columna, header
+  // y badge de urgencia.
 
   return (
     <div style={{
@@ -484,39 +484,9 @@ function DeliveryCard({
               <span style={{ fontSize: 12, color: '#64748b', lineHeight: 1.35 }}>{order.delivery_address}</span>
             </div>
           )}
-          {/* Acciones de contacto */}
-          {(order.customer_phone || order.delivery_address) && (
-            <div style={{ display: 'flex', gap: 6 }}>
-              {order.customer_phone && (
-                <a
-                  href={`tel:${order.customer_phone}`}
-                  style={{
-                    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
-                    padding: '7px 8px', border: '1px solid #bbf7d0', background: '#f0fdf4',
-                    borderRadius: 7, fontSize: 12, fontWeight: 600, color: '#065f46', textDecoration: 'none',
-                  }}
-                >
-                  <Phone size={12} /> {order.customer_phone}
-                </a>
-              )}
-              {order.delivery_address && (
-                <a
-                  href={mapsLink(order.delivery_address)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title="Abrir en mapas"
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
-                    padding: '7px 12px', border: '1px solid #bfdbfe', background: '#eff6ff',
-                    borderRadius: 7, fontSize: 12, fontWeight: 600, color: '#1e40af', textDecoration: 'none',
-                    flexShrink: 0,
-                  }}
-                >
-                  <MapPin size={12} /> Mapa
-                </a>
-              )}
-            </div>
-          )}
+          {/* Sin acciones de contacto: los domicilios llegan por WhatsApp y la
+              dirección/teléfono viven ahí, no en la orden (decidido con el cliente
+              2026-08-10). Ver la nota de Delivery en CLAUDE.md antes de reponerlas. */}
         </div>
 
         {/* Items */}
@@ -596,12 +566,12 @@ function DeliveryCard({
                 style={{
                   width: '100%', padding: '10px',
                   border: 'none',
-                  background: nextBg[col],
+                  background: '#10b981',
                   borderRadius: 8,
                   cursor: 'pointer',
                   fontSize: 12.5, fontWeight: 600, color: '#fff',
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                  boxShadow: col === 'in_transit' ? '0 4px 12px rgba(16,185,129,.3)' : 'none',
+                  boxShadow: '0 4px 12px rgba(16,185,129,.35)',
                 }}
               >
                 {nextLabel[col]} <ChevronRight size={13} />
@@ -632,6 +602,11 @@ function KanbanColumn({
   isAdmin: boolean
 }) {
   const cfg = COLUMN_CONFIG[column]
+
+  // Máscara de scroll: la columna SIEMPRE tuvo overflowY auto y siempre scrolleó,
+  // pero sin ninguna señal de que hubiera más abajo, el corte de la última tarjeta
+  // se leía como desbordamiento roto.
+  const { ref: scrollRef, hasMore } = useScrollOverflow<HTMLDivElement>('y', orders)
 
   return (
     <div style={{
@@ -673,26 +648,54 @@ function KanbanColumn({
         )}
       </div>
 
-      {/* Cards (scroll interno) */}
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {orders.length === 0 ? (
-          <div style={{ padding: '24px 12px', textAlign: 'center', color: '#94a3b8' }}>
-            <div style={{ fontSize: 22, marginBottom: 6, opacity: 0.4 }}>
-              {column === 'delivered' ? '✓' : '—'}
+      {/* Cards (scroll interno) + máscara de continuación al pie */}
+      <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <div
+          ref={scrollRef}
+          style={{
+            flex: 1, minHeight: 0, overflowY: 'auto',
+            // El padding inferior extra le da respiro a la última tarjeta: sin él
+            // toca el borde de la columna y el corte parece un destrozo de layout.
+            padding: '10px 10px 22px',
+            display: 'flex', flexDirection: 'column', gap: 10,
+            // Columna vacía: el estado vacío se centra en el alto disponible. Las 3
+            // columnas comparten altura A PROPÓSITO (si crecieran con su contenido
+            // bailarían con cada pedido nuevo); lo que se leía como error de layout
+            // no era el alto sino el vacío pegado arriba con 700px de nada debajo.
+            justifyContent: orders.length === 0 ? 'center' : 'flex-start',
+          }}
+        >
+          {orders.length === 0 ? (
+            <div style={{ padding: '24px 12px', textAlign: 'center', color: '#94a3b8' }}>
+              <div style={{ fontSize: 22, marginBottom: 6, opacity: 0.4 }}>
+                {column === 'delivered' ? '✓' : '—'}
+              </div>
+              <div style={{ fontSize: 12 }}>Sin pedidos</div>
             </div>
-            <div style={{ fontSize: 12 }}>Sin pedidos</div>
-          </div>
-        ) : (
-          orders.map((order) => (
-            <DeliveryCard
-              key={order.id}
-              order={order}
-              onAssign={() => onAssign(order)}
-              onAdvance={() => onAdvance(order)}
-              onCancel={() => onCancel(order)}
-              isAdmin={isAdmin}
-            />
-          ))
+          ) : (
+            orders.map((order) => (
+              <DeliveryCard
+                key={order.id}
+                order={order}
+                onAssign={() => onAssign(order)}
+                onAdvance={() => onAdvance(order)}
+                onCancel={() => onCancel(order)}
+                isAdmin={isAdmin}
+              />
+            ))
+          )}
+        </div>
+        {hasMore && (
+          <div
+            aria-hidden
+            style={{
+              position: 'absolute', left: 0, right: 0, bottom: 0, height: 32,
+              // Degradado del PROPIO fondo de la columna: la tarjeta cortada se
+              // desvanece en vez de terminar en un tajo recto.
+              background: 'linear-gradient(to top, #f8fafc 15%, rgba(248,250,252,0))',
+              pointerEvents: 'none',
+            }}
+          />
         )}
       </div>
     </div>

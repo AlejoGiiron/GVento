@@ -23,10 +23,15 @@ import type { SalePaymentPart } from '@/lib/supabase-helpers'
 import { captureError } from '@/lib/sentry'
 import { CustomerPicker } from '@/components/fiado/CustomerPicker'
 import { cashQuickAmounts } from '@/lib/cashRounding'
+import { stockStatus, esAlertaDeStock } from '@/lib/stockStatus'
 import type { ProductWithCategory, CartItem, DiscountType, DiscountKind, HeldOrder } from '@/stores/cartStore'
 import type { Enums } from '@/types/database.types'
 
 type OrderType = 'dine_in' | 'takeaway' | 'delivery'
+
+// Tipo por defecto del POS: se aplica al montar Y al terminar cada venta.
+const DEFAULT_ORDER_TYPE: OrderType = 'takeaway'
+
 type PaymentMethodUI = 'efectivo' | 'tarjeta' | 'transferencia' | 'nequi' | 'fiado'
 
 const formatCOP = (n: number) =>
@@ -214,11 +219,26 @@ function ProductImage({ product, color = '#10b981' }: { product: ProductWithCate
 function ProductCard({ product, onAdd }: { product: ProductWithCategory; onAdd: () => void }) {
   const color = product.categories?.color ?? '#10b981'
 
-  // Indicador discreto de stock para productos simples con inventario en ≤ 0.
-  // NO bloquea la venta (stock negativo permitido); solo señala reponer.
+  // Indicador discreto de stock. NO bloquea la venta (el stock negativo está
+  // permitido: un bar vende aunque el conteo diga 0); solo avisa.
+  //
+  // La condición vivía acá incrustada y solo cubría "≤ 0" — el POS no conocía
+  // `min_stock`, así que "stock bajo" no existía. Ahora sale de la MISMA regla
+  // que usa Inventario (`stockStatus`), que es lo que impide que las dos
+  // pantallas contesten distinto sobre el mismo producto.
+  //
+  // Ojo con la historia del nombre: la variable se llamaba `lowStock` y NO
+  // significaba stock bajo — significaba sin stock. Hoy `low` es un estado real
+  // y distinto, así que ese nombre habría sido activamente engañoso.
   const stockQty = product.stock_qty ?? 0
-  const lowStock = product.stock_tracking && product.kind === 'simple' && stockQty <= 0
-  const stockLabel = stockQty < 0 ? 'Reponer' : 'Sin stock'
+  const estadoStock = stockStatus(product)
+  const alertaStock = esAlertaDeStock(estadoStock)
+  const STOCK_BADGE: Record<string, { bg: string; label: string }> = {
+    negative: { bg: '#dc2626',              label: 'Reponer' },
+    out:      { bg: 'rgba(15,23,42,.72)',   label: 'Sin stock' },
+    low:      { bg: '#d97706',              label: 'Stock bajo' },
+  }
+  const badge = STOCK_BADGE[estadoStock]
 
   return (
     <button
@@ -243,18 +263,20 @@ function ProductCard({ product, onAdd }: { product: ProductWithCategory; onAdd: 
       }}
     >
       <ProductImage product={product} color={color} />
-      {lowStock && (
+      {alertaStock && badge && (
         <span
           data-testid="pos-stock-indicator"
+          data-stock-status={estadoStock}
+          title={`Stock: ${stockQty}${product.min_stock > 0 ? ` · mínimo ${product.min_stock}` : ''}`}
           style={{
             position: 'absolute', top: 8, right: 8,
             display: 'inline-flex', alignItems: 'center', gap: 4,
             padding: '2px 8px', borderRadius: 8,
-            background: stockQty < 0 ? '#dc2626' : 'rgba(15,23,42,.72)',
+            background: badge.bg,
             color: '#fff', fontSize: 10.5, fontWeight: 700,
           }}
         >
-          <AlertTriangle size={10} /> {stockLabel}
+          <AlertTriangle size={10} /> {badge.label}
         </span>
       )}
       <div style={{ padding: '12px 14px 14px' }}>
@@ -477,6 +499,7 @@ function CartPanel({
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div
+              data-testid="order-type-toggle"
               style={{
                 width: 36, height: 36, borderRadius: 10,
                 background: current.bg, color: current.fg,
@@ -491,7 +514,8 @@ function CartPanel({
               {current.icon}
             </div>
             <div>
-              <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', letterSpacing: -0.2 }}>
+              {/* testid: el texto solo ("Delivery") colisiona con el nav del sidebar. */}
+              <div data-testid="order-type-label" style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', letterSpacing: -0.2 }}>
                 {current.label}
               </div>
               <div style={{ fontSize: 11.5, color: '#64748b', fontFamily: 'monospace', marginTop: 1 }}>
@@ -1538,7 +1562,7 @@ function ResumeConflictDialog({ onKeep, onDiscardCurrent, onCancel }: {
 export function POSPage() {
   const [activeCat, setActiveCat] = useState<string | null>(null)
   const [query, setQuery] = useState('')
-  const [orderType, setOrderType] = useState<OrderType>('takeaway')
+  const [orderType, setOrderType] = useState<OrderType>(DEFAULT_ORDER_TYPE)
   const [checkout, setCheckout] = useState(false)
   const [showOpenShift, setShowOpenShift] = useState(false)
   const [notingIdx, setNotingIdx] = useState<number | null>(null)
@@ -1868,7 +1892,14 @@ export function POSPage() {
           iva={iva}
           orderType={orderType}
           onClose={() => setCheckout(false)}
-          onComplete={() => { setCheckout(false); clear() }}
+          // El tipo de venta vuelve al default tras CUALQUIER venta, no solo tras
+          // delivery. `orderType` es estado local de la página y `clear()` (del
+          // cartStore) no lo tocaba, así que quedaba pegado: la siguiente venta de
+          // mostrador se grababa como delivery y ensuciaba el desglose por canal
+          // del reporte Financiero. Un dato mal clasificado pesa más que el clic
+          // de más para quien hace varios domicilios seguidos (el selector cicla
+          // entre solo dos opciones, así que es exactamente un clic).
+          onComplete={() => { setCheckout(false); clear(); setOrderType(DEFAULT_ORDER_TYPE) }}
         />
       )}
     </div>

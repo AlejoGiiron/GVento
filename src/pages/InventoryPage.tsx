@@ -8,18 +8,14 @@ import { useStockMovements } from '@/hooks/useStockMovements'
 import { StockAdjustModal } from '@/components/inventory/StockAdjustModal'
 import type { ProductWithCategory } from '@/stores/cartStore'
 import type { StockMovementType } from '@/lib/supabase-helpers'
+// Regla ÚNICA de estado de inventario, compartida con el POS (antes duplicada).
+import { stockStatus, type StockStatus } from '@/lib/stockStatus'
 
 const PAGE_SIZE = 25
 
-type StockStatus = 'out' | 'negative' | 'low' | 'ok'
-
-function stockStatus(p: ProductWithCategory): StockStatus {
-  const s = p.stock_qty ?? 0
-  if (s < 0) return 'negative'
-  if (s === 0) return 'out'
-  if (p.min_stock > 0 && s <= p.min_stock) return 'low'
-  return 'ok'
-}
+// Esta pantalla pre-filtra a simple + stock_tracking, así que nunca ve
+// 'untracked'; el tipo local acota los estados que sí puede mostrar.
+type NivelStatus = Exclude<StockStatus, 'untracked'>
 
 const fmtDateTime = (iso: string) =>
   new Intl.DateTimeFormat('es-CO', {
@@ -33,6 +29,9 @@ function StatusBadge({ status, stock }: { status: StockStatus; stock: number }) 
     out: { bg: '#fef2f2', fg: '#b91c1c', label: 'Sin stock' },
     low: { bg: '#fffbeb', fg: '#92400e', label: 'Stock bajo' },
     ok: { bg: '#ecfdf5', fg: '#065f46', label: 'Disponible' },
+    // La tabla pre-filtra a simple+tracking, así que este caso no se alcanza;
+    // se cubre igual para no depender de un cast sobre el filtro.
+    untracked: { bg: '#f8fafc', fg: '#94a3b8', label: 'Sin inventario' },
   }[status]
   return (
     <span
@@ -60,7 +59,7 @@ function KpiCard({ icon, label, value, tone }: { icon: React.ReactNode; label: s
 // ─── Niveles tab ─────────────────────────────────────────────────
 function LevelsTab({ products, onAdjust }: { products: ProductWithCategory[]; onAdjust: (id: string) => void }) {
   const [query, setQuery] = useState('')
-  const [filter, setFilter] = useState<'all' | StockStatus>('all')
+  const [filter, setFilter] = useState<'all' | NivelStatus>('all')
 
   const tracked = useMemo(
     () => products.filter(p => p.kind === 'simple' && p.stock_tracking),
@@ -87,7 +86,7 @@ function LevelsTab({ products, onAdjust }: { products: ProductWithCategory[]; on
     })
   }, [tracked, query, filter])
 
-  const FILTERS: { value: 'all' | StockStatus; label: string }[] = [
+  const FILTERS: { value: 'all' | NivelStatus; label: string }[] = [
     { value: 'all', label: 'Todos' },
     { value: 'negative', label: 'Negativo' },
     { value: 'out', label: 'Sin stock' },
