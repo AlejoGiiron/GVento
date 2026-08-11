@@ -396,18 +396,46 @@ Resumen rápido:
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: **Filtro de PII por allowlist en Sentry** (sesión 2026-08-05/06,
-  rama develop → promovida a main/PROD, release 344787b). Detalle de diseño en
-  "Filtros de privacidad: ALLOWLIST por clave" (arriba) y en el docblock de
-  `src/lib/sentry.ts`. Unit **261/261** · E2E full **160 passed + 1 skipped** · tsc 0 ·
-  eslint 0 · build verde.
+Última fase completada: **Ajustes pedidos por el cliente + arreglos visuales de Delivery**
+  (sesión 2026-08-10, rama develop, 7 commits). Unit **261/261** · E2E full
+  **177 passed + 1 skipped** · tsc 0 · build verde ·
+  ⚠️ **eslint con 6 errores PREEXISTENTES** (ajenos a esta sesión, anotados con archivo y
+  línea en Deudas vigentes — la afirmación "eslint 0" que traía este bloque ya no era cierta).
 
-**develop = main** (árbol idéntico; `main` solo tiene además el commit de merge del release).
-  Precondición de la nota de proceso CUMPLIDA: `pnpm test:e2e` full sobre develop ANTES de
-  promover.
+**Qué entró en esta sesión** (E2E pasó de 160 a 177: 17 tests nuevos, uno por ajuste):
+  - **Categorías en Productos:** los tabs no se podían desplazar. El strip ya tenía
+    `overflowX: auto`; lo que faltaba era `flex:1` + `minWidth:0` — es flex item del toolbar,
+    no hijo en bloque como en el POS, así que crecía con su contenido (medido: `clientWidth`
+    3255 en un viewport de 900) en vez de acotarse. + máscara de continuación.
+  - **Recibo al cerrar mesa:** Mesas no ofrecía ticket (solo `printComanda`). Usa
+    `printSaleTicket`, la misma función que la reimpresión del Historial ⇒ ticket
+    byte-idéntico. Con BOTÓN, como el POS (auto-imprimir gasta papel si nadie lo pide).
+  - **Reset del tipo de venta** tras CUALQUIER venta. El motivo es de datos, no de UX: un
+    `orderType` pegado grababa la siguiente venta de mostrador como delivery y ensuciaba el
+    desglose por canal del reporte Financiero.
+  - **Stock bajo en el POS** con `src/lib/stockStatus.ts` como regla ÚNICA. La regla estaba
+    duplicada Y divergente (el POS ignoraba `min_stock`; Inventario ignoraba
+    `kind`/`stock_tracking`). Un test compara ambas pantallas sobre el mismo producto para
+    que no vuelvan a bifurcarse.
+  - **Observaciones de cocina POR ÍTEM** en el picker de Mesas. `order_items.notes` ya estaba
+    cableada de punta a punta (incluida la comanda impresa); el único hueco era que
+    `PickerItem.note` existía y se enviaba, pero no había input que lo escribiera.
+  - **Delivery, 3 arreglos visuales:** el CTA de "Nuevos" era naranja porque tomaba el color
+    de la columna DESTINO (no inferible, y aplicado inconsistente) → emerald del design
+    system en ambas columnas; máscara de scroll en las columnas (siempre scrollearon, faltaba
+    la señal); estado vacío centrado. Hook compartido `useScrollOverflow`.
+
+⏸️ **El trabajo del filtro de PII de Sentry sigue PAUSADO** — se pausó por estos pedidos del
+  cliente y NO se retomó en esta sesión. El diagnóstico está COMPLETO y medido en Deudas
+  vigentes (hallazgos 1, 2a, 2b y 3), con el orden sugerido para retomar: 2b → 2a → 3 → 1.
+  Nada de eso es fuga consumada: no corresponde release de emergencia.
+
+**develop ≠ main desde esta sesión:** `main` sigue en el release del filtro de PII (344787b);
+  develop tiene además estos 7 commits. Antes de promover, correr `pnpm test:e2e` full sobre
+  develop (nota de proceso) — en esta sesión ya se corrió y dio 177 + 1 skipped.
 
 **PRODUCCIÓN (main, desplegado en Vercel) incluye:**
-  - **Sentry activo con el filtro de PII por allowlist** (esta sesión). Se cazó ANTES de que
+  - **Sentry activo con el filtro de PII por allowlist** (release 344787b). Se cazó ANTES de que
     hubiera fuga consumada: Sentry tenía 1 solo issue (un test directo) y CERO PII capturada.
   - **Bloque de seguridad RBAC completo:** escalada por auto-edición de `profiles` cerrada
     (trigger), `is_active` efectivo en las CUATRO funciones base, invariante
