@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import {
   UtensilsCrossed, Plus, Users, X, Check, Search,
   ChevronRight, Banknote, CreditCard, Building2, Smartphone,
-  Trash, Minus, Settings, Pencil,
+  Trash, Minus, Settings, Pencil, StickyNote,
   ReceiptText, RefreshCw, ChefHat, HandCoins, SplitSquareHorizontal,
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
@@ -333,6 +333,7 @@ function ProductPickerModal({
   const [query, setQuery] = useState('')
   const [activeCat, setActiveCat] = useState<string | null>(null)
   const [selection, setSelection] = useState<PickerItem[]>([])
+  const [notingIdx, setNotingIdx] = useState<number | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [configProduct, setConfigProduct] = useState<ProductWithCategory | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -371,6 +372,10 @@ function ProductPickerModal({
     setSelection((prev) => [...prev, { product, qty: 1, note: '', extras }])
     setConfigProduct(null)
   }
+
+  // Índice de la línea cuya observación se está editando (una a la vez).
+  const setNote = (idx: number, note: string) =>
+    setSelection((prev) => prev.map((x, i) => (i === idx ? { ...x, note } : x)))
 
   const setQty = (idx: number, qty: number) => {
     if (qty <= 0) {
@@ -519,27 +524,70 @@ function ProductPickerModal({
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
               {selection.map((x, idx) => (
                 <div key={idx} style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
+                  display: 'flex', flexDirection: 'column', gap: 4,
                   background: '#fff', border: '1px solid #e5e7eb',
                   borderRadius: 7, padding: '5px 8px',
                 }}>
-                  <span style={{ fontSize: 12, color: '#0f172a', fontWeight: 500 }}>
-                    {x.qty}× {x.product.name}
-                    {x.extras.length > 0 && (
-                      <span style={{ color: '#065f46' }}> · {x.extras.map((e) => `${e.name}×${e.qty}`).join(', ')}</span>
-                    )}
-                  </span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                    <button onClick={() => setQty(idx, x.qty - 1)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', display: 'grid', placeItems: 'center', padding: 2 }}>
-                      <Minus size={11} />
-                    </button>
-                    <button onClick={() => setQty(idx, x.qty + 1)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', display: 'grid', placeItems: 'center', padding: 2 }}>
-                      <Plus size={11} />
-                    </button>
-                    <button onClick={() => setSelection((p) => p.filter((_, i) => i !== idx))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', display: 'grid', placeItems: 'center', padding: 2 }}>
-                      <X size={11} />
-                    </button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 12, color: '#0f172a', fontWeight: 500 }}>
+                      {x.qty}× {x.product.name}
+                      {x.extras.length > 0 && (
+                        <span style={{ color: '#065f46' }}> · {x.extras.map((e) => `${e.name}×${e.qty}`).join(', ')}</span>
+                      )}
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                      {/* Observación para cocina (ej: "sin cebolla"). Va POR ÍTEM, no
+                          por orden: la comanda la imprime indentada bajo su línea, así
+                          que una nota por orden quedaría al pie y el cocinero no sabría
+                          a cuál plato aplica. El campo `note` de PickerItem ya viajaba
+                          a `order_items.notes` — lo que faltaba era la puerta. */}
+                      <button
+                        onClick={() => setNotingIdx(notingIdx === idx ? null : idx)}
+                        title="Observación para cocina"
+                        data-testid="picker-note-toggle"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: x.note ? '#854d0e' : '#64748b', display: 'grid', placeItems: 'center', padding: 2 }}
+                      >
+                        <StickyNote size={11} />
+                      </button>
+                      <button onClick={() => setQty(idx, x.qty - 1)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', display: 'grid', placeItems: 'center', padding: 2 }}>
+                        <Minus size={11} />
+                      </button>
+                      <button onClick={() => setQty(idx, x.qty + 1)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', display: 'grid', placeItems: 'center', padding: 2 }}>
+                        <Plus size={11} />
+                      </button>
+                      <button onClick={() => setSelection((p) => p.filter((_, i) => i !== idx))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', display: 'grid', placeItems: 'center', padding: 2 }}>
+                        <X size={11} />
+                      </button>
+                    </div>
                   </div>
+
+                  {notingIdx === idx ? (
+                    <input
+                      autoFocus
+                      data-testid="picker-note-input"
+                      value={x.note}
+                      onChange={(e) => setNote(idx, e.target.value)}
+                      onBlur={() => setNotingIdx(null)}
+                      onKeyDown={(e) => e.key === 'Enter' && setNotingIdx(null)}
+                      placeholder="Ej: sin cebolla"
+                      style={{
+                        width: '100%', minWidth: 160, border: '1.5px solid #10b981', outline: 'none',
+                        borderRadius: 6, padding: '4px 7px', fontSize: 11.5,
+                        fontFamily: 'Inter, sans-serif', boxSizing: 'border-box',
+                      }}
+                    />
+                  ) : x.note ? (
+                    <div
+                      data-testid="picker-note-chip"
+                      onClick={() => setNotingIdx(idx)}
+                      style={{
+                        fontSize: 11, color: '#854d0e', background: '#fef3c7',
+                        borderRadius: 5, padding: '2px 6px', cursor: 'pointer',
+                      }}
+                    >
+                      * {x.note}
+                    </div>
+                  ) : null}
                 </div>
               ))}
             </div>
