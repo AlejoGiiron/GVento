@@ -71,6 +71,13 @@ const anon = () =>
 let owner: SupabaseClient
 let orgId = ''
 let orgNombre = ''
+// Baseline del estado de suscripción al empezar. NO se asume 'active' + null:
+// LAB es el tenant de prueba de G-Centro, así que estos valores CAMBIAN de
+// forma legítima cada vez que alguien ejercita la Edge Function. Los casos de
+// abajo comparan contra este snapshot en vez de contra un valor fijo — un test
+// que exija "nadie escribió nunca" se rompe con el uso normal del laboratorio.
+let baseStatus = ''
+let baseUpdatedAt: string | null = null
 
 // 42501 = insufficient_privilege. Se assertea el CÓDIGO y no el texto: es
 // estable entre versiones y no depende del idioma del servidor. Un
@@ -85,10 +92,15 @@ test.beforeAll(async () => {
 
   // La RLS "organizations: ver la propia" solo deja ver la del propio usuario,
   // así que esto ya es la org de LAB.
-  const { data, error: e2 } = await owner.from('organizations').select('id, name').single()
+  const { data, error: e2 } = await owner
+    .from('organizations')
+    .select('id, name, subscription_status, subscription_updated_at')
+    .single()
   if (e2) throw e2
   orgId = data.id
   orgNombre = data.name
+  baseStatus = data.subscription_status
+  baseUpdatedAt = data.subscription_updated_at
 })
 
 test.afterAll(async () => {
@@ -99,7 +111,15 @@ test.afterAll(async () => {
   }
 })
 
-test('las 3 columnas existen y la organización nace en active', async () => {
+// Los 5 estados del CHECK de organization-subscription.sql. Si se agrega uno,
+// se toca acá y en la Edge Function: los tres lados van juntos.
+const ESTADOS = ['active', 'expiring', 'grace', 'restricted', 'suspended']
+
+test('las 3 columnas existen y el estado es uno del enum', async () => {
+  // Canario de "aplicaste la migración". NO assertea 'active' ni updated_at
+  // null: LAB es el tenant de prueba de G-Centro y esos valores cambian de
+  // forma legítima. Lo que sí es invariante es que la columna exista y que su
+  // contenido esté dentro del CHECK.
   const { data, error } = await owner
     .from('organizations')
     .select('subscription_status, subscription_message, subscription_updated_at')
@@ -107,9 +127,7 @@ test('las 3 columnas existen y la organización nace en active', async () => {
     .single()
 
   expect(error).toBeNull()
-  expect(data!.subscription_status).toBe('active')
-  // Nadie escribió todavía: G-Centro no corrió contra el lab.
-  expect(data!.subscription_updated_at).toBeNull()
+  expect(ESTADOS).toContain(data!.subscription_status)
 })
 
 test('un OWNER autenticado NO puede escribir su propio subscription_status', async () => {
@@ -124,13 +142,16 @@ test('un OWNER autenticado NO puede escribir su propio subscription_status', asy
   // Contesta la allowlist de privilegios, no el trigger (ver encabezado).
   expect(error!.code).toBe(SIN_PRIVILEGIO)
 
-  // Y no quedó escrito: el rechazo es real, no un error cosmético.
+  // Y no quedó escrito: el rechazo es real, no un error cosmético. Se compara
+  // contra el SNAPSHOT del beforeAll, no contra null — lo que importa es que
+  // este intento no movió nada, no que nadie haya escrito nunca.
   const { data } = await owner
     .from('organizations')
     .select('subscription_status, subscription_updated_at')
     .eq('id', orgId)
     .single()
-  expect(data!.subscription_updated_at).toBeNull()
+  expect(data!.subscription_status).toBe(baseStatus)
+  expect(data!.subscription_updated_at).toBe(baseUpdatedAt)
 })
 
 test('tampoco puede escribir subscription_message ni subscription_updated_at', async () => {
