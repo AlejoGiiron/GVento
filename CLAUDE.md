@@ -372,6 +372,15 @@ Resumen rápido:
   camino los dos números coinciden por casualidad) y además repite el contador que cada columna
   ya muestra en su badge.
 ### Testing — laboratorio (LAB) MONTADO
+
+🔴 **LAB es una ORGANIZACIÓN más dentro de la BD compartida, y NO es un cliente que
+  pague.** Es el laboratorio. Importa para todo lo que trate a las organizaciones como
+  cuentas comerciales —empezando por el estado de suscripción que escribe G-Centro—:
+  LAB existe justamente para que G-Centro pueda probar el circuito completo sin tocar
+  clientes reales, así que **nunca debe entrar a un cobro, a una métrica de negocio ni a
+  un conteo de clientes activos.** Los clientes reales son G-10 y Salchimelo.
+  Los UUID de las tres organizaciones se obtienen con la query del encabezado de
+  `supabase/organization-subscription.sql` (no se hardcodean acá: se leen de la BD).
 - **✅ Laboratorio listo.** Existe la organización **LAB** (Supabase separado de
   producción) con **2 sedes**, los usuarios **owner.test** (rol owner) y
   **cajero.test** (rol cajero) con sus profiles, y productos de prueba. La suite
