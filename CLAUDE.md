@@ -426,9 +426,27 @@ Orden correcto ante un rojo:
 2. El trace si hace falta (`npx playwright show-trace …`).
 3. Recién ahí re-correr.
 
-⚠️ **Y ojo con el exit code cuando se pipea la salida:** `playwright test | tail`
-devuelve el código de `tail`, no el de Playwright — un `exit 0` con la suite en
-rojo. Para saber si pasó, redirigir a archivo y leer el `$?`, o mirar el resumen.
+### ⚠️ Trampas de TERMINAL — el síntoma no señala la causa
+
+Dos cosas que ya costaron tiempo, juntas porque son la misma familia: **la
+herramienta miente sobre lo que pasó, y uno termina diagnosticando el sistema
+equivocado.** Ante un resultado raro, descartar estas dos ANTES de sospechar del
+código.
+
+- **`playwright test | tail` devuelve el exit code de `tail`, no el de
+  Playwright** — un `exit 0` con la suite en rojo. Costó anunciar una corrida
+  verde que tenía un fallo. Para saber si pasó: redirigir a archivo y leer `$?`,
+  o mirar el resumen, nunca el código de salida de una tubería.
+
+- **Un `curl` multilínea pegado en Git Bash rompe las continuaciones de línea**
+  (`\`), así que se ejecuta la primera línea sola: **la petición sale sin
+  headers**. El síntoma es un **401 idéntico** al de un secreto equivocado o una
+  firma mal calculada, así que se pierde el tiempo revisando la credencial en vez
+  de la terminal. Pasó probando la Edge Function `aplicar-estado`, donde el 401
+  legítimo por HMAC inválido y el 401 por "no llegó ningún header" se ven igual.
+  Mitigación: envolver la llamada en una **función de shell** —que se pega como
+  bloque y se invoca en una línea— en vez de pegar el `curl` crudo. Los comandos
+  de prueba de `aplicar-estado` están escritos así por este motivo.
 
 **Flake abierto — `vale-descuento.spec.ts:243` (REPORTE de vales), 2026-08-11.**
 Falló en corrida full con `expect(after - before).toBe(7000)`; pasó en la corrida
