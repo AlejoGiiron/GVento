@@ -1105,10 +1105,16 @@ end $$;
 -- Descomentá si querés que owner.test caiga en la Demo sin usar el selector
 -- de sede del sidebar.
 --
--- ⚠️  DEJA LA SUITE E2E EN ROJO hasta que vuelvas a correr lab-seed.sql: casi
---     todos los specs asumen que la sede activa es "Sede Lab Norte". El selector
---     de sede hace exactamente esto mismo desde la UI, con un clic y sin efecto
---     colateral, así que la vía recomendada es esa.
+-- 🔴 DESCOMENTAR ESTE BLOQUE DEJA LA SUITE E2E EN ROJO, y no de a poco: casi
+--     TODOS los specs asumen que la sede activa de owner.test es "Sede Lab
+--     Norte" (ahí crean sus mesas, productos y turnos). Con la sede activa en
+--     Demo, empiezan a fallar en masa y por motivos que no parecen tener nada
+--     que ver — mesas que no aparecen, productos que no existen, turnos de otra
+--     sede. Volvés al verde recién cuando corrés lab-seed.sql de nuevo o
+--     devolvés la sede activa a Norte.
+--
+--     LA VÍA RECOMENDADA ES EL SELECTOR DE SEDE DEL SIDEBAR: hace exactamente
+--     este mismo UPDATE, con un clic, y volvés con otro clic.
 --
 -- update public.profiles p
 --    set restaurant_id = r.id
@@ -1120,6 +1126,18 @@ end $$;
 
 -- ============================================================
 -- VERIFICACIÓN (read-only) — corre dentro de la misma transacción.
+--
+-- ⚠️ TODA consulta de acá resuelve la sede con el CTE `demo`, que filtra por
+--    organización ADEMÁS de por nombre. Buscar solo por `name = 'Sede Demo'`
+--    contaría de más si otra organización llegara a tener una sede homónima:
+--    no es riesgo de datos (son select), pero **un conteo equivocado en una
+--    salida de verificación es peor que no tener ninguna** — alguien lo lee,
+--    concluye que está bien y sigue.
+--
+--    El CTE existe además para que el filtro se escriba UNA vez por consulta y
+--    no una vez por subconsulta: la repetición anterior (13 subselects con el
+--    mismo `where` copiado) fue exactamente el motivo por el que a la mayoría
+--    le faltaba el join a organizations.
 -- ============================================================
 
 select 'sede' as check, r.name, r.uses_kitchen, r.address, r.id as restaurant_id
@@ -1127,45 +1145,45 @@ select 'sede' as check, r.name, r.uses_kitchen, r.address, r.id as restaurant_id
   join public.organizations o on o.id = r.organization_id
  where o.name = 'LAB' and r.name = 'Sede Demo';
 
+with demo as (
+  select r.id
+    from public.restaurants r
+    join public.organizations o on o.id = r.organization_id
+   where o.name = 'LAB' and r.name = 'Sede Demo'
+)
 select 'catálogo' as check,
   (select count(*) from public.categories c
-     join public.restaurants r on r.id = c.restaurant_id
-    where r.name = 'Sede Demo' and c.is_active) as categorias,
+    where c.restaurant_id in (select id from demo) and c.is_active) as categorias,
   (select count(*) from public.products p
-     join public.restaurants r on r.id = p.restaurant_id
-    where r.name = 'Sede Demo' and p.is_active) as productos,
+    where p.restaurant_id in (select id from demo) and p.is_active) as productos,
   (select count(*) from public.products p
-     join public.restaurants r on r.id = p.restaurant_id
-    where r.name = 'Sede Demo' and p.kind = 'composite') as compuestos,
+    where p.restaurant_id in (select id from demo) and p.kind = 'composite') as compuestos,
   (select count(*) from public.extras e
-     join public.restaurants r on r.id = e.restaurant_id
-    where r.name = 'Sede Demo' and e.is_active) as extras,
+    where e.restaurant_id in (select id from demo) and e.is_active) as extras,
   (select count(*) from public.tables t
-     join public.restaurants r on r.id = t.restaurant_id
-    where r.name = 'Sede Demo') as mesas;
+    where t.restaurant_id in (select id from demo)) as mesas;
 
+with demo as (
+  select r.id
+    from public.restaurants r
+    join public.organizations o on o.id = r.organization_id
+   where o.name = 'LAB' and r.name = 'Sede Demo'
+)
 select 'operación' as check,
   (select count(*) from public.orders o
-     join public.restaurants r on r.id = o.restaurant_id
-    where r.name = 'Sede Demo') as ordenes,
+    where o.restaurant_id in (select id from demo)) as ordenes,
   (select max(order_number) from public.orders o
-     join public.restaurants r on r.id = o.restaurant_id
-    where r.name = 'Sede Demo') as ultimo_numero,
+    where o.restaurant_id in (select id from demo)) as ultimo_numero,
   (select count(*) from public.payments p
-     join public.restaurants r on r.id = p.restaurant_id
-    where r.name = 'Sede Demo') as pagos,
+    where p.restaurant_id in (select id from demo)) as pagos,
   (select count(*) from public.cash_shifts cs
-     join public.restaurants r on r.id = cs.restaurant_id
-    where r.name = 'Sede Demo' and cs.closed_at is null) as turnos_abiertos,
+    where cs.restaurant_id in (select id from demo) and cs.closed_at is null) as turnos_abiertos,
   (select count(*) from public.cash_shifts cs
-     join public.restaurants r on r.id = cs.restaurant_id
-    where r.name = 'Sede Demo' and cs.closed_at is not null) as turnos_cerrados,
+    where cs.restaurant_id in (select id from demo) and cs.closed_at is not null) as turnos_cerrados,
   (select count(*) from public.tables t
-     join public.restaurants r on r.id = t.restaurant_id
-    where r.name = 'Sede Demo' and t.status <> 'free') as mesas_ocupadas,
+    where t.restaurant_id in (select id from demo) and t.status <> 'free') as mesas_ocupadas,
   (select count(*) from public.orders o
-     join public.restaurants r on r.id = o.restaurant_id
-    where r.name = 'Sede Demo' and o.payment_status <> 'paid') as fiados_abiertos;
+    where o.restaurant_id in (select id from demo) and o.payment_status <> 'paid') as fiados_abiertos;
 
 -- Inventario: el stock actual debe coincidir con la suma de movimientos.
 select 'inventario' as check, p.name, p.stock_qty, p.min_stock,
@@ -1176,8 +1194,9 @@ select 'inventario' as check, p.name, p.stock_qty, p.min_stock,
                                  where sm.product_id = p.id)
             then 'OK' else 'DESCUADRE' end as cuadre
   from public.products p
-  join public.restaurants r on r.id = p.restaurant_id
- where r.name = 'Sede Demo' and p.stock_tracking
+  join public.restaurants r  on r.id = p.restaurant_id
+  join public.organizations o on o.id = r.organization_id
+ where o.name = 'LAB' and r.name = 'Sede Demo' and p.stock_tracking
  order by p.name;
 
 commit;
