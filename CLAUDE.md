@@ -414,6 +414,32 @@ Resumen rápido:
 - Tests deterministas e idempotentes (aprendizaje: verificar con datos limpios).
 - Los tests corren en serie (`workers: 1`) por compartir backend.
 
+### 🔴 ANTE UN FALLO: LEER LOS ARTEFACTOS ANTES DE RE-CORRER
+
+**Playwright BORRA `test-results/` al arrancar cada corrida.** Re-correr para "ver
+si se repite" destruye el `error-context.md`, el screenshot, el video y el trace
+del fallo — que suelen ser la única forma de saber qué pasó, porque un flake por
+definición no se reproduce a pedido.
+
+Orden correcto ante un rojo:
+1. `test-results/**/error-context.md` — el **valor recibido** de la aserción.
+2. El trace si hace falta (`npx playwright show-trace …`).
+3. Recién ahí re-correr.
+
+⚠️ **Y ojo con el exit code cuando se pipea la salida:** `playwright test | tail`
+devuelve el código de `tail`, no el de Playwright — un `exit 0` con la suite en
+rojo. Para saber si pasó, redirigir a archivo y leer el `$?`, o mirar el resumen.
+
+**Flake abierto — `vale-descuento.spec.ts:243` (REPORTE de vales), 2026-08-11.**
+Falló en corrida full con `expect(after - before).toBe(7000)`; pasó en la corrida
+full siguiente y aislado (8/8). **Causa NO determinada:** los artefactos se
+perdieron por re-correr antes de leerlos — este bloque existe por eso. Sospecha
+sin confirmar: acumulación de estado en LAB (ese día hubo 3 corridas full más
+varios specs sueltos). Si reaparece, el valor recibido discrimina: `0` = el KPI
+no se movió, `14000` = doble conteo, otro número = contaminación de datos.
+Con `retries: 0` un flake es DEUDA, no ruido: la config es así a propósito para
+que un fallo se investigue en vez de enmascararse con un reintento.
+
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
 Última fase completada: **Ajustes pedidos por el cliente + arreglos visuales de Delivery**
