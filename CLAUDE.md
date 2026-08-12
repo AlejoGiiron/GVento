@@ -460,13 +460,64 @@ que un fallo se investigue en vez de enmascararse con un reintento.
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: **Ajustes pedidos por el cliente + arreglos visuales de Delivery**
-  (sesión 2026-08-10, rama develop, 7 commits). Unit **261/261** · E2E full
-  **177 passed + 1 skipped** · tsc 0 · build verde ·
-  ⚠️ **eslint con 6 errores PREEXISTENTES** (ajenos a esta sesión, anotados con archivo y
-  línea en Deudas vigentes — la afirmación "eslint 0" que traía este bloque ya no era cierta).
+Última fase completada: **FASE 1 del estado de suscripción de G-Centro** (sesión
+  2026-08-11/12, rama develop). Unit **261/261** · E2E full **182 passed + 2 skipped**
+  (exit 0 real) · tsc 0 · build verde ·
+  ⚠️ **eslint con 6 errores PREEXISTENTES** (ajenos, anotados con archivo y línea en
+  Deudas vigentes — la afirmación "eslint 0" que traía este bloque ya no era cierta).
 
-**Qué entró en esta sesión** (E2E pasó de 160 a 177: 17 tests nuevos, uno por ajuste):
+### FASE 1 — estado de suscripción (aplicada y desplegada)
+
+G-Centro (panel de suscripciones, **repo y BD aparte**) ESCRIBE una bandera en
+`organizations`; G-Vento solo LEE. Si G-Centro se cae, el POS sigue vendiendo.
+
+- **3 columnas aplicadas** en `organizations` (`supabase/organization-subscription.sql`):
+  `subscription_status` (text + CHECK sobre
+  `active|expiring|grace|restricted|suspended`, **not null default `'active'`**),
+  `subscription_message`, `subscription_updated_at`. El default es la decisión central:
+  **la ausencia de información nunca degrada a un cliente.** Se sumó también
+  `unique (name)` en `organizations` (onboard-org resuelve la org POR NOMBRE y sin unique
+  un re-seed con el nombre distinto creaba una org nueva en silencio).
+- **Protección en DOS CAPAS**, porque la policy `"organizations: editar con permiso"`
+  valida QUIÉN y no QUÉ COLUMNAS —la misma falla de categoría que se cerró en `profiles`—:
+  (1) privilegios de columna en **allowlist** (se revoca el UPDATE de tabla y se concede
+  solo `name, logo_url, config`), y (2) el trigger `protect_organization_subscription`.
+- 🔴 **La capa ACTIVA es el GRANT, no el trigger.** Medido: Postgres verifica los
+  privilegios de columna al arrancar el executor, antes de escanear filas y por lo tanto
+  antes de cualquier BEFORE ROW trigger. Da **`42501 permission denied for table
+  organizations`** — mensaje a nivel TABLA aunque la falla sea por columna, así que el
+  spec assertea el CÓDIGO y no el texto, y el caso de CONTRASTE (que el mismo owner SÍ
+  pueda escribir `name`) es lo único que distingue una protección puntual de una RLS rota.
+  **El trigger es la red para cuando alguien restaure el privilegio de tabla** — el modo de
+  fallo probable es una línea rutinaria tipo
+  `grant all on all tables in schema public to authenticated`, que borraría la allowlist en
+  silencio. No se puede ejercitar desde el spec (requiere que `authenticated` TENGA el
+  privilegio, que es lo que revocamos): su verificación manual está en la migración.
+- **Edge Function `aplicar-estado` DESPLEGADA y validada** con 7 casos contra la función
+  viva: firma válida (`changed:true`), repetida (`changed:false` y `subscription_updated_at`
+  sin moverse), firma inválida, timestamp fuera de la ventana de 300s, estado fuera del
+  enum, org inexistente y sin header de firma. **Quedó con "Verify JWT" DESACTIVADO** — el
+  llamante es un servidor, no un usuario — así que **es públicamente alcanzable y el HMAC
+  es la única autenticación**. `subscription_updated_at` significa *"cuándo CAMBIÓ el
+  estado"*, no *"cuándo llamaron"*: re-aplicar el mismo estado es un no-op.
+- ⚠️ **EL GATING NO ESTÁ IMPLEMENTADO (Fase 2 en adelante).** Hoy la bandera existe y
+  **nadie la lee**: ninguna pantalla la consulta, ningún flujo cambia. G-Vento se comporta
+  exactamente igual que antes. Dos decisiones ya tomadas para cuando se construya:
+  **`suspended` NO toca la apertura de turno** (bloquearla ES bloquear la venta, con un día
+  de retraso y en el peor momento; además el gate de turno es de UI y no de seguridad, así
+  que solo sacaría las ventas del cuadre) y **el export NUNCA se bloquea**, en ningún nivel.
+- **Lectura al login + refetch por foco, NO Realtime** (aunque G-Vento sí usa Realtime en 5
+  lugares y estaría disponible): para una bandera que cambia una vez al mes la latencia es
+  **amortiguación**, no carencia. Una bandera que cambia sola en medio de un cobro es
+  exactamente el modo de fallo que motivó el patrón `checkoutOrder`. **No "mejorar" esto
+  con Realtime.**
+- **Los UUID de las organizaciones NO están en este documento**: se consultan con la query
+  del encabezado de `supabase/organization-subscription.sql`, que los lee siempre
+  actualizados. Recordar que **LAB no es un cliente que pague** (ver la sección del lab).
+
+### Sesión previa (2026-08-10) — ajustes del cliente + Delivery
+
+E2E pasó de 160 a 177 con 17 tests nuevos, uno por ajuste:
   - **Categorías en Productos:** los tabs no se podían desplazar. El strip ya tenía
     `overflowX: auto`; lo que faltaba era `flex:1` + `minWidth:0` — es flex item del toolbar,
     no hijo en bloque como en el POS, así que crecía con su contenido (medido: `clientWidth`
@@ -489,14 +540,17 @@ que un fallo se investigue en vez de enmascararse con un reintento.
     system en ambas columnas; máscara de scroll en las columnas (siempre scrollearon, faltaba
     la señal); estado vacío centrado. Hook compartido `useScrollOverflow`.
 
-⏸️ **El trabajo del filtro de PII de Sentry sigue PAUSADO** — se pausó por estos pedidos del
-  cliente y NO se retomó en esta sesión. El diagnóstico está COMPLETO y medido en Deudas
-  vigentes (hallazgos 1, 2a, 2b y 3), con el orden sugerido para retomar: 2b → 2a → 3 → 1.
+⏸️ **El trabajo del filtro de PII de Sentry sigue PAUSADO** — se pausó por los pedidos del
+  cliente y no se retomó. El diagnóstico está COMPLETO y medido en Deudas vigentes
+  (hallazgos 1, 2a, 2b y 3), con el orden sugerido para retomar: 2b → 2a → 3 → 1.
   Nada de eso es fuga consumada: no corresponde release de emergencia.
 
-**develop ≠ main desde esta sesión:** `main` sigue en el release del filtro de PII (344787b);
-  develop tiene además estos 7 commits. Antes de promover, correr `pnpm test:e2e` full sobre
-  develop (nota de proceso) — en esta sesión ya se corrió y dio 177 + 1 skipped.
+**develop ≠ main:** `main` está en el release de los ajustes del cliente (`ae0ea91`);
+  develop tiene además la Fase 1 de suscripción. Antes de promover, correr `pnpm test:e2e`
+  full sobre develop (nota de proceso).
+  ⚠️ **Promover la Fase 1 a `main` NO cambia el comportamiento de producción** (nadie lee la
+  bandera), pero el SQL **ya está aplicado en la BD compartida**, así que la protección de
+  columnas rige HOY para las tres organizaciones, esté o no promovido el frontend.
 
 **PRODUCCIÓN (main, desplegado en Vercel) incluye:**
   - **Sentry activo con el filtro de PII por allowlist** (release 344787b). Se cazó ANTES de que
