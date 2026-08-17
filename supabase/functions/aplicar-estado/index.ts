@@ -64,6 +64,22 @@ type Estado = (typeof ESTADOS)[number]
 // adelantado del llamante: |ahora - ts| > VENTANA => rechazo.
 const VENTANA_SEG = 300
 
+// Forma canónica 8-4-4-4-12. NO se valida el nibble de versión ni el de
+// variante: la columna `organizations.id` es uuid a secas y no nos corresponde
+// ser más exigentes que la BD sobre QUÉ uuid es válido — solo sobre la FORMA.
+//
+// Sin este chequeo, un id malformado llegaba al `.eq('id', ...)`, Postgres
+// respondía 22P02 y eso caía en el 500 genérico "Error de base de datos": un
+// mensaje que MIENTE sobre la causa (dice "la base falló" cuando el que se
+// equivocó fue el llamante) y no le dice a G-Centro qué corregir.
+//
+// ⚠️ ESTRECHA EL CONTRATO a propósito: Postgres acepta también `{...}` y la
+// forma sin guiones, y esas ahora dan 400 aunque antes habrían funcionado. Es
+// aceptable porque el único llamante es G-Centro y el id sale serializado de su
+// propia BD, siempre canónico. Si algún día otro llamante manda otra forma, el
+// síntoma es un 400 explícito, no una escritura perdida.
+const RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 function hexABytes(hex: string): Uint8Array | null {
   if (hex.length === 0 || hex.length % 2 !== 0) return null
   if (!/^[0-9a-fA-F]+$/.test(hex)) return null
@@ -130,6 +146,12 @@ serve(async (req) => {
           : undefined
 
     if (!orgId) return json({ error: 'organization_id requerido' }, 400)
+    // Va acá y no antes: el chequeo de forma es posterior a la firma (:112), así
+    // que un llamante NO autenticado nunca obtiene señal sobre qué acepta el
+    // parser. Y es anterior al SELECT, que es lo que hace que un id malformado
+    // conteste 400 y no el 500 genérico.
+    if (!RE_UUID.test(orgId))
+      return json({ error: 'organization_id invalido: se espera un UUID' }, 400)
     if (message === undefined) return json({ error: 'message debe ser string o null' }, 400)
     if (!ESTADOS.includes(status as Estado))
       return json({ error: `status invalido. Validos: ${ESTADOS.join(', ')}` }, 400)

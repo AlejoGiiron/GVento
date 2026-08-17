@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { readFileSync } from 'node:fs'
+import { createHmac, randomUUID } from 'node:crypto'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { ownerCreds } from './helpers/auth'
 
@@ -221,4 +222,160 @@ test('el CHECK rechaza un estado fuera del enum', async () => {
 
   expect(error).not.toBeNull()
   expect(error!.message).toMatch(/subscription_status|check/i)
+})
+
+// ============================================================================
+// Edge Function aplicar-estado — un RECHAZO NO DEJA EFECTO
+//
+// Los 7 casos con que se validó la función viva probaron la RESPUESTA (status
+// HTTP + mensaje). Ninguno probó el EFECTO: que la fila siguiera intacta. Es la
+// mitad que importa, porque una validación que corre DESPUÉS de la escritura
+// devuelve el mismo 400 y deja la fila escrita — el fallo que apareció en
+// G-Centro (validación dentro de la función de envío, insert en el handler).
+//
+// Hoy el orden es correcto: el enum se valida en index.ts:134 y el UPDATE está
+// en :167, con el cliente service role construido recién en :137. Estos tests
+// NO existen para confirmar eso —se lee del código— sino para que un refactor
+// que mueva la validación debajo del UPDATE se ponga rojo.
+//
+// Por qué el mensaje no alcanza como prueba de orden: si el enum se validara
+// después, el 23514 del CHECK caería en `updErr` (:178) y saldría 500
+// "Error de base de datos". Ninguna ruta produce un 400 con el texto del enum a
+// partir de un fallo de constraint. Ese razonamiento es correcto HOY y se cae
+// si alguien cambia el mapeo de errores; la aserción sobre la fila, no.
+//
+// ── SOLO LEE (contra LAB) ───────────────────────────────────────────────────
+// Los tres casos son RECHAZOS, así que el spec no cambia el estado de suscripción
+// de LAB. No agregar acá un caso de camino feliz sin pensarlo: escribiría el
+// estado del tenant que G-Centro usa para probar.
+//
+// Requiere el secreto HMAC (una firma inválida muere en :112, antes del enum,
+// y el test no probaría nada). Sin él hace skip, como el caso del service role.
+// ============================================================================
+
+const FN_URL = () =>
+  `${process.env.VITE_GVENTO_SUPABASE_URL}/functions/v1/${
+    process.env.E2E_APLICAR_ESTADO_FN ?? 'aplicar-estado'
+  }`
+
+type RespuestaFn = { status: number; body: { error?: string; ok?: boolean } }
+
+/** Firma y llama a la función igual que G-Centro: HMAC sobre `${ts}.${crudo}`
+ *  con el cuerpo CRUDO (no re-serializado). No manda Authorization: la función
+ *  tiene "Verify JWT" desactivado y el HMAC es la única autenticación. */
+async function aplicarEstado(secreto: string, payload: unknown): Promise<RespuestaFn> {
+  const crudo = JSON.stringify(payload)
+  const ts = Math.floor(Date.now() / 1000).toString()
+  const firma = createHmac('sha256', secreto).update(`${ts}.${crudo}`).digest('hex')
+
+  const res = await fetch(FN_URL(), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-gcentro-timestamp': ts,
+      'x-gcentro-signature': firma,
+    },
+    body: crudo,
+  })
+  let body: RespuestaFn['body'] = {}
+  try { body = await res.json() } catch { /* sin cuerpo */ }
+  return { status: res.status, body }
+}
+
+/** Las 3 columnas de suscripción de LAB, leídas con la sesión del owner. */
+async function leerSuscripcion() {
+  const { data, error } = await owner
+    .from('organizations')
+    .select('subscription_status, subscription_message, subscription_updated_at')
+    .eq('id', orgId)
+    .single()
+  if (error) throw error
+  return data
+}
+
+test('un status fuera del enum se rechaza SIN tocar la fila', async () => {
+  const secreto = process.env.E2E_GCENTRO_HMAC_SECRET
+  test.skip(!secreto, 'Requiere E2E_GCENTRO_HMAC_SECRET (mismo valor que el de la función)')
+
+  const antes = await leerSuscripcion()
+
+  // Firma VÁLIDA a propósito: el llamante está autenticado y llega hasta la
+  // validación del enum. Con una firma inválida moriría en :112 y el test sería
+  // vacuo — verde sin haber ejercitado nunca el chequeo que dice probar.
+  const res = await aplicarEstado(secreto!, {
+    organization_id: orgId,
+    status: 'trial_extendido',
+    message: 'no debe escribirse',
+  })
+
+  expect(res.status).toBe(400)
+  // El TEXTO del enum, no un 400 cualquiera: discrimina el rechazo de la función
+  // (index.ts:134) de un fallo del CHECK de la BD, que saldría 500 con
+  // "Error de base de datos".
+  expect(res.body.error).toMatch(/status invalido/i)
+
+  // LA ASERCIÓN QUE FALTABA. Las tres columnas, no solo `status`: un UPDATE que
+  // corriera antes de validar escribiría también `message` y movería
+  // `subscription_updated_at`, y el CHECK solo ataja `status`.
+  const despues = await leerSuscripcion()
+  expect(despues.subscription_status).toBe(antes.subscription_status)
+  expect(despues.subscription_message).toBe(antes.subscription_message)
+  expect(despues.subscription_updated_at).toBe(antes.subscription_updated_at)
+})
+
+test('un organization_id malformado da 400 legible, no el 500 generico', async () => {
+  const secreto = process.env.E2E_GCENTRO_HMAC_SECRET
+  test.skip(!secreto, 'Requiere E2E_GCENTRO_HMAC_SECRET (mismo valor que el de la función)')
+
+  const antes = await leerSuscripcion()
+
+  const res = await aplicarEstado(secreto!, {
+    organization_id: 'no-es-un-uuid',
+    status: 'suspended',
+    message: null,
+  })
+
+  // ANTES del arreglo esto daba 500 "Error de base de datos": el id llegaba al
+  // .eq() y Postgres contestaba 22P02, que caía en el catch genérico del SELECT.
+  // El status es lo que discrimina — un 500 acá le dice a G-Centro "la base
+  // falló" cuando el que se equivocó fue él, y no le dice qué corregir.
+  expect(res.status).toBe(400)
+  expect(res.body.error).toMatch(/organization_id/i)
+  // Y que NO sea el mensaje que mentía. Sin esta línea el test pasaría igual si
+  // alguien mapeara el 22P02 a un 400 con el texto genérico: seguiría sin
+  // decirle al llamante qué arreglar, que es el punto del cambio.
+  expect(res.body.error).not.toMatch(/base de datos/i)
+
+  const despues = await leerSuscripcion()
+  expect(despues.subscription_status).toBe(antes.subscription_status)
+  expect(despues.subscription_message).toBe(antes.subscription_message)
+  expect(despues.subscription_updated_at).toBe(antes.subscription_updated_at)
+})
+
+test('una organización inexistente se rechaza SIN tocar ninguna fila', async () => {
+  const secreto = process.env.E2E_GCENTRO_HMAC_SECRET
+  test.skip(!secreto, 'Requiere E2E_GCENTRO_HMAC_SECRET (mismo valor que el de la función)')
+
+  const antes = await leerSuscripcion()
+
+  // Status VÁLIDO: así el único motivo de rechazo posible es la existencia de la
+  // org (index.ts:154). Con un status inválido cortaría antes y el test estaría
+  // midiendo el caso anterior otra vez.
+  const res = await aplicarEstado(secreto!, {
+    organization_id: randomUUID(),
+    status: 'suspended',
+    message: null,
+  })
+
+  expect(res.status).toBe(404)
+  expect(res.body.error).toMatch(/inexistente/i)
+
+  // No hay fila que inspeccionar para un UUID que no existe, así que lo que se
+  // verifica es que el rechazo no se derramó sobre una org REAL — que el
+  // `.eq('id', ...)` del UPDATE esté acotado y que no haya escritura previa al
+  // chequeo de existencia.
+  const despues = await leerSuscripcion()
+  expect(despues.subscription_status).toBe(antes.subscription_status)
+  expect(despues.subscription_message).toBe(antes.subscription_message)
+  expect(despues.subscription_updated_at).toBe(antes.subscription_updated_at)
 })
