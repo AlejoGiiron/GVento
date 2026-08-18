@@ -466,6 +466,14 @@ que un fallo se investigue en vez de enmascararse con un reintento.
   ⚠️ **eslint con 6 errores PREEXISTENTES** (ajenos, anotados con archivo y línea en
   Deudas vigentes — la afirmación "eslint 0" que traía este bloque ya no era cierta).
 
+Después, sesión **2026-08-16/17**: auditoría de orden de operaciones de `aplicar-estado`
+  + el arreglo del `organization_id` malformado (commit `eb179d3`, ya desplegado). La
+  suite full NO se volvió a correr; lo verificado es `suscripcion-estado.spec.ts`
+  **8 passed + 1 skipped** contra la función desplegada, tsc 0 y eslint limpio en los
+  archivos tocados. Ese spec pasó de 6 a 9 casos, así que el conteo full sube a **185**
+  *solo si* `E2E_GCENTRO_HMAC_SECRET` está en `.env.test`; sin esa variable son los mismos
+  182 passed y 3 skips más.
+
 ### FASE 1 — estado de suscripción (aplicada y desplegada)
 
 G-Centro (panel de suscripciones, **repo y BD aparte**) ESCRIBE una bandera en
@@ -493,16 +501,62 @@ G-Centro (panel de suscripciones, **repo y BD aparte**) ESCRIBE una bandera en
   `grant all on all tables in schema public to authenticated`, que borraría la allowlist en
   silencio. No se puede ejercitar desde el spec (requiere que `authenticated` TENGA el
   privilegio, que es lo que revocamos): su verificación manual está en la migración.
-- **Edge Function `aplicar-estado` DESPLEGADA y validada** con 7 casos contra la función
-  viva: firma válida (`changed:true`), repetida (`changed:false` y `subscription_updated_at`
-  sin moverse), firma inválida, timestamp fuera de la ventana de 300s, estado fuera del
-  enum, org inexistente y sin header de firma. **Quedó con "Verify JWT" DESACTIVADO** — el
-  llamante es un servidor, no un usuario — así que **es públicamente alcanzable y el HMAC
-  es la única autenticación**. `subscription_updated_at` significa *"cuándo CAMBIÓ el
-  estado"*, no *"cuándo llamaron"*: re-aplicar el mismo estado es un no-op.
-- ⚠️ **EL GATING NO ESTÁ IMPLEMENTADO (Fase 2 en adelante).** Hoy la bandera existe y
-  **nadie la lee**: ninguna pantalla la consulta, ningún flujo cambia. G-Vento se comporta
-  exactamente igual que antes. Dos decisiones ya tomadas para cuando se construya:
+- **Edge Function `aplicar-estado` DESPLEGADA y validada en dos tandas.**
+  (a) **7 casos manuales por `curl`** (2026-08-12) contra la función viva: firma válida
+  (`changed:true`), repetida (`changed:false` y `subscription_updated_at` sin moverse),
+  firma inválida, timestamp fuera de la ventana de 300s, estado fuera del enum, org
+  inexistente y sin header de firma.
+  (b) **3 casos AUTOMATIZADOS** en `tests/suscripcion-estado.spec.ts` (2026-08-17) que
+  verifican el **EFECTO, no solo la respuesta**: tras un rechazo (enum inválido, org
+  inexistente, UUID malformado) releen la fila y comparan **las tres columnas** contra el
+  snapshot previo. Los 7 manuales probaban únicamente el status HTTP y el mensaje, y una
+  validación que corriera DESPUÉS del UPDATE devuelve el mismo 400 dejando la fila escrita
+  — que es el fallo que apareció en G-Centro y disparó esta auditoría. Firman con HMAC
+  **válido** a propósito: con firma inválida la función corta antes y el test sería vacuo.
+  Requieren `E2E_GCENTRO_HMAC_SECRET` en `.env.test`; sin esa variable hacen skip.
+  Los tres son RECHAZOS, así que **el spec no escribe el estado de suscripción de LAB** —
+  no agregar ahí un caso de camino feliz sin pensarlo.
+- **El orden de validaciones está AUDITADO y es correcto**, con una garantía mejor que el
+  orden de líneas: **el cliente `service_role` se construye recién en la `:159`, después de
+  las 11 validaciones** — antes no existe el objeto con el que escribir. La firma HMAC es la
+  `:128`, el UPDATE la `:191`. Sobrevive a un refactor que reordene, que es justo lo que el
+  orden de líneas no hace.
+- **`organization_id` malformado da 400 legible** (`eb179d3`). Antes llegaba al
+  `.eq('id', ...)`, Postgres respondía `22P02` y caía en el 500 genérico *"Error de base de
+  datos"*: un mensaje que MIENTE sobre la causa y no le dice a G-Centro qué corregir. La
+  validación de forma va **DESPUÉS de la firma** (un llamante sin autenticar no debe obtener
+  señal sobre qué acepta el parser) y **ANTES del SELECT**. ⚠️ **Estrecha la aceptación
+  respecto de Postgres**: rechaza `{...}` y la forma sin guiones, que la BD sí acepta. Es
+  aceptable porque el id sale canónico de la BD de G-Centro, y el modo de fallo es un 400
+  explícito, nunca una escritura perdida.
+- **"Verify JWT" DESACTIVADO — DECISIÓN, NO DESCUIDO.** El llamante es un servidor, no un
+  usuario, así que un JWT de Supabase no significa nada acá. Consecuencia directa: **el
+  endpoint es públicamente alcanzable y el HMAC es la ÚNICA autenticación** — de ahí la
+  firma sobre timestamp+cuerpo, la ventana anti-replay y la comparación en tiempo constante.
+  **Si un redeploy lo reactiva, los 3 casos automatizados dan 401** y el síntoma se confunde
+  con secreto equivocado: verificar el toggle después de cada deploy.
+  `subscription_updated_at` significa *"cuándo CAMBIÓ el estado"*, no *"cuándo llamaron"*:
+  re-aplicar el mismo estado es un no-op.
+- 🔴 **CAMBIAR EL `CHECK` DE `subscription_status` EXIGE AVISAR A G-CENTRO ANTES DE
+  DESPLEGARLO.** El enum vive en TRES lados que no se enteran entre sí: el `CHECK` de la BD,
+  la constante `ESTADOS` de la Edge Function y el `ESTADOS` del spec. Agregar un estado y
+  desplegarlo sin aviso hace que G-Centro mande un valor que la función rechaza con 400 —
+  el panel cree haber aplicado un estado que nunca se escribió. **Esta es la fragilidad real
+  del puente**, y crece cuando exista la Fase 2: ahí un estado no aplicado es un cliente
+  que no queda restringido, o uno restringido que no debía. No es un problema de código
+  —los tres lados se tocan en una pasada— sino de COORDINACIÓN entre dos repos con dueños
+  distintos: el aviso va primero, el deploy después.
+- ⚠️ **EL GATING NO ESTÁ IMPLEMENTADO (Fase 2 en adelante).** Hoy la bandera existe, la
+  Edge Function la escribe, y **NINGUNA PANTALLA LA LEE**: cero consultas a
+  `subscription_status` en toda la app, ningún flujo cambia. G-Vento se comporta
+  exactamente igual con un cliente en `active` que en `suspended`.
+  🔴 **Es la confusión que YA tuvo G-Centro**: pusieron un tenant en `suspended` esperando
+  ver un banner en el POS, y no pasó nada — porque el banner no existe. Escribir la bandera
+  y REACCIONAR a la bandera son dos fases distintas, y solo la primera está hecha. Si estás
+  probando desde G-Centro y "no se ve nada en G-Vento", **eso es el comportamiento
+  esperado**, no un bug: la verificación de que la escritura funcionó se hace mirando la
+  columna en la BD, no la pantalla.
+  Dos decisiones ya tomadas para cuando se construya:
   **`suspended` NO toca la apertura de turno** (bloquearla ES bloquear la venta, con un día
   de retraso y en el peor momento; además el gate de turno es de UI y no de seguridad, así
   que solo sacaría las ventas del cuadre) y **el export NUNCA se bloquea**, en ningún nivel.
