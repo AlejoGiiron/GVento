@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { useQueryClient } from '@tanstack/react-query'
+import { useScrollOverflow } from '@/hooks/useScrollOverflow'
 import { useCartStore, cartItemTotal } from '@/stores/cartStore'
 import { useProducts } from '@/hooks/useProducts'
 import { useCategories } from '@/hooks/useCategories'
@@ -1583,6 +1584,10 @@ export function POSPage() {
   }
 
   const { data: categories = [], isLoading: catsLoading } = useCategories()
+
+  // Máscara de continuación del strip de categorías. `categories` como dep:
+  // el ResizeObserver ve el contenedor, no los tabs que entran o salen.
+  const { ref: tabsRef, hasMore: tabsHasMore } = useScrollOverflow<HTMLDivElement>('x', categories)
   const { data: products = [], isLoading: prodsLoading } = useProducts()
 
   // Set first category as default
@@ -1716,7 +1721,18 @@ export function POSPage() {
       }}
     >
       {/* ─── LEFT: Catalog 60% ─── */}
-      <div style={{ flex: '0 0 60%', display: 'flex', flexDirection: 'column', minHeight: 0, background: '#fafafa' }}>
+      {/*
+        `minWidth: 0` NO es cosmético: sin él este flex item conserva el
+        `min-width: auto` por defecto y se NIEGA a bajar de su ancho min-content.
+        Cuando los tabs de categorías no entran, el panel crece más allá del 60%
+        y SE COME EL CARRITO. Medido a 1024px (área útil 800 = viewport − 224 del
+        sidebar): con 5 categorías de nombres reales el catálogo pasaba de 480 a
+        548 y el carrito caía de 320 a 253; con 7 el carrito quedaba en 86 y el
+        cajero NO PODÍA COBRAR. G-10 tiene 5 categorías reales.
+        El `overflowX: auto` del strip no alcanzaba: nunca llegaba a activarse
+        porque el panel le cedía el ancho antes de que hubiera algo que scrollear.
+      */}
+      <div style={{ flex: '0 0 60%', minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0, background: '#fafafa' }}>
 
         {/* Search + category tabs */}
         <div style={{ padding: '18px 24px 4px', background: '#fff', borderBottom: '1px solid #f1f5f9' }}>
@@ -1759,7 +1775,14 @@ export function POSPage() {
           </div>
 
           {/* Category tabs */}
-          <div style={{ display: 'flex', gap: 4, overflowX: 'auto', paddingBottom: 2, scrollbarWidth: 'none' }}>
+          {/*
+            El wrapper `position: relative` ancla la máscara. Y los botones llevan
+            `flexShrink: 0` a propósito: una vez que el panel está acotado, sin eso
+            los tabs se COMPRIMIRÍAN en vez de desbordar, y el overflow seguiría sin
+            activarse — el bug se mudaría en lugar de resolverse.
+          */}
+          <div style={{ position: 'relative' }}>
+          <div ref={tabsRef} data-testid="pos-category-tabs" style={{ display: 'flex', gap: 4, overflowX: 'auto', paddingBottom: 2, scrollbarWidth: 'none' }}>
             {categories.map((c) => {
               const active = resolvedCat === c.id && !query
               return (
@@ -1774,12 +1797,30 @@ export function POSPage() {
                     fontWeight: active ? 700 : 500, fontSize: 14,
                     fontFamily: 'Inter, sans-serif', cursor: 'pointer',
                     whiteSpace: 'nowrap', letterSpacing: -0.2, transition: 'color .12s',
+                    flexShrink: 0,
                   }}
                 >
                   {c.name}
                 </button>
               )
             })}
+          </div>
+
+          {/* Máscara de continuación: la scrollbar está oculta
+              (`scrollbarWidth: none`), así que sin esto el cajero no tiene NINGUNA
+              señal de que quedan categorías a la derecha. Solo aparece si de verdad
+              hay más (ver useScrollOverflow). Mismo patrón que Productos y Delivery. */}
+          {tabsHasMore && (
+            <div
+              aria-hidden
+              data-testid="pos-category-tabs-fade"
+              style={{
+                position: 'absolute', top: 0, bottom: 2, right: 0, width: 36,
+                background: 'linear-gradient(to left, #fff 25%, rgba(255,255,255,0))',
+                pointerEvents: 'none',
+              }}
+            />
+          )}
           </div>
         </div>
 

@@ -586,6 +586,71 @@ G-Centro (panel de suscripciones, **repo y BD aparte**) ESCRIBE una bandera en
   del encabezado de `supabase/organization-subscription.sql`, que los lee siempre
   actualizados. Recordar que **LAB no es un cliente que pague** (ver la sección del lab).
 
+### 🔴 Desborde del POS por categorías — BUG DE PRODUCCIÓN corregido (2026-08-19)
+
+**El carrito del POS se encogía hasta ser inusable a medida que se agregaban categorías.**
+El modo de fallo es el peor posible: **el cajero no puede cobrar.**
+
+**Causa:** el panel del catálogo es `flex: '0 0 60%'` y **sin `minWidth: 0`** conserva el
+`min-width: auto` por defecto, así que se niega a bajar de su ancho min-content. Cuando los
+tabs de categorías no entran, el panel CRECE más allá del 60% y se come el carrito. El
+`overflowX: auto` del strip no alcanzaba: **nunca llegaba a activarse**, porque el panel le
+cedía el ancho antes de que hubiera algo que scrollear.
+
+**Medido** con los nombres reales de G-10 (área útil = viewport − 224 del sidebar):
+
+| viewport | categorías | catálogo | carrito | ¿cobrable? |
+|---|---|---|---|---|
+| 1024 | 2–4 | 480 (=60%) | 320 | sí |
+| 1024 | **5** | 548 | **253** | sí, degradado |
+| 1024 | **7** | 714 | **86** | **NO** |
+| 1280 | 2–5 | 634 (=60%) | 422 | sí |
+| 1280 | **10** | 974 | **82** | **NO** |
+
+🔴 **G-10 tiene 5 categorías reales** (Cocteles, Bebidas, Utensilios, Adiciones, Vaper):
+**ya estaba degradado en producción** —carrito de 253px en vez de 320, un 21% menos— y a
+**dos categorías** de que su cajero no pudiera cobrar en una terminal de 1024px.
+El umbral depende del **ancho del texto**, no del número: 5 categorías de nombre largo
+pesan más que 8 cortas.
+
+**El arreglo son TRES cosas, no una** (quitar cualquiera lo deja a medias):
+1. `minWidth: 0` en el panel del catálogo — la causa.
+2. `flexShrink: 0` en los botones de tab. Sin esto, una vez acotado el panel los tabs se
+   COMPRIMEN en vez de desbordar y el overflow sigue sin activarse: **el bug se muda en
+   vez de resolverse**.
+3. Máscara de continuación (`useScrollOverflow`), porque la scrollbar está oculta
+   (`scrollbarWidth: none`) y sin señal el cajero no sabe que puede desplazarse.
+
+Verificado después del fix en 18 combinaciones (2→10 categorías × 1024/1280): catálogo
+clavado en 60%, carrito íntegro (320 / 422) **en todas**, y máscara ⟺ desborde coherente
+en las 18. El caso común (pocas categorías) queda **idéntico** a antes del fix.
+
+🔴 **`useScrollOverflow` estaba ROTO y nadie lo sabía — `useRef` → callback ref.**
+El hook quedaba MUDO cuando el consumidor tiene un return temprano de carga: el efecto
+corría en un render donde el nodo aún no estaba montado (`ref.current === null`), salía sin
+montar observers, y al montarse el nodo **el efecto no volvía a correr** porque `deps` no
+había cambiado. `hasMore` se congelaba en `false` para siempre. Encontrado con una sonda
+`console.log` DENTRO del hook: la secuencia real era `efecto corre, el=NULL` repetido, con
+el strip desbordando de verdad (scrollWidth 666 vs clientWidth 432).
+El POS lo destapó porque su return de carga lo gobierna **otra query** distinta de la que
+viaja en `deps`; **Productos y Delivery tenían la misma fragilidad latente y funcionaban
+por casualidad de timing.** Con callback ref el montaje se ata a que el NODO aparezca, que
+es la condición real. Se sumaron además: observar los HIJOS (el contenedor puede no cambiar
+de tamaño mientras su contenido crece), un re-chequeo en `requestAnimationFrame` y otro en
+`document.fonts.ready`.
+
+**Spec:** `tests/pos-categorias-layout.spec.ts` (3). Usa **7 categorías a 1024px** a
+propósito: es el punto que rompe sin el fix — verificado quitando el `minWidth: 0`, el test
+da `Expected: 480, Received: 714`. Los nombres son realistas y no `cat-1`, `cat-2`: con
+nombres cortos entrarían de sobra y el test sería vacuo.
+
+⚠️ **PENDIENTE DE VERIFICAR EN PRODUCCIÓN:** cuántas categorías activas tienen G-10 y
+Salchimelo. No se puede consultar desde el laboratorio —la RLS `categories` es por sede y
+las credenciales de LAB solo ven LAB—, así que hay que correrlo en el SQL Editor:
+`select r.name, count(*) from categories c join restaurants r on r.id = c.restaurant_id
+where c.is_active group by 1 order by 2 desc;`
+Con ≥5 en una terminal de 1024px, ese cliente **ya estaba degradado** antes de este fix.
+
 ### FASE 2 — banner de suscripción (implementada, sesión 2026-08-18)
 
 G-Vento **LEE** la bandera y muestra un aviso. **SOLO UI: no bloquea NADA.** Ni reportes, ni
@@ -672,9 +737,16 @@ moroso que abre devtools se resuelve con una llamada. **Sin RLS y sin triggers p
 
 E2E pasó de 160 a 177 con 17 tests nuevos, uno por ajuste:
   - **Categorías en Productos:** los tabs no se podían desplazar. El strip ya tenía
-    `overflowX: auto`; lo que faltaba era `flex:1` + `minWidth:0` — es flex item del toolbar,
-    no hijo en bloque como en el POS, así que crecía con su contenido (medido: `clientWidth`
-    3255 en un viewport de 900) en vez de acotarse. + máscara de continuación.
+    `overflowX: auto`; lo que faltaba era `flex:1` + `minWidth:0` (medido: `clientWidth`
+    3255 en un viewport de 900). + máscara de continuación.
+    ⚠️ **CORREGIDO 2026-08-19:** esta nota decía "no hijo en bloque **como en el POS**",
+    dando a entender que el POS estaba a salvo. **Era falso y mandaba a descartar justo el
+    lugar del bug** — ver el bloque del desborde del POS más abajo. La mecánica de verdad,
+    que es lo que hay que recordar: **un flex item sin `minWidth: 0` conserva
+    `min-width: auto`, se niega a bajar de su ancho min-content y SE COME AL HERMANO.**
+    Da igual si el contenedor con scroll es hijo en bloque o flex item: lo que decide es si
+    el ANCESTRO FLEX está acotado. En Productos el que faltaba acotar era el strip; en el
+    POS, el panel del catálogo.
   - **Recibo al cerrar mesa:** Mesas no ofrecía ticket (solo `printComanda`). Usa
     `printSaleTicket`, la misma función que la reimpresión del Historial ⇒ ticket
     byte-idéntico. Con BOTÓN, como el POS (auto-imprimir gasta papel si nadie lo pide).
