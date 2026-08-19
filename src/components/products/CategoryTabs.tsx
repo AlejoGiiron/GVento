@@ -20,11 +20,16 @@ export function CategoryTabs({ categories, activeId, productCounts, onSelect, on
   const { ref: scrollRef, hasMore } = useScrollOverflow<HTMLDivElement>('x', categories)
 
   // El strip SIEMPRE tuvo overflowX auto, pero acá es un FLEX ITEM del toolbar de
-  // ProductsPage (al lado del buscador de 220px con flexShrink 0), no un hijo en
-  // bloque como en el POS. Sin `flex:1` + `minWidth:0` no tiene un ancho disponible
-  // definido dentro de la línea flex y el overflow no llega a activarse: los tabs de
-  // más quedan fuera de alcance. En el POS scrollea porque ahí el ancho se lo da el
-  // bloque contenedor por definición.
+  // ProductsPage (al lado del buscador de 220px con flexShrink 0). Sin `flex:1` +
+  // `minWidth:0` no tiene un ancho disponible definido dentro de la línea flex y el
+  // overflow no llega a activarse: los tabs de más quedan fuera de alcance.
+  //
+  // ⚠️ Este comentario afirmaba que "en el POS scrollea porque ahí el ancho se lo da
+  // el bloque contenedor por definición". ERA FALSO: en el POS el overflow tampoco se
+  // activaba, porque el ancestro flex (el panel del catálogo) no estaba acotado y
+  // crecía comiéndose el carrito. Se corrigió el 2026-08-19 con su medición.
+  // La regla real: lo que decide no es si el contenedor con scroll es hijo en bloque
+  // o flex item, sino si su ANCESTRO FLEX tiene `minWidth: 0`.
   return (
     <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
       <div
