@@ -155,10 +155,30 @@ let VASO = ''       // seed: insumo con tracking
 let CERVEZA = ''    // seed: simple SIN tracking
 
 // ── UI helpers ──────────────────────────────────────────────────────────────
+
+/**
+ * Fila cuyo número de venta es EXACTAMENTE `#N`.
+ *
+ * ⚠️ NO usar `filter({ hasText: `#${number}` })`: `hasText` es SUBCADENA sobre el
+ * texto concatenado de la fila, y el número y la fecha son dos <span> hermanos
+ * sin separador en el textContent. La fila de la venta #14 del 11/08 concatena
+ * como `#1411/08/26, 10:03 p. m.`, que CONTIENE `#141` → al llegar el lab a la
+ * venta #141, el locator resolvía a 2 elementos y reventaba por strict mode.
+ * Es una colisión de datos latente (#15/#151, #16/#161…), no un flake: aparece
+ * cuando el correlativo cruza un número cuyo prefijo ya existe y la fecha
+ * empieza con el dígito que completa el nuevo número.
+ *
+ * `getByText(..., { exact: true })` matchea el <span> del número completo, así
+ * que `#14` ya no matchea cuando se busca `#141`.
+ */
+function saleRow(page: Page, testid: string, number: number) {
+  return page.getByTestId(testid).filter({ has: page.getByText(`#${number}`, { exact: true }) })
+}
+
 async function openSaleDetail(page: Page, number: number) {
   await page.goto('/historial')
   await page.getByTestId('sales-search').fill(String(number))
-  await page.getByTestId('sale-row').filter({ hasText: `#${number}` }).first().click()
+  await saleRow(page, 'sale-row', number).first().click()
   await expect(page.getByTestId('sale-detail-modal')).toBeVisible()
 }
 
@@ -414,7 +434,7 @@ test.describe.serial('Anulación de ventas', () => {
     // La fila del historial muestra el badge (navegar desmonta el modal).
     await page.goto('/historial')
     await page.getByTestId('sales-search').fill(String(number))
-    await expect(page.getByTestId('sale-row').filter({ hasText: `#${number}` }).getByTestId('sale-voided-badge')).toBeVisible()
+    await expect(saleRow(page, 'sale-row', number).getByTestId('sale-voided-badge')).toBeVisible()
   })
 
   test('UI: con filtro de método, la anulada sale de la lista y aparece en cancelled-sales-section', async ({ page }) => {
@@ -428,11 +448,11 @@ test.describe.serial('Anulación de ventas', () => {
     await page.getByTestId('sales-method').selectOption('cash')
 
     // La anulada NO está en la lista paginada (perdió sus payments)...
-    await expect(page.getByTestId('sale-row').filter({ hasText: `#${number}` })).toHaveCount(0)
+    await expect(saleRow(page, 'sale-row', number)).toHaveCount(0)
     // ...pero SÍ en la sección "Anuladas", con su badge y clickeable al detalle.
     const section = page.getByTestId('cancelled-sales-section')
     await expect(section).toBeVisible()
-    const row = section.getByTestId('cancelled-sale-row').filter({ hasText: `#${number}` })
+    const row = section.getByTestId('cancelled-sale-row').filter({ has: page.getByText(`#${number}`, { exact: true }) })
     await expect(row).toBeVisible()
     await expect(row.getByTestId('sale-voided-badge')).toBeVisible()
     await row.click()
