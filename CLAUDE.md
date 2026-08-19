@@ -466,7 +466,16 @@ que un fallo se investigue en vez de enmascararse con un reintento.
   ⚠️ **eslint con 6 errores PREEXISTENTES** (ajenos, anotados con archivo y línea en
   Deudas vigentes — la afirmación "eslint 0" que traía este bloque ya no era cierta).
 
-Después, sesión **2026-08-16/17**: auditoría de orden de operaciones de `aplicar-estado`
+Después, sesión **2026-08-18**: **FASE 2 del estado de suscripción — el banner de lectura**
+  (bloque propio abajo). Solo `expiring` y `grace`, solo UI, fail-open, sin Realtime.
+  Verificado: unit **285/285** (261 previos + 24 nuevos), `suscripcion-banner.spec.ts`
+  **12/12** contra LAB y la Edge Function desplegada (exit 0 leído de archivo, no de una
+  tubería), tsc 0 y eslint limpio en los archivos tocados.
+  ⚠️ **La suite E2E full NO se volvió a correr en esta sesión** — pendiente antes de promover.
+  El conteo full sube en 12 solo si `E2E_GCENTRO_HMAC_SECRET` está en `.env.test`; sin esa
+  variable son 12 skips.
+
+Antes, sesión **2026-08-16/17**: auditoría de orden de operaciones de `aplicar-estado`
   + el arreglo del `organization_id` malformado (commit `eb179d3`, ya desplegado). La
   suite full NO se volvió a correr; lo verificado es `suscripcion-estado.spec.ts`
   **8 passed + 1 skipped** contra la función desplegada, tsc 0 y eslint limpio en los
@@ -538,25 +547,33 @@ G-Centro (panel de suscripciones, **repo y BD aparte**) ESCRIBE una bandera en
   `subscription_updated_at` significa *"cuándo CAMBIÓ el estado"*, no *"cuándo llamaron"*:
   re-aplicar el mismo estado es un no-op.
 - 🔴 **CAMBIAR EL `CHECK` DE `subscription_status` EXIGE AVISAR A G-CENTRO ANTES DE
-  DESPLEGARLO.** El enum vive en TRES lados que no se enteran entre sí: el `CHECK` de la BD,
-  la constante `ESTADOS` de la Edge Function y el `ESTADOS` del spec. Agregar un estado y
-  desplegarlo sin aviso hace que G-Centro mande un valor que la función rechaza con 400 —
-  el panel cree haber aplicado un estado que nunca se escribió. **Esta es la fragilidad real
-  del puente**, y crece cuando exista la Fase 2: ahí un estado no aplicado es un cliente
-  que no queda restringido, o uno restringido que no debía. No es un problema de código
-  —los tres lados se tocan en una pasada— sino de COORDINACIÓN entre dos repos con dueños
-  distintos: el aviso va primero, el deploy después.
-- ⚠️ **EL GATING NO ESTÁ IMPLEMENTADO (Fase 2 en adelante).** Hoy la bandera existe, la
-  Edge Function la escribe, y **NINGUNA PANTALLA LA LEE**: cero consultas a
-  `subscription_status` en toda la app, ningún flujo cambia. G-Vento se comporta
-  exactamente igual con un cliente en `active` que en `suspended`.
-  🔴 **Es la confusión que YA tuvo G-Centro**: pusieron un tenant en `suspended` esperando
-  ver un banner en el POS, y no pasó nada — porque el banner no existe. Escribir la bandera
-  y REACCIONAR a la bandera son dos fases distintas, y solo la primera está hecha. Si estás
-  probando desde G-Centro y "no se ve nada en G-Vento", **eso es el comportamiento
-  esperado**, no un bug: la verificación de que la escritura funcionó se hace mirando la
-  columna en la BD, no la pantalla.
-  Dos decisiones ya tomadas para cuando se construya:
+  DESPLEGARLO.** El enum vive en **CUATRO** lados que no se enteran entre sí: el `CHECK` de
+  la BD, la constante `ESTADOS` de la Edge Function, el `ESTADOS` del spec de Fase 1 y —desde
+  la Fase 2— **el lector del frontend** (`resolveNotice` en `src/hooks/useSubscriptionStatus.ts`,
+  que decide qué estados producen aviso). **No existe ningún mecanismo que garantice el
+  aviso**: es coordinación entre dos repos con dueños distintos, no código. El aviso va
+  primero, el deploy después.
+  **La consecuencia CAMBIÓ con la Fase 2 — ya no es "da igual porque nadie lee":**
+  - Antes: un estado nuevo sin aviso lo rechazaba la función con 400 y el panel creía haber
+    aplicado algo que nunca se escribió.
+  - Ahora se suma un modo de fallo más silencioso: un estado que la BD SÍ acepte pero que el
+    frontend no conozca **cae en el default del switch y no muestra nada**. Eso es fail-open
+    y está BIEN —es la regla de la Fase 2, nada degrada por un valor que no entendemos—,
+    **pero significa que G-Centro puede creer que avisó a un cliente que nunca vio nada.**
+    La escritura fue exitosa y aun así el cajero no se enteró: los dos lados quedan
+    convencidos de que el aviso llegó.
+  **Esta sigue siendo la fragilidad real del puente**, y crece con cada fase: hoy el costo es
+  un aviso que no se ve; con `restricted`/`suspended` implementados sería un cliente que no
+  queda restringido, o uno restringido que no debía.
+- ✅ **LA FASE 2 YA ESTÁ IMPLEMENTADA (banner de lectura) — ver su bloque propio abajo.**
+  Lo que sigue SIN implementar es el **gating**: ningún flujo se bloquea, en ningún estado.
+  🔴 **Ojo con la confusión que YA tuvo G-Centro** (pusieron un tenant en `suspended`
+  esperando un banner en el POS y no pasó nada): **hoy sigue sin pasar nada con
+  `suspended`**, pero por otro motivo. Ya no es que ninguna pantalla lea la bandera — la lee
+  — sino que el alcance de la Fase 2 son SOLO `expiring` y `grace`. `restricted` y
+  `suspended` caen a propósito en el default del switch y no muestran nada.
+  **Para ver el banner desde G-Centro hay que escribir `expiring` o `grace`.**
+  Dos decisiones ya tomadas para cuando se construya el gating:
   **`suspended` NO toca la apertura de turno** (bloquearla ES bloquear la venta, con un día
   de retraso y en el peor momento; además el gate de turno es de UI y no de seguridad, así
   que solo sacaría las ventas del cuadre) y **el export NUNCA se bloquea**, en ningún nivel.
@@ -568,6 +585,88 @@ G-Centro (panel de suscripciones, **repo y BD aparte**) ESCRIBE una bandera en
 - **Los UUID de las organizaciones NO están en este documento**: se consultan con la query
   del encabezado de `supabase/organization-subscription.sql`, que los lee siempre
   actualizados. Recordar que **LAB no es un cliente que pague** (ver la sección del lab).
+
+### FASE 2 — banner de suscripción (implementada, sesión 2026-08-18)
+
+G-Vento **LEE** la bandera y muestra un aviso. **SOLO UI: no bloquea NADA.** Ni reportes, ni
+configuración, ni exportaciones, ni la venta. El bien protegido es la cobranza, no los datos
+del cliente: un falso positivo en una política de BD es un bar que no vende de madrugada; un
+moroso que abre devtools se resuelve con una llamada. **Sin RLS y sin triggers para esto.**
+
+- **Alcance deliberado: solo `expiring` (aviso DESCARTABLE) y `grace` (banner PERSISTENTE).**
+  `restricted` y `suspended` **NO se implementaron** — se dejan hasta saber si el aviso suave
+  alcanza. Caen en el default del switch como cualquier estado desconocido.
+- **Sin migración: la Fase 2 es frontend puro.** La policy `"organizations: ver la propia"`
+  ya permitía el SELECT y `organizationId` ya estaba en `AuthContext`. Las 3 columnas sí se
+  agregaron **A MANO** a `database.types.ts` (deuda del CLI 403, como el resto).
+- 🔴 **FAIL-OPEN, con el `switch` SIN `else`.** Todo lo que no sea exactamente `expiring` o
+  `grace` devuelve null y no muestra nada: `active`, los dos estados no implementados, un
+  valor nuevo que agregue G-Centro, la columna nula, y la lectura fallida. La asimetría es
+  la regla: mostrar de menos es aceptable, degradar a un cliente por una bandera que no
+  supimos leer no lo es.
+- 🔴 **EL TIMESTAMP NO DECIDE — y el pedido original decía lo contrario.** Se pidió asumir
+  activa si `subscription_updated_at` era viejo; es un error y se corrigió antes de
+  implementar. `subscription_updated_at` significa *"cuándo CAMBIÓ el estado"*: un cliente
+  estable en `grace` hace tres semanas tiene el timestamp viejo **y es correcto**. Caducar
+  por antigüedad haría desaparecer el banner solo — la degradación por timeout que se quería
+  evitar, invertida. Se lee solo como diagnóstico. La razón está escrita en el hook.
+- **Mensaje NULL → texto por defecto, NUNCA silencio** (aplica también a `''` y a solo
+  espacios). Si un NULL apagara el banner, G-Centro tendría un **interruptor accidental**:
+  un campo opcional decidiría si el cliente se entera. El estado es el contrato; el mensaje
+  es presentación.
+- **Dónde vive:** `SubscriptionBanner` en `AppLayout`, fila hermana debajo del header y
+  **ARRIBA** del banner de turno — el mismo slot que ya usaba el aviso de "no hay turno".
+  **Comprime `<main>`, no se superpone:** ninguna pantalla bajo AppLayout usa `100vh`
+  (verificado: cero ocurrencias), todas derivan su alto del padre con `height:100%`.
+  Medido: 41px una línea, 61px dos, 81px tres — 6% a 12% del alto útil en 720p.
+  **Cocina NO lo recibe** y está bien: `/cocina` vive fuera de `ProtectedRoute` y de
+  `AppLayout`, sin Supabase Auth ni organización — es la tablet de cocina, no una pantalla
+  donde se cobre. **Apilamiento con el banner de turno: aceptado** (dos filas, 102px); es
+  infrecuente y el de turno se resuelve en segundos.
+- **Descarte (solo `expiring`): dura el DÍA CALENDARIO de Bogotá**, en `localStorage` bajo
+  `gvento:suscripcion:descartado` = `{estado, dia}` (precedente: `useCollapsedGroups`, mismo
+  degradado silencioso). Un descarte permanente anularía el aviso; uno que vuelve en cada
+  recarga entrena a ignorarlo. Se guarda el **estado junto al día** para que descartar
+  `expiring` no tape un `grace` que llegue el mismo día.
+  Es **por navegador, no por usuario**: en un POS compartido, si un cajero descarta, el del
+  turno siguiente no lo ve ese día. Asumido — es un aviso del negocio.
+  ⚠️ Residuo conocido, no bug: si la bandera va y vuelve al MISMO estado el mismo día
+  (`expiring`→`grace`→`expiring`), el descarte original sigue valiendo.
+- **Largo del mensaje: se le pidió a G-Centro un tope de 140 caracteres** (ellos proponían
+  280). Medido en Chromium, máximo en UNA línea: **106** @1024px, **145** @1280, **157**
+  @1366, **248** @1920. 280 **no rompe** el layout (2 líneas, 3 en 1024) — se bajó a 140 por
+  economía de espacio, no por necesidad. Ojo: el proyecto declara `Inter` pero **no la carga
+  como webfont**, así que resuelve a `system-ui` y las cifras se mueven según la máquina.
+- 🔴 **Texto sin espacios: se RECORTABA EN SILENCIO.** Una corrida sin oportunidad de corte
+  (un token, un id) desbordaba un flex item bajo un ancestro `overflow-hidden` y quedaba
+  invisible **sin ninguna señal** — no desbordaba la página, simplemente dejaba de verse. Se
+  arregló con `min-width:0` + `overflow-wrap:anywhere` **en los DOS banners**: el nuevo y el
+  de turno, que tenía la misma carencia y hoy no molesta solo porque su texto es una
+  constante nuestra. Un tope de caracteres NO protege de esto.
+- **SIN Realtime (decisión, no omisión).** Lectura al login + `refetchOnWindowFocus` (default
+  de React Query, no hay `defaultOptions.queries`) + `staleTime` de 5 min. Para una bandera
+  que cambia una vez al mes la latencia es **amortiguación**, no carencia; y una bandera que
+  cambia sola en medio de un cobro es el modo de fallo que se cazó con `checkoutOrder` en
+  TablesPage. **No "mejorar" esto con Realtime.** La razón está escrita en el hook.
+- **Tests: 24 unitarios + 12 E2E.**
+  - `src/hooks/useSubscriptionStatus.test.ts` — matriz fail-open de `resolveNotice`. Cubre lo
+    que el E2E NO PUEDE: un `subscription_status` fuera del enum lo rechazan la función y el
+    `CHECK`, así que ese caso solo se prueba sin red.
+  - `tests/suscripcion-banner.spec.ts` — escribe cada escenario **por la Edge Function
+    firmada con HMAC**, el mismo camino que usa G-Centro (authenticated no puede escribir
+    estas columnas: es el punto de la Fase 1). Beneficio lateral: cada corrida revalida que
+    la función siga viva y que "Verify JWT" siga desactivado.
+    ⚠️ **Este spec SÍ cambia el estado de suscripción de LAB** (el de Fase 1 a propósito no).
+    Snapshot + restore; `subscription_updated_at` queda con la hora de la corrida y no se
+    puede restaurar por ese camino. Requiere `E2E_GCENTRO_HMAC_SECRET`; sin él, skip.
+  - **Auditado POR MUTACIÓN en las dos direcciones** (método del proyecto): con
+    `resolveNotice`→null mueren los positivos y sobreviven los 3 de fail-open —inherente a su
+    forma, están MARCADOS en el spec para que una auditoría futura no los "arregle"—; con
+    `resolveNotice`→siempre-aviso mueren esos 3. Ninguno es vacuo.
+- **Nota de proceso:** `vitest.config.ts` no heredaba el alias `@` de `vite.config.ts` (es
+  una config aparte), así que ningún módulo de `src/` que importe con `@/...` era testeable.
+  Se le agregó el alias. Los tests viejos no lo notaron porque viven en `src/lib/` con rutas
+  relativas.
 
 ### Sesión previa (2026-08-10) — ajustes del cliente + Delivery
 
