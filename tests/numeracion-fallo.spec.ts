@@ -134,16 +134,39 @@ test.describe.serial('Numeración: fallo visible + reintento', () => {
     await page.getByRole('button', { name: 'Nueva venta' }).click()
   })
 
-  test('limpieza: cerrar turno, borrar producto y categoría', async ({ page }) => {
+  test('limpieza: cerrar turno, desactivar producto y categoría', async ({ page }) => {
+    // 🔴 ESTA LIMPIEZA NO LIMPIABA NADA, y no fallaba: fallaba en SILENCIO.
+    // Eran dos defectos encadenados:
+    //  1. La confirmación de "Desactivar" un producto es un MODAL DE LA APP con
+    //     botón "Sí, desactivar", no un `window.confirm` nativo. El test esperaba
+    //     el nativo (`page.once('dialog')`), que nunca llega ⇒ el producto seguía
+    //     activo.
+    //  2. La categoría se "limpiaba" con un `click({button:'right'}).catch(()=>{})`
+    //     — un no-op que además se tragaba su propio error. Y aunque se hubiera
+    //     hecho bien, la app RECHAZA desactivar una categoría con productos
+    //     activos ("Hay 1 producto en esta categoría"), así que sin (1) tampoco
+    //     habría funcionado.
+    // Resultado: cada corrida dejaba una categoría `E2E NumFail ...` viva.
+    // Consecuencia real (2026-08-19): con 5 acumuladas, el strip de categorías del
+    // POS empujaba el carrito fuera de pantalla y tumbó 3 tests AJENOS (pos.spec y
+    // venta-espera) por residuo que no era de ellos.
+    // Por eso cada paso ahora TERMINA EN UNA ASERCIÓN: una limpieza que no
+    // verifica es indistinguible de una que no corre.
     await loginAsOwner(page)
     await closeShiftIfOpen(page)
 
     await page.goto('/productos')
     await page.getByPlaceholder('Buscar producto...').fill(PROD)
-    page.once('dialog', (d) => d.accept())
     await page.getByTitle('Desactivar', { exact: true }).first().click()
+    await page.getByRole('button', { name: 'Sí, desactivar' }).click()
+    await expect(page.getByText(/Sin resultados/)).toBeVisible()
 
-    await page.goto('/productos')
-    await page.getByRole('button', { name: new RegExp(CAT) }).click({ button: 'right' }).catch(() => {})
+    const tab = page.getByRole('button', { name: new RegExp(CAT) })
+    await tab.getByTitle('Editar categoría').click()
+    const sw = page.getByRole('switch')
+    await expect(sw).toHaveAttribute('aria-checked', 'true')
+    await sw.click()
+    await page.getByRole('button', { name: 'Guardar cambios' }).click()
+    await expect(tab).toHaveCount(0)
   })
 })

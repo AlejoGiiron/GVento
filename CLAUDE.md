@@ -115,6 +115,56 @@ Ejemplo: TablesPage usa `checkoutOrder` en lugar de `selectedOrder` para control
 `TableCheckoutModal`. Si `selectedOrder` se vuelve null por Realtime durante el cobro,
 el modal no se desmonta.
 
+### Efecto que depende de una ref: CALLBACK REF, no `useRef`
+
+**Un `useEffect` que lee `ref.current` puede correr ANTES de que el nodo exista si el
+consumidor tiene un return temprano (un estado de carga). Y si sus `deps` no cambian
+después, NO VUELVE A CORRER NUNCA: el efecto queda muerto y la funcionalidad,
+ausente. El síntoma es que algo no aparece — sin error, sin log, sin nada que falle.
+Solo se detecta MIDIENDO, no leyendo el código.**
+
+El caso que lo fijó (2026-08-19, `src/hooks/useScrollOverflow.ts`). El hook montaba su
+`ResizeObserver` dentro de un efecto con `deps = [axis, deps]` y salía temprano si
+`ref.current` era null:
+
+```
+efecto corre, el= NULL      <- el consumidor estaba en su return de carga
+efecto corre, el= NULL
+(el nodo monta, pero `deps` no cambió ⇒ el efecto no se re-ejecuta)
+hasMore === false PARA SIEMPRE
+```
+
+En el POS el return de carga lo gobierna **una query distinta** de la que viaja en `deps`,
+así que el nodo montaba en un render donde el efecto no corría. **Productos y Delivery
+tenían exactamente la misma fragilidad y funcionaban por casualidad de timing.**
+
+Por qué es especialmente traicionero: **el modo de fallo es SILENCIOSO y BENIGNO en
+apariencia.** Una máscara de continuación que no aparece no rompe nada visible; solo
+significa que el cajero no se entera de que hay más contenido. Nadie abre un bug por eso.
+Se encontró midiendo la coherencia `desborda ⟺ máscara` en 18 combinaciones y viendo 14
+incoherentes, y se confirmó con una sonda `console.log` DENTRO del hook.
+
+**La regla:** si el setup de un efecto depende de que un NODO exista, atalo al nodo, no a
+las deps. Con callback ref el efecto se dispara cuando el nodo aparece —que es la
+condición real— y deja de depender del orden de los renders:
+
+```ts
+const [node, setNode] = useState<T | null>(null)
+const ref = useCallback((n: T | null) => setNode(n), [])   // identidad estable
+useEffect(() => { if (!node) return; /* observers */ }, [axis, deps, node])
+```
+
+⚠️ La identidad del callback **debe** ser estable (`useCallback` con deps vacías): si
+cambiara en cada render, React lo llamaría con `null` y con el nodo en cada pasada y el
+efecto se remontaría sin parar.
+
+Corolarios que salieron del mismo arreglo:
+- **Un `ResizeObserver` sobre el contenedor no ve crecer su CONTENIDO.** Si el contenedor
+  conserva su tamaño mientras entran más hijos, no dispara. Observar también los hijos.
+- Re-chequear en `requestAnimationFrame` (el layout del contenido recién insertado puede
+  no estar resuelto en el primer paso del efecto) y en `document.fonts.ready` (un cambio
+  de tipografía cambia el ancho de los hijos sin cambiar el del contenedor).
+
 ### Filtros de privacidad: ALLOWLIST por clave, nunca deny-list
 
 **Un filtro de privacidad por deny-list no puede funcionar: un nombre propio es
@@ -403,6 +453,36 @@ Resumen rápido:
 - **Los flujos de caja y mesas mutan estado** — los specs limpian tras de sí, pero
   pueden acumular residuos entre corridas (p. ej. mesas ocupadas). `closeShiftIfOpen`
   cierra la caja del lab. Ver tests/README.md.
+- 🔴 **EL LAB NO ES DETERMINISTA ENTRE CORRIDAS, y el modo de fallo es que un spec
+  tumbe a OTRO.** No alcanza con que cada spec limpie: alcanza con que UNO no limpie.
+  **Evidencia medida (2026-08-19), no teórica:** la limpieza de
+  `numeracion-fallo.spec.ts` no limpiaba nada y no fallaba —fallaba en silencio—, así
+  que cada corrida dejaba viva una categoría `E2E NumFail ...`. Con **5 acumuladas**, el
+  strip de categorías del POS empujó el carrito fuera de pantalla y **tumbó 3 tests
+  ajenos** (`pos.spec.ts:12`, `venta-espera.spec.ts:21` y `:37`), que fallaban por
+  residuo que no era de ellos. Se perdió una tarde diagnosticando el spec equivocado.
+  Consecuencias prácticas:
+  - **Ante un rojo en un spec que no tocaste, sospechá del ESTADO antes que del código.**
+    El discriminador barato: `git stash -u` y correr el mismo spec sobre el árbol limpio.
+    Si falla igual, no es tu cambio.
+  - Una limpieza **sin aserción es indistinguible de una que no corre**. Toda limpieza
+    termina verificando que lo que borró ya no está.
+  - Ojo con las confirmaciones: en esta app "Desactivar" un producto abre un **modal
+    propio con botón "Sí, desactivar"**, NO un `window.confirm` nativo. Un
+    `page.on('dialog')` esperando el nativo no dispara nunca y el paso se salta en
+    silencio — eso es exactamente lo que pasó acá. Y la app **rechaza desactivar una
+    categoría con productos activos**, así que el orden es: productos primero, categoría
+    después.
+  - Cuando el lab se ensucia igual, barrer el residuo es legítimo: son datos de prueba.
+    Verificar con `select name, is_active from categories where name like 'E2E %'`.
+- ⚠️ **HAY UN SOLO LAB, ASÍ QUE LAS CORRIDAS DE DISTINTAS RAMAS SE HEREDAN ENTRE SÍ.**
+  Correr la suite sobre `main` (p. ej. para validar un cherry-pick antes de promover) deja
+  LAB en el estado que produjo **el código de main**, y la siguiente corrida de `develop`
+  arranca desde ahí. Los specs no lo notan mientras cada uno limpie lo suyo —por eso
+  importa el punto anterior—, pero es la primera hipótesis a revisar si aparece un rojo
+  raro justo después de haber probado otra rama. **No es problema hoy; está escrito para
+  que no se diagnostique el código cuando la causa es de qué rama vino el estado.**
+  Aplica igual a `git stash` + correr: lo que quede en LAB no se revierte con el árbol.
 
 ## Política de testing (obligatoria)
 - Todo módulo o funcionalidad nueva **DEBE** incluir su spec E2E en `tests/` antes de
@@ -426,6 +506,38 @@ Orden correcto ante un rojo:
 2. El trace si hace falta (`npx playwright show-trace …`).
 3. Recién ahí re-correr.
 
+### Un defecto de CLASE se barre en toda la suite, no solo donde estalló
+
+**Cuando arreglés un defecto que es de CLASE y no de instancia, buscá las otras
+instancias en la misma pasada. El conocimiento puede estar YA en el repo y no haber
+llegado a todos los archivos.**
+
+El caso que lo fijó (2026-08-19): `anular-venta.spec.ts` reventó por un locator
+`filter({ hasText: '#141' })` que matcheaba también la venta `#14` (el número y la fecha
+son `<span>` hermanos y el `textContent` concatena sin separador: `#14` + `11/08/26` =
+`#1411/08/26`, que contiene `#141`).
+
+Lo revelador no fue el bug sino **que la lección ya estaba escrita**: `fiado.spec.ts:295`
+documentaba esa misma concatenación y la evitaba con `getByRole` + regex sobre el nombre
+accesible, y `pago-mixto` y `vale-descuento` habían copiado el patrón. **`anular-venta`
+era una instancia HUÉRFANA de un defecto ya resuelto** — la corrección se aplicó donde
+dolió y no se barrió el resto. Estalló meses después, cuando el correlativo del lab cruzó
+141, y costó una corrida full más el diagnóstico.
+
+Cómo se aplica:
+1. Al arreglar, preguntarse **cuál es la clase** (acá: "locator por subcadena sobre una
+   fila cuyo texto concatena celdas"), no solo cuál es el síntoma.
+2. `grep` de esa forma en toda la suite y clasificar. No todo lo que matchea es la misma
+   clase: la mayoría de los `hasText` del repo buscan nombres con sufijo `Date.now()`, que
+   no colisionan por prefijo.
+3. Arreglar las que sí lo son **en el mismo commit**, aunque estén en verde. Las que
+   todavía no estallaron son las que van a costar más caro después: nadie las va a asociar
+   con este arreglo.
+4. Si una instancia tiene una raíz distinta, decirlo. Las filas de `historial-turnos` eran
+   la misma clase pero por otro motivo: de sus seis celdas, cinco tenían `data-testid` y el
+   monto de apertura era la única sin uno, así que no había forma de acotar el locator. Se
+   agregó el testid faltante.
+
 ### ⚠️ Trampas de TERMINAL — el síntoma no señala la causa
 
 Dos cosas que ya costaron tiempo, juntas porque son la misma familia: **la
@@ -437,6 +549,19 @@ código.
   Playwright** — un `exit 0` con la suite en rojo. Costó anunciar una corrida
   verde que tenía un fallo. Para saber si pasó: redirigir a archivo y leer `$?`,
   o mirar el resumen, nunca el código de salida de una tubería.
+
+- 🔴 **LA NOTIFICACIÓN DE TAREA EN SEGUNDO PLANO REPORTA EL EXIT DEL *SHELL*, NO EL DE
+  PLAYWRIGHT.** Misma familia que lo anterior y **peor**, porque la mentira llega en un
+  mensaje del sistema que parece autoritativo. Si el comando termina en cualquier cosa
+  que salga bien —un `echo`, un `tail`, un `;` final—, ESE es el código que se informa.
+  **Medido el 2026-08-19: dijo "exit code 0" las 4 de 4 veces, incluidas DOS suites
+  ROJAS** (una con 1 fallo, otra con 3).
+  **Obligatorio:** escribir el código real DENTRO del archivo de salida y leerlo de ahí:
+  ```
+  npx playwright test --reporter=list > /tmp/e2e.txt 2>&1; echo "PLAYWRIGHT_EXIT=$?" >> /tmp/e2e.txt
+  ```
+  Y verificarlo con `grep PLAYWRIGHT_EXIT` antes de decir que algo está verde. **Nunca
+  anunciar una corrida verde a partir de la notificación.**
 
 - **Un `curl` multilínea pegado en Git Bash rompe las continuaciones de línea**
   (`\`), así que se ejecuta la primera línea sola: **la petición sale sin
@@ -457,6 +582,16 @@ varios specs sueltos). Si reaparece, el valor recibido discrimina: `0` = el KPI
 no se movió, `14000` = doble conteo, otro número = contaminación de datos.
 Con `retries: 0` un flake es DEUDA, no ruido: la config es así a propósito para
 que un fallo se investigue en vez de enmascararse con un reintento.
+
+🔶 **HIPÓTESIS con evidencia INDIRECTA (2026-08-19) — NO está cerrado.** La sospecha de
+"acumulación de estado en LAB" dejó de ser una corazonada: ese mismo día se DEMOSTRÓ que
+el lab acumula residuo entre corridas y que ese residuo **tumba tests ajenos** (las 5
+categorías `E2E NumFail` que voltearon `pos.spec` y `venta-espera` — ver el bloque del
+lab). Eso hace mucho más plausible la explicación, pero **no la verifica sobre ESTE
+test**: nadie reprodujo el fallo de `vale-descuento:243` con residuo controlado, y el
+mecanismo sería otro (contaminación de DATOS del KPI, no de layout).
+**Sigue abierto.** Para cerrarlo hace falta reproducirlo y leer el valor recibido, que
+es lo que discrimina. Si reaparece: **leer los artefactos ANTES de re-correr.**
 
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
@@ -644,12 +779,23 @@ propósito: es el punto que rompe sin el fix — verificado quitando el `minWidt
 da `Expected: 480, Received: 714`. Los nombres son realistas y no `cat-1`, `cat-2`: con
 nombres cortos entrarían de sobra y el test sería vacuo.
 
-⚠️ **PENDIENTE DE VERIFICAR EN PRODUCCIÓN:** cuántas categorías activas tienen G-10 y
-Salchimelo. No se puede consultar desde el laboratorio —la RLS `categories` es por sede y
-las credenciales de LAB solo ven LAB—, así que hay que correrlo en el SQL Editor:
+🔴 **VERIFICADO EN PRODUCCIÓN (2026-08-19) — era PEOR de lo estimado:**
+
+| cliente | categorías activas | a 1024px | a 1280px |
+|---|---|---|---|
+| **Salchimelo** | **9** | **INUSABLE** (rompe en 7) | a UNA categoría del límite (rompe en 10) |
+| **G-10** | **5** | degradado 21% (carrito 253 en vez de 320) | con margen |
+
+**Salchimelo probablemente YA tenía el POS roto**, no estaba por tenerlo: con 9 categorías
+supera el umbral de 7 de una terminal de 1024px. G-10 venía operando con un 21% menos de
+carrito. **Esto no era un hallazgo de laboratorio: era producción.**
+
+Dato que conviene mirar antes de sacar conclusiones sobre un cliente: **el umbral depende
+del ANCHO DEL TEXTO y de la RESOLUCIÓN REAL de la terminal**, no solo del conteo. La query
+para repetirlo (hay que correrla en el SQL Editor: la RLS de `categories` es por sede y las
+credenciales del lab solo ven LAB):
 `select r.name, count(*) from categories c join restaurants r on r.id = c.restaurant_id
 where c.is_active group by 1 order by 2 desc;`
-Con ≥5 en una terminal de 1024px, ese cliente **ya estaba degradado** antes de este fix.
 
 ### FASE 2 — banner de suscripción (implementada, sesión 2026-08-18)
 
