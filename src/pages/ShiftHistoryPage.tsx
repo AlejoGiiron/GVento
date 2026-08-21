@@ -177,7 +177,7 @@ export function ShiftHistoryPage() {
                 >
                   {/* Apertura: monto, quién abrió, cuándo (con cierre debajo) */}
                   <span style={{ minWidth: 0 }}>
-                    <span style={{ display: 'block', fontSize: 13.5, fontWeight: 700, color: '#0f172a', fontFamily: 'monospace' }}>
+                    <span data-testid="shift-opening" style={{ display: 'block', fontSize: 13.5, fontWeight: 700, color: '#0f172a', fontFamily: 'monospace' }}>
                       {formatCOP(row.opening_amount)}
                     </span>
                     <span data-testid="shift-opened-by" style={{ display: 'block', fontSize: 12, color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

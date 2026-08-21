@@ -115,6 +115,56 @@ Ejemplo: TablesPage usa `checkoutOrder` en lugar de `selectedOrder` para control
 `TableCheckoutModal`. Si `selectedOrder` se vuelve null por Realtime durante el cobro,
 el modal no se desmonta.
 
+### Efecto que depende de una ref: CALLBACK REF, no `useRef`
+
+**Un `useEffect` que lee `ref.current` puede correr ANTES de que el nodo exista si el
+consumidor tiene un return temprano (un estado de carga). Y si sus `deps` no cambian
+después, NO VUELVE A CORRER NUNCA: el efecto queda muerto y la funcionalidad,
+ausente. El síntoma es que algo no aparece — sin error, sin log, sin nada que falle.
+Solo se detecta MIDIENDO, no leyendo el código.**
+
+El caso que lo fijó (2026-08-19, `src/hooks/useScrollOverflow.ts`). El hook montaba su
+`ResizeObserver` dentro de un efecto con `deps = [axis, deps]` y salía temprano si
+`ref.current` era null:
+
+```
+efecto corre, el= NULL      <- el consumidor estaba en su return de carga
+efecto corre, el= NULL
+(el nodo monta, pero `deps` no cambió ⇒ el efecto no se re-ejecuta)
+hasMore === false PARA SIEMPRE
+```
+
+En el POS el return de carga lo gobierna **una query distinta** de la que viaja en `deps`,
+así que el nodo montaba en un render donde el efecto no corría. **Productos y Delivery
+tenían exactamente la misma fragilidad y funcionaban por casualidad de timing.**
+
+Por qué es especialmente traicionero: **el modo de fallo es SILENCIOSO y BENIGNO en
+apariencia.** Una máscara de continuación que no aparece no rompe nada visible; solo
+significa que el cajero no se entera de que hay más contenido. Nadie abre un bug por eso.
+Se encontró midiendo la coherencia `desborda ⟺ máscara` en 18 combinaciones y viendo 14
+incoherentes, y se confirmó con una sonda `console.log` DENTRO del hook.
+
+**La regla:** si el setup de un efecto depende de que un NODO exista, atalo al nodo, no a
+las deps. Con callback ref el efecto se dispara cuando el nodo aparece —que es la
+condición real— y deja de depender del orden de los renders:
+
+```ts
+const [node, setNode] = useState<T | null>(null)
+const ref = useCallback((n: T | null) => setNode(n), [])   // identidad estable
+useEffect(() => { if (!node) return; /* observers */ }, [axis, deps, node])
+```
+
+⚠️ La identidad del callback **debe** ser estable (`useCallback` con deps vacías): si
+cambiara en cada render, React lo llamaría con `null` y con el nodo en cada pasada y el
+efecto se remontaría sin parar.
+
+Corolarios que salieron del mismo arreglo:
+- **Un `ResizeObserver` sobre el contenedor no ve crecer su CONTENIDO.** Si el contenedor
+  conserva su tamaño mientras entran más hijos, no dispara. Observar también los hijos.
+- Re-chequear en `requestAnimationFrame` (el layout del contenido recién insertado puede
+  no estar resuelto en el primer paso del efecto) y en `document.fonts.ready` (un cambio
+  de tipografía cambia el ancho de los hijos sin cambiar el del contenedor).
+
 ### Filtros de privacidad: ALLOWLIST por clave, nunca deny-list
 
 **Un filtro de privacidad por deny-list no puede funcionar: un nombre propio es
@@ -372,6 +422,15 @@ Resumen rápido:
   camino los dos números coinciden por casualidad) y además repite el contador que cada columna
   ya muestra en su badge.
 ### Testing — laboratorio (LAB) MONTADO
+
+🔴 **LAB es una ORGANIZACIÓN más dentro de la BD compartida, y NO es un cliente que
+  pague.** Es el laboratorio. Importa para todo lo que trate a las organizaciones como
+  cuentas comerciales —empezando por el estado de suscripción que escribe G-Centro—:
+  LAB existe justamente para que G-Centro pueda probar el circuito completo sin tocar
+  clientes reales, así que **nunca debe entrar a un cobro, a una métrica de negocio ni a
+  un conteo de clientes activos.** Los clientes reales son G-10 y Salchimelo.
+  Los UUID de las tres organizaciones se obtienen con la query del encabezado de
+  `supabase/organization-subscription.sql` (no se hardcodean acá: se leen de la BD).
 - **✅ Laboratorio listo.** Existe la organización **LAB** (Supabase separado de
   producción) con **2 sedes**, los usuarios **owner.test** (rol owner) y
   **cajero.test** (rol cajero) con sus profiles, y productos de prueba. La suite
@@ -394,6 +453,36 @@ Resumen rápido:
 - **Los flujos de caja y mesas mutan estado** — los specs limpian tras de sí, pero
   pueden acumular residuos entre corridas (p. ej. mesas ocupadas). `closeShiftIfOpen`
   cierra la caja del lab. Ver tests/README.md.
+- 🔴 **EL LAB NO ES DETERMINISTA ENTRE CORRIDAS, y el modo de fallo es que un spec
+  tumbe a OTRO.** No alcanza con que cada spec limpie: alcanza con que UNO no limpie.
+  **Evidencia medida (2026-08-19), no teórica:** la limpieza de
+  `numeracion-fallo.spec.ts` no limpiaba nada y no fallaba —fallaba en silencio—, así
+  que cada corrida dejaba viva una categoría `E2E NumFail ...`. Con **5 acumuladas**, el
+  strip de categorías del POS empujó el carrito fuera de pantalla y **tumbó 3 tests
+  ajenos** (`pos.spec.ts:12`, `venta-espera.spec.ts:21` y `:37`), que fallaban por
+  residuo que no era de ellos. Se perdió una tarde diagnosticando el spec equivocado.
+  Consecuencias prácticas:
+  - **Ante un rojo en un spec que no tocaste, sospechá del ESTADO antes que del código.**
+    El discriminador barato: `git stash -u` y correr el mismo spec sobre el árbol limpio.
+    Si falla igual, no es tu cambio.
+  - Una limpieza **sin aserción es indistinguible de una que no corre**. Toda limpieza
+    termina verificando que lo que borró ya no está.
+  - Ojo con las confirmaciones: en esta app "Desactivar" un producto abre un **modal
+    propio con botón "Sí, desactivar"**, NO un `window.confirm` nativo. Un
+    `page.on('dialog')` esperando el nativo no dispara nunca y el paso se salta en
+    silencio — eso es exactamente lo que pasó acá. Y la app **rechaza desactivar una
+    categoría con productos activos**, así que el orden es: productos primero, categoría
+    después.
+  - Cuando el lab se ensucia igual, barrer el residuo es legítimo: son datos de prueba.
+    Verificar con `select name, is_active from categories where name like 'E2E %'`.
+- ⚠️ **HAY UN SOLO LAB, ASÍ QUE LAS CORRIDAS DE DISTINTAS RAMAS SE HEREDAN ENTRE SÍ.**
+  Correr la suite sobre `main` (p. ej. para validar un cherry-pick antes de promover) deja
+  LAB en el estado que produjo **el código de main**, y la siguiente corrida de `develop`
+  arranca desde ahí. Los specs no lo notan mientras cada uno limpie lo suyo —por eso
+  importa el punto anterior—, pero es la primera hipótesis a revisar si aparece un rojo
+  raro justo después de haber probado otra rama. **No es problema hoy; está escrito para
+  que no se diagnostique el código cuando la causa es de qué rama vino el estado.**
+  Aplica igual a `git stash` + correr: lo que quede en LAB no se revierte con el árbol.
 
 ## Política de testing (obligatoria)
 - Todo módulo o funcionalidad nueva **DEBE** incluir su spec E2E en `tests/` antes de
@@ -405,19 +494,405 @@ Resumen rápido:
 - Tests deterministas e idempotentes (aprendizaje: verificar con datos limpios).
 - Los tests corren en serie (`workers: 1`) por compartir backend.
 
+### 🔴 ANTE UN FALLO: LEER LOS ARTEFACTOS ANTES DE RE-CORRER
+
+**Playwright BORRA `test-results/` al arrancar cada corrida.** Re-correr para "ver
+si se repite" destruye el `error-context.md`, el screenshot, el video y el trace
+del fallo — que suelen ser la única forma de saber qué pasó, porque un flake por
+definición no se reproduce a pedido.
+
+Orden correcto ante un rojo:
+1. `test-results/**/error-context.md` — el **valor recibido** de la aserción.
+2. El trace si hace falta (`npx playwright show-trace …`).
+3. Recién ahí re-correr.
+
+### Un defecto de CLASE se barre en toda la suite, no solo donde estalló
+
+**Cuando arreglés un defecto que es de CLASE y no de instancia, buscá las otras
+instancias en la misma pasada. El conocimiento puede estar YA en el repo y no haber
+llegado a todos los archivos.**
+
+El caso que lo fijó (2026-08-19): `anular-venta.spec.ts` reventó por un locator
+`filter({ hasText: '#141' })` que matcheaba también la venta `#14` (el número y la fecha
+son `<span>` hermanos y el `textContent` concatena sin separador: `#14` + `11/08/26` =
+`#1411/08/26`, que contiene `#141`).
+
+Lo revelador no fue el bug sino **que la lección ya estaba escrita**: `fiado.spec.ts:295`
+documentaba esa misma concatenación y la evitaba con `getByRole` + regex sobre el nombre
+accesible, y `pago-mixto` y `vale-descuento` habían copiado el patrón. **`anular-venta`
+era una instancia HUÉRFANA de un defecto ya resuelto** — la corrección se aplicó donde
+dolió y no se barrió el resto. Estalló meses después, cuando el correlativo del lab cruzó
+141, y costó una corrida full más el diagnóstico.
+
+Cómo se aplica:
+1. Al arreglar, preguntarse **cuál es la clase** (acá: "locator por subcadena sobre una
+   fila cuyo texto concatena celdas"), no solo cuál es el síntoma.
+2. `grep` de esa forma en toda la suite y clasificar. No todo lo que matchea es la misma
+   clase: la mayoría de los `hasText` del repo buscan nombres con sufijo `Date.now()`, que
+   no colisionan por prefijo.
+3. Arreglar las que sí lo son **en el mismo commit**, aunque estén en verde. Las que
+   todavía no estallaron son las que van a costar más caro después: nadie las va a asociar
+   con este arreglo.
+4. Si una instancia tiene una raíz distinta, decirlo. Las filas de `historial-turnos` eran
+   la misma clase pero por otro motivo: de sus seis celdas, cinco tenían `data-testid` y el
+   monto de apertura era la única sin uno, así que no había forma de acotar el locator. Se
+   agregó el testid faltante.
+
+### ⚠️ Trampas de TERMINAL — el síntoma no señala la causa
+
+Dos cosas que ya costaron tiempo, juntas porque son la misma familia: **la
+herramienta miente sobre lo que pasó, y uno termina diagnosticando el sistema
+equivocado.** Ante un resultado raro, descartar estas dos ANTES de sospechar del
+código.
+
+- **`playwright test | tail` devuelve el exit code de `tail`, no el de
+  Playwright** — un `exit 0` con la suite en rojo. Costó anunciar una corrida
+  verde que tenía un fallo. Para saber si pasó: redirigir a archivo y leer `$?`,
+  o mirar el resumen, nunca el código de salida de una tubería.
+
+- 🔴 **LA NOTIFICACIÓN DE TAREA EN SEGUNDO PLANO REPORTA EL EXIT DEL *SHELL*, NO EL DE
+  PLAYWRIGHT.** Misma familia que lo anterior y **peor**, porque la mentira llega en un
+  mensaje del sistema que parece autoritativo. Si el comando termina en cualquier cosa
+  que salga bien —un `echo`, un `tail`, un `;` final—, ESE es el código que se informa.
+  **Medido el 2026-08-19: dijo "exit code 0" las 4 de 4 veces, incluidas DOS suites
+  ROJAS** (una con 1 fallo, otra con 3).
+  **Obligatorio:** escribir el código real DENTRO del archivo de salida y leerlo de ahí:
+  ```
+  npx playwright test --reporter=list > /tmp/e2e.txt 2>&1; echo "PLAYWRIGHT_EXIT=$?" >> /tmp/e2e.txt
+  ```
+  Y verificarlo con `grep PLAYWRIGHT_EXIT` antes de decir que algo está verde. **Nunca
+  anunciar una corrida verde a partir de la notificación.**
+
+- **Un `curl` multilínea pegado en Git Bash rompe las continuaciones de línea**
+  (`\`), así que se ejecuta la primera línea sola: **la petición sale sin
+  headers**. El síntoma es un **401 idéntico** al de un secreto equivocado o una
+  firma mal calculada, así que se pierde el tiempo revisando la credencial en vez
+  de la terminal. Pasó probando la Edge Function `aplicar-estado`, donde el 401
+  legítimo por HMAC inválido y el 401 por "no llegó ningún header" se ven igual.
+  Mitigación: envolver la llamada en una **función de shell** —que se pega como
+  bloque y se invoca en una línea— en vez de pegar el `curl` crudo. Los comandos
+  de prueba de `aplicar-estado` están escritos así por este motivo.
+
+**Flake abierto — `vale-descuento.spec.ts:243` (REPORTE de vales), 2026-08-11.**
+Falló en corrida full con `expect(after - before).toBe(7000)`; pasó en la corrida
+full siguiente y aislado (8/8). **Causa NO determinada:** los artefactos se
+perdieron por re-correr antes de leerlos — este bloque existe por eso. Sospecha
+sin confirmar: acumulación de estado en LAB (ese día hubo 3 corridas full más
+varios specs sueltos). Si reaparece, el valor recibido discrimina: `0` = el KPI
+no se movió, `14000` = doble conteo, otro número = contaminación de datos.
+Con `retries: 0` un flake es DEUDA, no ruido: la config es así a propósito para
+que un fallo se investigue en vez de enmascararse con un reintento.
+
+🔶 **HIPÓTESIS con evidencia INDIRECTA (2026-08-19) — NO está cerrado.** La sospecha de
+"acumulación de estado en LAB" dejó de ser una corazonada: ese mismo día se DEMOSTRÓ que
+el lab acumula residuo entre corridas y que ese residuo **tumba tests ajenos** (las 5
+categorías `E2E NumFail` que voltearon `pos.spec` y `venta-espera` — ver el bloque del
+lab). Eso hace mucho más plausible la explicación, pero **no la verifica sobre ESTE
+test**: nadie reprodujo el fallo de `vale-descuento:243` con residuo controlado, y el
+mecanismo sería otro (contaminación de DATOS del KPI, no de layout).
+**Sigue abierto.** Para cerrarlo hace falta reproducirlo y leer el valor recibido, que
+es lo que discrimina. Si reaparece: **leer los artefactos ANTES de re-correr.**
+
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: **Ajustes pedidos por el cliente + arreglos visuales de Delivery**
-  (sesión 2026-08-10, rama develop, 7 commits). Unit **261/261** · E2E full
-  **177 passed + 1 skipped** · tsc 0 · build verde ·
-  ⚠️ **eslint con 6 errores PREEXISTENTES** (ajenos a esta sesión, anotados con archivo y
-  línea en Deudas vigentes — la afirmación "eslint 0" que traía este bloque ya no era cierta).
+Última fase completada: **FASE 1 del estado de suscripción de G-Centro** (sesión
+  2026-08-11/12, rama develop). Unit **261/261** · E2E full **182 passed + 2 skipped**
+  (exit 0 real) · tsc 0 · build verde ·
+  ⚠️ **eslint con 6 errores PREEXISTENTES** (ajenos, anotados con archivo y línea en
+  Deudas vigentes — la afirmación "eslint 0" que traía este bloque ya no era cierta).
 
-**Qué entró en esta sesión** (E2E pasó de 160 a 177: 17 tests nuevos, uno por ajuste):
+Después, sesión **2026-08-18**: **FASE 2 del estado de suscripción — el banner de lectura**
+  (bloque propio abajo). Solo `expiring` y `grace`, solo UI, fail-open, sin Realtime.
+  Verificado: unit **285/285** (261 previos + 24 nuevos), `suscripcion-banner.spec.ts`
+  **12/12** contra LAB y la Edge Function desplegada (exit 0 leído de archivo, no de una
+  tubería), tsc 0 y eslint limpio en los archivos tocados.
+  ⚠️ **La suite E2E full NO se volvió a correr en esta sesión** — pendiente antes de promover.
+  El conteo full sube en 12 solo si `E2E_GCENTRO_HMAC_SECRET` está en `.env.test`; sin esa
+  variable son 12 skips.
+
+Antes, sesión **2026-08-16/17**: auditoría de orden de operaciones de `aplicar-estado`
+  + el arreglo del `organization_id` malformado (commit `eb179d3`, ya desplegado). La
+  suite full NO se volvió a correr; lo verificado es `suscripcion-estado.spec.ts`
+  **8 passed + 1 skipped** contra la función desplegada, tsc 0 y eslint limpio en los
+  archivos tocados. Ese spec pasó de 6 a 9 casos, así que el conteo full sube a **185**
+  *solo si* `E2E_GCENTRO_HMAC_SECRET` está en `.env.test`; sin esa variable son los mismos
+  182 passed y 3 skips más.
+
+### FASE 1 — estado de suscripción (aplicada y desplegada)
+
+G-Centro (panel de suscripciones, **repo y BD aparte**) ESCRIBE una bandera en
+`organizations`; G-Vento solo LEE. Si G-Centro se cae, el POS sigue vendiendo.
+
+- **3 columnas aplicadas** en `organizations` (`supabase/organization-subscription.sql`):
+  `subscription_status` (text + CHECK sobre
+  `active|expiring|grace|restricted|suspended`, **not null default `'active'`**),
+  `subscription_message`, `subscription_updated_at`. El default es la decisión central:
+  **la ausencia de información nunca degrada a un cliente.** Se sumó también
+  `unique (name)` en `organizations` (onboard-org resuelve la org POR NOMBRE y sin unique
+  un re-seed con el nombre distinto creaba una org nueva en silencio).
+- **Protección en DOS CAPAS**, porque la policy `"organizations: editar con permiso"`
+  valida QUIÉN y no QUÉ COLUMNAS —la misma falla de categoría que se cerró en `profiles`—:
+  (1) privilegios de columna en **allowlist** (se revoca el UPDATE de tabla y se concede
+  solo `name, logo_url, config`), y (2) el trigger `protect_organization_subscription`.
+- 🔴 **La capa ACTIVA es el GRANT, no el trigger.** Medido: Postgres verifica los
+  privilegios de columna al arrancar el executor, antes de escanear filas y por lo tanto
+  antes de cualquier BEFORE ROW trigger. Da **`42501 permission denied for table
+  organizations`** — mensaje a nivel TABLA aunque la falla sea por columna, así que el
+  spec assertea el CÓDIGO y no el texto, y el caso de CONTRASTE (que el mismo owner SÍ
+  pueda escribir `name`) es lo único que distingue una protección puntual de una RLS rota.
+  **El trigger es la red para cuando alguien restaure el privilegio de tabla** — el modo de
+  fallo probable es una línea rutinaria tipo
+  `grant all on all tables in schema public to authenticated`, que borraría la allowlist en
+  silencio. No se puede ejercitar desde el spec (requiere que `authenticated` TENGA el
+  privilegio, que es lo que revocamos): su verificación manual está en la migración.
+- **Edge Function `aplicar-estado` DESPLEGADA y validada en dos tandas.**
+  (a) **7 casos manuales por `curl`** (2026-08-12) contra la función viva: firma válida
+  (`changed:true`), repetida (`changed:false` y `subscription_updated_at` sin moverse),
+  firma inválida, timestamp fuera de la ventana de 300s, estado fuera del enum, org
+  inexistente y sin header de firma.
+  (b) **3 casos AUTOMATIZADOS** en `tests/suscripcion-estado.spec.ts` (2026-08-17) que
+  verifican el **EFECTO, no solo la respuesta**: tras un rechazo (enum inválido, org
+  inexistente, UUID malformado) releen la fila y comparan **las tres columnas** contra el
+  snapshot previo. Los 7 manuales probaban únicamente el status HTTP y el mensaje, y una
+  validación que corriera DESPUÉS del UPDATE devuelve el mismo 400 dejando la fila escrita
+  — que es el fallo que apareció en G-Centro y disparó esta auditoría. Firman con HMAC
+  **válido** a propósito: con firma inválida la función corta antes y el test sería vacuo.
+  Requieren `E2E_GCENTRO_HMAC_SECRET` en `.env.test`; sin esa variable hacen skip.
+  Los tres son RECHAZOS, así que **el spec no escribe el estado de suscripción de LAB** —
+  no agregar ahí un caso de camino feliz sin pensarlo.
+- **El orden de validaciones está AUDITADO y es correcto**, con una garantía mejor que el
+  orden de líneas: **el cliente `service_role` se construye recién en la `:159`, después de
+  las 11 validaciones** — antes no existe el objeto con el que escribir. La firma HMAC es la
+  `:128`, el UPDATE la `:191`. Sobrevive a un refactor que reordene, que es justo lo que el
+  orden de líneas no hace.
+- **`organization_id` malformado da 400 legible** (`eb179d3`). Antes llegaba al
+  `.eq('id', ...)`, Postgres respondía `22P02` y caía en el 500 genérico *"Error de base de
+  datos"*: un mensaje que MIENTE sobre la causa y no le dice a G-Centro qué corregir. La
+  validación de forma va **DESPUÉS de la firma** (un llamante sin autenticar no debe obtener
+  señal sobre qué acepta el parser) y **ANTES del SELECT**. ⚠️ **Estrecha la aceptación
+  respecto de Postgres**: rechaza `{...}` y la forma sin guiones, que la BD sí acepta. Es
+  aceptable porque el id sale canónico de la BD de G-Centro, y el modo de fallo es un 400
+  explícito, nunca una escritura perdida.
+- **"Verify JWT" DESACTIVADO — DECISIÓN, NO DESCUIDO.** El llamante es un servidor, no un
+  usuario, así que un JWT de Supabase no significa nada acá. Consecuencia directa: **el
+  endpoint es públicamente alcanzable y el HMAC es la ÚNICA autenticación** — de ahí la
+  firma sobre timestamp+cuerpo, la ventana anti-replay y la comparación en tiempo constante.
+  **Si un redeploy lo reactiva, los 3 casos automatizados dan 401** y el síntoma se confunde
+  con secreto equivocado: verificar el toggle después de cada deploy.
+  `subscription_updated_at` significa *"cuándo CAMBIÓ el estado"*, no *"cuándo llamaron"*:
+  re-aplicar el mismo estado es un no-op.
+- 🔴 **CAMBIAR EL `CHECK` DE `subscription_status` EXIGE AVISAR A G-CENTRO ANTES DE
+  DESPLEGARLO.** El enum vive en **CUATRO** lados que no se enteran entre sí: el `CHECK` de
+  la BD, la constante `ESTADOS` de la Edge Function, el `ESTADOS` del spec de Fase 1 y —desde
+  la Fase 2— **el lector del frontend** (`resolveNotice` en `src/hooks/useSubscriptionStatus.ts`,
+  que decide qué estados producen aviso). **No existe ningún mecanismo que garantice el
+  aviso**: es coordinación entre dos repos con dueños distintos, no código. El aviso va
+  primero, el deploy después.
+  **La consecuencia CAMBIÓ con la Fase 2 — ya no es "da igual porque nadie lee":**
+  - Antes: un estado nuevo sin aviso lo rechazaba la función con 400 y el panel creía haber
+    aplicado algo que nunca se escribió.
+  - Ahora se suma un modo de fallo más silencioso: un estado que la BD SÍ acepte pero que el
+    frontend no conozca **cae en el default del switch y no muestra nada**. Eso es fail-open
+    y está BIEN —es la regla de la Fase 2, nada degrada por un valor que no entendemos—,
+    **pero significa que G-Centro puede creer que avisó a un cliente que nunca vio nada.**
+    La escritura fue exitosa y aun así el cajero no se enteró: los dos lados quedan
+    convencidos de que el aviso llegó.
+  **Esta sigue siendo la fragilidad real del puente**, y crece con cada fase: hoy el costo es
+  un aviso que no se ve; con `restricted`/`suspended` implementados sería un cliente que no
+  queda restringido, o uno restringido que no debía.
+- ✅ **LA FASE 2 YA ESTÁ IMPLEMENTADA (banner de lectura) — ver su bloque propio abajo.**
+  Lo que sigue SIN implementar es el **gating**: ningún flujo se bloquea, en ningún estado.
+  🔴 **Ojo con la confusión que YA tuvo G-Centro** (pusieron un tenant en `suspended`
+  esperando un banner en el POS y no pasó nada): **hoy sigue sin pasar nada con
+  `suspended`**, pero por otro motivo. Ya no es que ninguna pantalla lea la bandera — la lee
+  — sino que el alcance de la Fase 2 son SOLO `expiring` y `grace`. `restricted` y
+  `suspended` caen a propósito en el default del switch y no muestran nada.
+  **Para ver el banner desde G-Centro hay que escribir `expiring` o `grace`.**
+  Dos decisiones ya tomadas para cuando se construya el gating:
+  **`suspended` NO toca la apertura de turno** (bloquearla ES bloquear la venta, con un día
+  de retraso y en el peor momento; además el gate de turno es de UI y no de seguridad, así
+  que solo sacaría las ventas del cuadre) y **el export NUNCA se bloquea**, en ningún nivel.
+- **Lectura al login + refetch por foco, NO Realtime** (aunque G-Vento sí usa Realtime en 5
+  lugares y estaría disponible): para una bandera que cambia una vez al mes la latencia es
+  **amortiguación**, no carencia. Una bandera que cambia sola en medio de un cobro es
+  exactamente el modo de fallo que motivó el patrón `checkoutOrder`. **No "mejorar" esto
+  con Realtime.**
+- **Los UUID de las organizaciones NO están en este documento**: se consultan con la query
+  del encabezado de `supabase/organization-subscription.sql`, que los lee siempre
+  actualizados. Recordar que **LAB no es un cliente que pague** (ver la sección del lab).
+
+### 🔴 Desborde del POS por categorías — BUG DE PRODUCCIÓN corregido (2026-08-19)
+
+**El carrito del POS se encogía hasta ser inusable a medida que se agregaban categorías.**
+El modo de fallo es el peor posible: **el cajero no puede cobrar.**
+
+**Causa:** el panel del catálogo es `flex: '0 0 60%'` y **sin `minWidth: 0`** conserva el
+`min-width: auto` por defecto, así que se niega a bajar de su ancho min-content. Cuando los
+tabs de categorías no entran, el panel CRECE más allá del 60% y se come el carrito. El
+`overflowX: auto` del strip no alcanzaba: **nunca llegaba a activarse**, porque el panel le
+cedía el ancho antes de que hubiera algo que scrollear.
+
+**Medido** con los nombres reales de G-10 (área útil = viewport − 224 del sidebar):
+
+| viewport | categorías | catálogo | carrito | ¿cobrable? |
+|---|---|---|---|---|
+| 1024 | 2–4 | 480 (=60%) | 320 | sí |
+| 1024 | **5** | 548 | **253** | sí, degradado |
+| 1024 | **7** | 714 | **86** | **NO** |
+| 1280 | 2–5 | 634 (=60%) | 422 | sí |
+| 1280 | **10** | 974 | **82** | **NO** |
+
+🔴 **G-10 tiene 5 categorías reales** (Cocteles, Bebidas, Utensilios, Adiciones, Vaper):
+**ya estaba degradado en producción** —carrito de 253px en vez de 320, un 21% menos— y a
+**dos categorías** de que su cajero no pudiera cobrar en una terminal de 1024px.
+El umbral depende del **ancho del texto**, no del número: 5 categorías de nombre largo
+pesan más que 8 cortas.
+
+**El arreglo son TRES cosas, no una** (quitar cualquiera lo deja a medias):
+1. `minWidth: 0` en el panel del catálogo — la causa.
+2. `flexShrink: 0` en los botones de tab. Sin esto, una vez acotado el panel los tabs se
+   COMPRIMEN en vez de desbordar y el overflow sigue sin activarse: **el bug se muda en
+   vez de resolverse**.
+3. Máscara de continuación (`useScrollOverflow`), porque la scrollbar está oculta
+   (`scrollbarWidth: none`) y sin señal el cajero no sabe que puede desplazarse.
+
+Verificado después del fix en 18 combinaciones (2→10 categorías × 1024/1280): catálogo
+clavado en 60%, carrito íntegro (320 / 422) **en todas**, y máscara ⟺ desborde coherente
+en las 18. El caso común (pocas categorías) queda **idéntico** a antes del fix.
+
+🔴 **`useScrollOverflow` estaba ROTO y nadie lo sabía — `useRef` → callback ref.**
+El hook quedaba MUDO cuando el consumidor tiene un return temprano de carga: el efecto
+corría en un render donde el nodo aún no estaba montado (`ref.current === null`), salía sin
+montar observers, y al montarse el nodo **el efecto no volvía a correr** porque `deps` no
+había cambiado. `hasMore` se congelaba en `false` para siempre. Encontrado con una sonda
+`console.log` DENTRO del hook: la secuencia real era `efecto corre, el=NULL` repetido, con
+el strip desbordando de verdad (scrollWidth 666 vs clientWidth 432).
+El POS lo destapó porque su return de carga lo gobierna **otra query** distinta de la que
+viaja en `deps`; **Productos y Delivery tenían la misma fragilidad latente y funcionaban
+por casualidad de timing.** Con callback ref el montaje se ata a que el NODO aparezca, que
+es la condición real. Se sumaron además: observar los HIJOS (el contenedor puede no cambiar
+de tamaño mientras su contenido crece), un re-chequeo en `requestAnimationFrame` y otro en
+`document.fonts.ready`.
+
+**Spec:** `tests/pos-categorias-layout.spec.ts` (3). Usa **7 categorías a 1024px** a
+propósito: es el punto que rompe sin el fix — verificado quitando el `minWidth: 0`, el test
+da `Expected: 480, Received: 714`. Los nombres son realistas y no `cat-1`, `cat-2`: con
+nombres cortos entrarían de sobra y el test sería vacuo.
+
+🔴 **VERIFICADO EN PRODUCCIÓN (2026-08-19) — era PEOR de lo estimado:**
+
+| cliente | categorías activas | a 1024px | a 1280px |
+|---|---|---|---|
+| **Salchimelo** | **9** | **INUSABLE** (rompe en 7) | a UNA categoría del límite (rompe en 10) |
+| **G-10** | **5** | degradado 21% (carrito 253 en vez de 320) | con margen |
+
+**Salchimelo probablemente YA tenía el POS roto**, no estaba por tenerlo: con 9 categorías
+supera el umbral de 7 de una terminal de 1024px. G-10 venía operando con un 21% menos de
+carrito. **Esto no era un hallazgo de laboratorio: era producción.**
+
+Dato que conviene mirar antes de sacar conclusiones sobre un cliente: **el umbral depende
+del ANCHO DEL TEXTO y de la RESOLUCIÓN REAL de la terminal**, no solo del conteo. La query
+para repetirlo (hay que correrla en el SQL Editor: la RLS de `categories` es por sede y las
+credenciales del lab solo ven LAB):
+`select r.name, count(*) from categories c join restaurants r on r.id = c.restaurant_id
+where c.is_active group by 1 order by 2 desc;`
+
+### FASE 2 — banner de suscripción (implementada, sesión 2026-08-18)
+
+G-Vento **LEE** la bandera y muestra un aviso. **SOLO UI: no bloquea NADA.** Ni reportes, ni
+configuración, ni exportaciones, ni la venta. El bien protegido es la cobranza, no los datos
+del cliente: un falso positivo en una política de BD es un bar que no vende de madrugada; un
+moroso que abre devtools se resuelve con una llamada. **Sin RLS y sin triggers para esto.**
+
+- **Alcance deliberado: solo `expiring` (aviso DESCARTABLE) y `grace` (banner PERSISTENTE).**
+  `restricted` y `suspended` **NO se implementaron** — se dejan hasta saber si el aviso suave
+  alcanza. Caen en el default del switch como cualquier estado desconocido.
+- **Sin migración: la Fase 2 es frontend puro.** La policy `"organizations: ver la propia"`
+  ya permitía el SELECT y `organizationId` ya estaba en `AuthContext`. Las 3 columnas sí se
+  agregaron **A MANO** a `database.types.ts` (deuda del CLI 403, como el resto).
+- 🔴 **FAIL-OPEN, con el `switch` SIN `else`.** Todo lo que no sea exactamente `expiring` o
+  `grace` devuelve null y no muestra nada: `active`, los dos estados no implementados, un
+  valor nuevo que agregue G-Centro, la columna nula, y la lectura fallida. La asimetría es
+  la regla: mostrar de menos es aceptable, degradar a un cliente por una bandera que no
+  supimos leer no lo es.
+- 🔴 **EL TIMESTAMP NO DECIDE — y el pedido original decía lo contrario.** Se pidió asumir
+  activa si `subscription_updated_at` era viejo; es un error y se corrigió antes de
+  implementar. `subscription_updated_at` significa *"cuándo CAMBIÓ el estado"*: un cliente
+  estable en `grace` hace tres semanas tiene el timestamp viejo **y es correcto**. Caducar
+  por antigüedad haría desaparecer el banner solo — la degradación por timeout que se quería
+  evitar, invertida. Se lee solo como diagnóstico. La razón está escrita en el hook.
+- **Mensaje NULL → texto por defecto, NUNCA silencio** (aplica también a `''` y a solo
+  espacios). Si un NULL apagara el banner, G-Centro tendría un **interruptor accidental**:
+  un campo opcional decidiría si el cliente se entera. El estado es el contrato; el mensaje
+  es presentación.
+- **Dónde vive:** `SubscriptionBanner` en `AppLayout`, fila hermana debajo del header y
+  **ARRIBA** del banner de turno — el mismo slot que ya usaba el aviso de "no hay turno".
+  **Comprime `<main>`, no se superpone:** ninguna pantalla bajo AppLayout usa `100vh`
+  (verificado: cero ocurrencias), todas derivan su alto del padre con `height:100%`.
+  Medido: 41px una línea, 61px dos, 81px tres — 6% a 12% del alto útil en 720p.
+  **Cocina NO lo recibe** y está bien: `/cocina` vive fuera de `ProtectedRoute` y de
+  `AppLayout`, sin Supabase Auth ni organización — es la tablet de cocina, no una pantalla
+  donde se cobre. **Apilamiento con el banner de turno: aceptado** (dos filas, 102px); es
+  infrecuente y el de turno se resuelve en segundos.
+- **Descarte (solo `expiring`): dura el DÍA CALENDARIO de Bogotá**, en `localStorage` bajo
+  `gvento:suscripcion:descartado` = `{estado, dia}` (precedente: `useCollapsedGroups`, mismo
+  degradado silencioso). Un descarte permanente anularía el aviso; uno que vuelve en cada
+  recarga entrena a ignorarlo. Se guarda el **estado junto al día** para que descartar
+  `expiring` no tape un `grace` que llegue el mismo día.
+  Es **por navegador, no por usuario**: en un POS compartido, si un cajero descarta, el del
+  turno siguiente no lo ve ese día. Asumido — es un aviso del negocio.
+  ⚠️ Residuo conocido, no bug: si la bandera va y vuelve al MISMO estado el mismo día
+  (`expiring`→`grace`→`expiring`), el descarte original sigue valiendo.
+- **Largo del mensaje: se le pidió a G-Centro un tope de 140 caracteres** (ellos proponían
+  280). Medido en Chromium, máximo en UNA línea: **106** @1024px, **145** @1280, **157**
+  @1366, **248** @1920. 280 **no rompe** el layout (2 líneas, 3 en 1024) — se bajó a 140 por
+  economía de espacio, no por necesidad. Ojo: el proyecto declara `Inter` pero **no la carga
+  como webfont**, así que resuelve a `system-ui` y las cifras se mueven según la máquina.
+- 🔴 **Texto sin espacios: se RECORTABA EN SILENCIO.** Una corrida sin oportunidad de corte
+  (un token, un id) desbordaba un flex item bajo un ancestro `overflow-hidden` y quedaba
+  invisible **sin ninguna señal** — no desbordaba la página, simplemente dejaba de verse. Se
+  arregló con `min-width:0` + `overflow-wrap:anywhere` **en los DOS banners**: el nuevo y el
+  de turno, que tenía la misma carencia y hoy no molesta solo porque su texto es una
+  constante nuestra. Un tope de caracteres NO protege de esto.
+- **SIN Realtime (decisión, no omisión).** Lectura al login + `refetchOnWindowFocus` (default
+  de React Query, no hay `defaultOptions.queries`) + `staleTime` de 5 min. Para una bandera
+  que cambia una vez al mes la latencia es **amortiguación**, no carencia; y una bandera que
+  cambia sola en medio de un cobro es el modo de fallo que se cazó con `checkoutOrder` en
+  TablesPage. **No "mejorar" esto con Realtime.** La razón está escrita en el hook.
+- **Tests: 24 unitarios + 12 E2E.**
+  - `src/hooks/useSubscriptionStatus.test.ts` — matriz fail-open de `resolveNotice`. Cubre lo
+    que el E2E NO PUEDE: un `subscription_status` fuera del enum lo rechazan la función y el
+    `CHECK`, así que ese caso solo se prueba sin red.
+  - `tests/suscripcion-banner.spec.ts` — escribe cada escenario **por la Edge Function
+    firmada con HMAC**, el mismo camino que usa G-Centro (authenticated no puede escribir
+    estas columnas: es el punto de la Fase 1). Beneficio lateral: cada corrida revalida que
+    la función siga viva y que "Verify JWT" siga desactivado.
+    ⚠️ **Este spec SÍ cambia el estado de suscripción de LAB** (el de Fase 1 a propósito no).
+    Snapshot + restore; `subscription_updated_at` queda con la hora de la corrida y no se
+    puede restaurar por ese camino. Requiere `E2E_GCENTRO_HMAC_SECRET`; sin él, skip.
+  - **Auditado POR MUTACIÓN en las dos direcciones** (método del proyecto): con
+    `resolveNotice`→null mueren los positivos y sobreviven los 3 de fail-open —inherente a su
+    forma, están MARCADOS en el spec para que una auditoría futura no los "arregle"—; con
+    `resolveNotice`→siempre-aviso mueren esos 3. Ninguno es vacuo.
+- **Nota de proceso:** `vitest.config.ts` no heredaba el alias `@` de `vite.config.ts` (es
+  una config aparte), así que ningún módulo de `src/` que importe con `@/...` era testeable.
+  Se le agregó el alias. Los tests viejos no lo notaron porque viven en `src/lib/` con rutas
+  relativas.
+
+### Sesión previa (2026-08-10) — ajustes del cliente + Delivery
+
+E2E pasó de 160 a 177 con 17 tests nuevos, uno por ajuste:
   - **Categorías en Productos:** los tabs no se podían desplazar. El strip ya tenía
-    `overflowX: auto`; lo que faltaba era `flex:1` + `minWidth:0` — es flex item del toolbar,
-    no hijo en bloque como en el POS, así que crecía con su contenido (medido: `clientWidth`
-    3255 en un viewport de 900) en vez de acotarse. + máscara de continuación.
+    `overflowX: auto`; lo que faltaba era `flex:1` + `minWidth:0` (medido: `clientWidth`
+    3255 en un viewport de 900). + máscara de continuación.
+    ⚠️ **CORREGIDO 2026-08-19:** esta nota decía "no hijo en bloque **como en el POS**",
+    dando a entender que el POS estaba a salvo. **Era falso y mandaba a descartar justo el
+    lugar del bug** — ver el bloque del desborde del POS más abajo. La mecánica de verdad,
+    que es lo que hay que recordar: **un flex item sin `minWidth: 0` conserva
+    `min-width: auto`, se niega a bajar de su ancho min-content y SE COME AL HERMANO.**
+    Da igual si el contenedor con scroll es hijo en bloque o flex item: lo que decide es si
+    el ANCESTRO FLEX está acotado. En Productos el que faltaba acotar era el strip; en el
+    POS, el panel del catálogo.
   - **Recibo al cerrar mesa:** Mesas no ofrecía ticket (solo `printComanda`). Usa
     `printSaleTicket`, la misma función que la reimpresión del Historial ⇒ ticket
     byte-idéntico. Con BOTÓN, como el POS (auto-imprimir gasta papel si nadie lo pide).
@@ -436,14 +911,17 @@ Resumen rápido:
     system en ambas columnas; máscara de scroll en las columnas (siempre scrollearon, faltaba
     la señal); estado vacío centrado. Hook compartido `useScrollOverflow`.
 
-⏸️ **El trabajo del filtro de PII de Sentry sigue PAUSADO** — se pausó por estos pedidos del
-  cliente y NO se retomó en esta sesión. El diagnóstico está COMPLETO y medido en Deudas
-  vigentes (hallazgos 1, 2a, 2b y 3), con el orden sugerido para retomar: 2b → 2a → 3 → 1.
+⏸️ **El trabajo del filtro de PII de Sentry sigue PAUSADO** — se pausó por los pedidos del
+  cliente y no se retomó. El diagnóstico está COMPLETO y medido en Deudas vigentes
+  (hallazgos 1, 2a, 2b y 3), con el orden sugerido para retomar: 2b → 2a → 3 → 1.
   Nada de eso es fuga consumada: no corresponde release de emergencia.
 
-**develop ≠ main desde esta sesión:** `main` sigue en el release del filtro de PII (344787b);
-  develop tiene además estos 7 commits. Antes de promover, correr `pnpm test:e2e` full sobre
-  develop (nota de proceso) — en esta sesión ya se corrió y dio 177 + 1 skipped.
+**develop ≠ main:** `main` está en el release de los ajustes del cliente (`ae0ea91`);
+  develop tiene además la Fase 1 de suscripción. Antes de promover, correr `pnpm test:e2e`
+  full sobre develop (nota de proceso).
+  ⚠️ **Promover la Fase 1 a `main` NO cambia el comportamiento de producción** (nadie lee la
+  bandera), pero el SQL **ya está aplicado en la BD compartida**, así que la protección de
+  columnas rige HOY para las tres organizaciones, esté o no promovido el frontend.
 
 **PRODUCCIÓN (main, desplegado en Vercel) incluye:**
   - **Sentry activo con el filtro de PII por allowlist** (release 344787b). Se cazó ANTES de que

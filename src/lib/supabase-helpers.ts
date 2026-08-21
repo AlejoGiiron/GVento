@@ -18,6 +18,23 @@ export const getRestaurant = (restaurantId: string) =>
 export const updateRestaurant = (restaurantId: string, data: TablesUpdate<'restaurants'>) =>
   supabase.from('restaurants').update(data).eq('id', restaurantId).select().single()
 
+// --- Organization / suscripcion ---
+
+/**
+ * Lee la bandera de suscripcion que escribe G-Centro. SOLO LECTURA: G-Vento
+ * nunca escribe estas columnas (el privilegio de UPDATE esta en allowlist y no
+ * las incluye; ver supabase/organization-subscription.sql).
+ *
+ * Se seleccionan las columnas explicitamente en vez de `*` para que el dia que
+ * organizations gane una columna sensible no viaje sola al navegador.
+ */
+export const getOrganizationSubscription = (organizationId: string) =>
+  supabase
+    .from('organizations')
+    .select('subscription_status, subscription_message, subscription_updated_at')
+    .eq('id', organizationId)
+    .single()
+
 // --- Categories ---
 
 export const getCategories = (restaurantId: string) =>

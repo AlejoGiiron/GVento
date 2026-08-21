@@ -52,7 +52,15 @@ test.describe.serial('Historiales de turnos y gastos', () => {
     // Historial de turnos: la fila del turno recién cerrado (localizada por su
     // apertura única) muestra el cuadre PERSISTIDO.
     await page.goto('/historial-turnos')
-    const row = page.getByTestId('shift-history-row').filter({ hasText: cop(OPENING) }).first()
+    // Se filtra por la CELDA de apertura (`shift-opening`), no por el texto de
+    // la fila entera: el textContent de la fila concatena los <span> SIN
+    // separador, así que un `hasText` suelto puede matchear a caballo de dos
+    // celdas. Misma clase de defecto que la colisión #14/#141 de
+    // anular-venta.spec.ts — acá no había estallado porque los montos son
+    // aleatorios y no un correlativo que crece.
+    const row = page.getByTestId('shift-history-row')
+      .filter({ has: page.getByTestId('shift-opening').filter({ hasText: cop(OPENING) }) })
+      .first()
     await expect(row).toBeVisible({ timeout: 15_000 })
     await expect(row.getByTestId('shift-declared')).toContainText(cop(DECLARED))
     await expect(row.getByTestId('shift-expected')).toContainText(cop(EXPECTED))

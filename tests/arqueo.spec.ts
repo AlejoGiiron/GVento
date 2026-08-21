@@ -220,7 +220,10 @@ test.describe.serial('Arqueo multi-método', () => {
     // P3: localizar la fila por su apertura única y reimprimir.
     await page.goto('/historial-turnos')
     const aperturaText = OPEN.toLocaleString('es-CO')   // "7X.XXX"
-    const row = page.getByTestId('shift-history-row').filter({ hasText: aperturaText })
+    // Por la CELDA de apertura, no por el texto de la fila entera (ver la nota
+    // en historiales.spec.ts y la colisión #14/#141 de anular-venta.spec.ts).
+    const row = page.getByTestId('shift-history-row')
+      .filter({ has: page.getByTestId('shift-opening').filter({ hasText: aperturaText }) })
     await expect(row).toBeVisible({ timeout: 15_000 })
 
     await page.evaluate(() => { (window as unknown as { __arqueoPrinted: string | null }).__arqueoPrinted = null })

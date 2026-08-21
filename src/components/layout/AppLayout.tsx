@@ -29,6 +29,7 @@ import { useCollapsedGroups } from '@/hooks/useCollapsedGroups'
 import { ShiftBanner } from '@/components/shift/ShiftBanner'
 import { OpenShiftModal } from '@/components/shift/OpenShiftModal'
 import { StoreSelector } from '@/components/layout/StoreSelector'
+import { SubscriptionBanner } from '@/components/layout/SubscriptionBanner'
 import type { Enums } from '@/types/database.types'
 
 type UserRole = Enums<'user_role'>
@@ -258,6 +259,13 @@ export function AppLayout() {
           </div>
         </header>
 
+        {/*
+          Aviso de suscripción — va ARRIBA del banner de turno. Si ambos se
+          muestran se apilan (dos filas): aceptado, es infrecuente y el de turno
+          se resuelve en segundos. Se renderiza a sí mismo o nada.
+        */}
+        <SubscriptionBanner />
+
         {/* Dismissible banner — no hay turno abierto (no bloquea la navegación) */}
         {showShiftBanner && (
           <div
@@ -265,7 +273,17 @@ export function AppLayout() {
             style={{ background: '#fffbeb', borderColor: '#fde68a' }}
           >
             <Wallet size={16} color="#b45309" />
-            <span className="text-sm font-medium" style={{ color: '#92400e' }}>
+            {/*
+              minWidth/overflowWrap: hoy el texto es una constante nuestra y
+              siempre entra, pero la carencia es la misma que la del banner de
+              suscripción (un flex item recorta en silencio bajo un ancestro
+              overflow-hidden). Se corrige acá también para que no reaparezca
+              el día que este texto se vuelva dinámico.
+            */}
+            <span
+              className="text-sm font-medium"
+              style={{ color: '#92400e', minWidth: 0, overflowWrap: 'anywhere' }}
+            >
               No hay turno de caja abierto.
             </span>
             <button
