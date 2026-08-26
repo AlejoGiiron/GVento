@@ -66,6 +66,44 @@ evaluadas y **conscientemente pospuestas**. No aparecen en "Deudas vigentes" a
 propósito — una deuda es algo que YA rompe algo; esto no rompe nada hoy.
 No empezar a construirlo por encontrarlo escrito acá.
 
+### KPI de merma/descarte en Reportes → Stock (anotado 2026-08-25)
+
+**Origen: preparando la demo de Café Aroma.** No salió de un pedido de cliente
+ni de una idea de escritorio: salió de guionar la pantalla de Inventario y
+chocarse con el hueco. Se anota con el origen porque eso es lo que le da peso
+si algún día se retoma.
+
+**El hueco, medido:** `InventoryPage` → Movimientos **registra** los ajustes
+(tipo `adjustment`, con su motivo en `notes`) pero **no los totaliza en ningún
+lado**. Ni ahí ni en el tab Stock de Reportes, que hoy tiene KPIs de unidades,
+productos y categorías, top de productos y ranking por categoría — nada de
+descarte. Filtrar por tipo "Ajustes" da la LISTA; el número no existe.
+
+**Por qué importa en una cafetería** (y no en un bar, que es para quien se
+diseñó el seed original): un negocio con panadería **hornea a demanda y descarta
+lo que sobra todos los días**. "¿Cuánto estoy botando?" es una pregunta que el
+dueño ya se hace, no una que haya que enseñarle.
+
+🔴 **La señal a esperar, y qué significa:** si en la demo el dueño pregunta por
+el TOTAL de merma, eso es demanda real observada, no una hipótesis. Ahí sí vale
+construirlo. Hasta entonces, no.
+
+**Por qué es chico:** el dato ya está en `stock_movements` (`type='adjustment'`,
+con signo y con `notes`), acotado por sede y por rango de fechas igual que el
+resto del tab. No hace falta migración ni columna nueva: es una agregación más
+sobre una tabla que ya se consulta en esa pantalla.
+
+⚠️ **Al construirlo hay que decidir una cosa que no es obvia:** un `adjustment`
+NO es siempre una merma — la misma columna recibe los ajustes manuales de
+inventario, que pueden ser POSITIVOS (un conteo que salió de más). Sumar todos
+los `adjustment` y llamarlo "descarte" sería un número equivocado con nombre de
+número correcto. O se suman solo los negativos, o se separa merma de ajuste con
+un tipo propio.
+
+**Mientras tanto, en la demo:** el framing es *"queda registrado, producto por
+producto y día por día"*, NUNCA *"te digo cuánto"*. Prometer en vivo un número
+que la app no calcula es peor que no prometerlo.
+
 ### Pedidos entre negocios (decidido 2026-08-07: NO se construye ahora)
 
 **Caso:** un cliente en G-10 (coctelería, sin cocina) quiere comer; G-10 le pide
@@ -301,6 +339,28 @@ VITE_GVENTO_SUPABASE_URL=
 VITE_GVENTO_SUPABASE_ANON_KEY=
 Ver .env.example para la lista completa.
 
+## Cómo se escribe una nota en este documento (convención)
+
+Salió de auditar las 36 afirmaciones verificables del documento contra el código
+(2026-08-26). **Las 28 correctas eran reglas y mecanismos. Las 8 falsas eran TODAS
+afirmaciones de ESTADO** — qué rama tiene qué, cuántos tests hay, qué código existe hoy.
+Ninguna regla resultó falsa. El estado es lo que se pudre, así que se escribe distinto.
+
+- **CITAR EL SÍMBOLO, NO EL NÚMERO DE LÍNEA.** `handleDeleteItem` en `TablesPage.tsx`
+  sobrevive a un refactor; `TablesPage.tsx:1036` no — ese TODO ya se movió a la 1383 solo.
+  De las 8 referencias `archivo:línea` auditadas, las 7 que acertaron son de **migraciones
+  ya aplicadas**, que por regla del proyecto no se editan nunca. **Ahí sí vale el número**;
+  en código vivo, no.
+- **TODA AFIRMACIÓN DE ESTADO VA FECHADA.** "182 tests" se lee como presente y miente a
+  las dos semanas. "182 tests (2026-08-12)" es una referencia histórica honesta.
+- **MEJOR QUE FECHAR: DECIR CÓMO CONSULTARLO.** Un dato caduca; una instrucción para
+  reproducirlo, no. `git rev-list --count develop..main` vale más que cualquier frase sobre
+  qué rama va adelante — y de hecho ese bloque decía lo contrario de la realidad durante
+  semanas. Cuando existan las dos, va primero el comando y después el dato fechado.
+- **UNA NOTA QUE DIRIGE MAL CUESTA MÁS QUE UNA AUSENTE.** Las dos peores del documento no
+  eran omisiones: describían código eliminado y una relación de ramas invertida. Si no
+  podés verificar una afirmación, no la escribas como hecho.
+
 ## Git
 - Rama activa de desarrollo: develop
 - Nunca hacer commit directo a main
@@ -358,7 +418,8 @@ Resumen rápido:
 - **`pos.anular` aplicado a "Vaciar carrito"** en el POS (no hay botón "anular venta"
   dedicado). Revisar si el target es el correcto al construir la anulación de ventas.
 - **Devolver stock al borrar ítem de mesa (inventario):** al borrar un `order_item` ya
-  agregado (TODO en `TablesPage.tsx:1036`), NO se devuelve el stock que descontó al
+  agregado (ver el TODO en `handleDeleteItem`, `TablesPage.tsx` — citado por SÍMBOLO: el número
+  de línea ya se movió una vez), NO se devuelve el stock que descontó al
   agregarse → el inventario queda subestimado. Pendiente (pasada aparte): función SQL de
   reverso `return_stock_for_order_item(p_id)` SECURITY DEFINER que emita
   `stock_movements('return', +qty)` por producto (simple), insumos (composite vía
@@ -374,8 +435,9 @@ Resumen rápido:
   turnos simultáneos). Revisar el flujo de apertura de caja con esta regla.
 - ⚠️ **`order_items.modifiers` (jsonb) está MUERTA — no la uses "porque está ahí".**
   Existe en el esquema (`schema.sql:153`, `not null default '[]'`) y aparece en la lista
-  de columnas de `ORDER_WITH_RELATIONS` (`supabase-helpers.ts`), pero **cero lecturas y
-  cero escrituras** en toda la app: ningún componente la consulta ni la setea. Se creó
+  de columnas de `ORDER_WITH_RELATIONS` (`supabase-helpers.ts`), pero **cero CONSUMOS**: ningún
+  componente la lee ni la setea. (Sí viaja en ese SELECT — por eso "cero lecturas" sería
+  falso; lo que no existe es código que use el valor.) Se creó
   pensando en modificadores estructurados y **ese rol lo ocupó `extras`**, que sí tiene
   tablas propias (`extras`, `product_extras`, `order_item_extras`), precio con snapshot y
   descuento de inventario por insumo vinculado.
@@ -388,39 +450,20 @@ Resumen rápido:
   bajo clave desconocida no se recorren — ver el bloque del allowlist), así que además
   perderías el diagnóstico. Se anota porque es exactamente el tipo de columna que alguien
   "descubre" a los seis meses y cree que hay que empezar a usar.
-- ⚠️ **Delivery: los botones "Llamar" y "Mapa" de la tarjeta son CÓDIGO INACTIVO.** No los
-  leas como funcionalidad existente al planificar sobre esa pantalla: están implementados
-  (`DeliveryPage.tsx`, bloque "Acciones de contacto") pero **nunca se renderizan**, porque
-  están condicionados a `order.customer_phone` y `order.delivery_address` y **la app no
-  escribe ninguna de las dos columnas en ningún lado**. Verificado contra el código, no
-  supuesto:
-  - `delivery_address` — cero escrituras. Solo lecturas en DeliveryPage.
-  - `customer_phone` — cero escrituras.
-  - `customer_name` — se escribe **únicamente en la venta a fiado** (`POSPage.tsx`
-    `handleConfirm` y `setOrderFiado`). Una venta de delivery de contado lo deja NULL, y
-    por eso la tarjeta muestra "Cliente sin nombre".
-  El POS marca el tipo "Delivery" con el botón que cicla `orderType` y **no pide dirección
-  ni teléfono en ningún momento** — no existe el paso de captura.
-
-  ✅ **DECIDIDO POR EL CLIENTE (2026-08-10) — NO se construye la captura.** Los domicilios se
-  reciben **por WhatsApp** y se cargan al POS **solo como venta**. La pantalla de Delivery es
-  para **despachar** (mover el pedido por los 3 estados), no para capturar datos del cliente.
-  **NO falta capturar dirección ni teléfono; no es una deuda.** Que la tarjeta muestre
-  "Cliente sin nombre" y sin dirección es el estado ESPERADO, no un bug — la dirección vive en
-  el WhatsApp del que despacha.
-
-  🔻 **Consecuencia que hay que aceptar explícitamente:** con esa decisión, "Llamar" y "Mapa"
-  quedan **permanentemente inalcanzables** — dependen de dos columnas que ya nadie va a
-  escribir. El argumento original para conservarlos ("si el cliente confirma que quiere
-  despachar desde acá, se necesitan") **ya no los sostiene**: el cliente confirmó que despacha
-  desde acá Y que no quiere la captura. Hoy siguen en el código sin decisión de borrarlos —
-  **si los tocás, esto es lo que hay que saber**; el orden de tarjeta que se había propuesto
-  (dirección > teléfono > nombre) queda descartado por la misma razón.
-
-  Lo ÚNICO que sigue abierto de esta pantalla es **cosmético**: el chip "N activos" de la barra
+- **Delivery: NO hay captura de dirección ni teléfono, y es una DECISIÓN del cliente
+  (2026-08-10), no una deuda.** Los domicilios se reciben por WhatsApp y se cargan al POS
+  solo como venta; esta pantalla es para **despachar** (mover el pedido por los 3 estados).
+  Que la tarjeta diga "Cliente sin nombre" y sin dirección es el estado ESPERADO.
+  - `delivery_address` y `customer_phone`: **cero escrituras** en toda la app (verificado).
+  - `customer_name` se escribe **solo en la venta a fiado** (`POSPage` → `handleConfirm`,
+    y `setOrderFiado` en `supabase-helpers`). Una venta de delivery de contado lo deja NULL.
+  - Los botones "Llamar" y "Mapa" **YA NO EXISTEN**: se eliminaron en `5e8d864`
+    ("inalcanzables por diseño"), porque dependían de esas dos columnas. No los busques.
+  Lo único abierto de esta pantalla es **cosmético**: el chip "N activos" de la barra
   superior, que se solapa con "N nuevos" (`activeCount = nuevos + en camino`, así que con 0 en
   camino los dos números coinciden por casualidad) y además repite el contador que cada columna
   ya muestra en su badge.
+
 ### Testing — laboratorio (LAB) MONTADO
 
 🔴 **LAB es una ORGANIZACIÓN más dentro de la BD compartida, y NO es un cliente que
@@ -449,7 +492,8 @@ Resumen rápido:
 - **Suites pendientes de correr en el lab:** `tests/extras.spec.ts`,
   `tests/extras-pos.spec.ts` (incl. sobreventa con stock negativo),
   `tests/ventas-historial.spec.ts`, `tests/inventario.spec.ts`. Compilan
-  (`playwright test --list` lista 71). `rbac.spec.ts` ya se corre verde contra el lab.
+  (`playwright test --list`; eran 71 al 2026-06-24 y **202 al 2026-08-26** — correr el
+  comando, no leer el número). `rbac.spec.ts` ya se corre verde contra el lab.
 - **Los flujos de caja y mesas mutan estado** — los specs limpian tras de sí, pero
   pueden acumular residuos entre corridas (p. ej. mesas ocupadas). `closeShiftIfOpen`
   cierra la caja del lab. Ver tests/README.md.
@@ -538,6 +582,23 @@ Cómo se aplica:
    monto de apertura era la única sin uno, así que no había forma de acotar el locator. Se
    agregó el testid faltante.
 
+**🔴 EL CASO MÁS ELOCUENTE (2026-08-26): el hook que existe para prevenir este defecto
+salió MUDO por el mismo defecto.** Se escribió `.claude/hooks/sql-checklist.mjs` para
+inyectar un checklist antes de tocar SQL. La primera versión leía stdin con `require`
+dentro de un `.mjs` —donde `require` NO EXISTE— envuelto en un `try/catch` que devolvía
+`''` al fallar. Resultado: **exit 0, sin inyectar nada, sin error**. Un hook exitoso,
+silencioso e inútil.
+
+Leyéndolo se veía perfecto. Lo cazó el pipe-test: **10 de 10 casos callados, incluidos los
+6 que debían disparar.** La causa es la misma que la del guard deny-list que ese hook
+existe para atajar: **un `catch` que convierte un error en silencio es fail-OPEN.** El modo
+de fallo tiene que ser cerrarse, no dejar pasar. Hoy ese `catch` sale con código 1 y
+escribe a stderr.
+
+**Es el caso número once en 20 días de un error cuya lección ya estaba escrita en el
+repo** — y el único que ocurrió DENTRO del mecanismo diseñado para cortar la serie. Si
+hace falta un argumento de por qué esto no se arregla con más documentación, es este.
+
 ### ⚠️ Trampas de TERMINAL — el síntoma no señala la causa
 
 Dos cosas que ya costaron tiempo, juntas porque son la misma familia: **la
@@ -562,6 +623,16 @@ código.
   ```
   Y verificarlo con `grep PLAYWRIGHT_EXIT` antes de decir que algo está verde. **Nunca
   anunciar una corrida verde a partir de la notificación.**
+
+- 🔴 **"ES EL PATRÓN CANÓNICO" NO ES EVIDENCIA DE QUE FUNCIONE ACÁ.** El patrón oficial de
+  hooks de Claude Code parsea el payload con `jq`. **`jq` NO está instalado en esta
+  máquina.** Copiarlo sin verificar habría dejado el hook mudo desde el primer día —
+  fallando en silencio, que es el peor modo. Se reemplazó por `node`, que acá es la
+  dependencia más segura: si falta, el proyecto no compila igual. **Antes de copiar
+  cualquier patrón de referencia, verificar que sus dependencias existan en esta máquina**
+  (`command -v <herramienta>`), aunque el patrón venga de la documentación oficial.
+  Corolario práctico: los ejemplos de validación de settings con `jq -e` no corren acá; el
+  equivalente en node está escrito en el encabezado de `.claude/hooks/sql-checklist.mjs`.
 
 - **Un `curl` multilínea pegado en Git Bash rompe las continuaciones de línea**
   (`\`), así que se ejecuta la primera línea sola: **la petición sale sin
@@ -596,8 +667,9 @@ es lo que discrimina. Si reaparece: **leer los artefactos ANTES de re-correr.**
 ## Estado actual del proyecto
 [ACTUALIZAR AL INICIO DE CADA SESIÓN]
 Última fase completada: **FASE 1 del estado de suscripción de G-Centro** (sesión
-  2026-08-11/12, rama develop). Unit **261/261** · E2E full **182 passed + 2 skipped**
-  (exit 0 real) · tsc 0 · build verde ·
+  2026-08-11/12, rama develop). Unit **261/261** · E2E full **182 passed + 2 skipped** *(medido 2026-08-12; al
+  2026-08-26 `npx playwright test --list` da **202 tests en 35 archivos** — reproducilo con
+  ese comando en vez de confiar en este número)* · tsc 0 · build verde ·
   ⚠️ **eslint con 6 errores PREEXISTENTES** (ajenos, anotados con archivo y línea en
   Deudas vigentes — la afirmación "eslint 0" que traía este bloque ya no era cierta).
 
@@ -828,7 +900,8 @@ moroso que abre devtools se resuelve con una llamada. **Sin RLS y sin triggers p
 - **Dónde vive:** `SubscriptionBanner` en `AppLayout`, fila hermana debajo del header y
   **ARRIBA** del banner de turno — el mismo slot que ya usaba el aviso de "no hay turno".
   **Comprime `<main>`, no se superpone:** ninguna pantalla bajo AppLayout usa `100vh`
-  (verificado: cero ocurrencias), todas derivan su alto del padre con `height:100%`.
+  — todas derivan su alto del padre con `height:100%`. (Las 5 ocurrencias de `100vh` del
+  repo están en KitchenPage y LoginPage, ambas FUERA de AppLayout.)
   Medido: 41px una línea, 61px dos, 81px tres — 6% a 12% del alto útil en 720p.
   **Cocina NO lo recibe** y está bien: `/cocina` vive fuera de `ProtectedRoute` y de
   `AppLayout`, sin Supabase Auth ni organización — es la tablet de cocina, no una pantalla
@@ -916,12 +989,23 @@ E2E pasó de 160 a 177 con 17 tests nuevos, uno por ajuste:
   (hallazgos 1, 2a, 2b y 3), con el orden sugerido para retomar: 2b → 2a → 3 → 1.
   Nada de eso es fuga consumada: no corresponde release de emergencia.
 
-**develop ≠ main:** `main` está en el release de los ajustes del cliente (`ae0ea91`);
-  develop tiene además la Fase 1 de suscripción. Antes de promover, correr `pnpm test:e2e`
-  full sobre develop (nota de proceso).
-  ⚠️ **Promover la Fase 1 a `main` NO cambia el comportamiento de producción** (nadie lee la
-  bandera), pero el SQL **ya está aplicado en la BD compartida**, así que la protección de
-  columnas rige HOY para las tres organizaciones, esté o no promovido el frontend.
+**develop vs main — CONSULTALO, no lo leas de acá.** Un estado declarado caduca; la
+  instrucción para consultarlo, no. Este bloque decía durante semanas que develop iba
+  ADELANTE de main, y era al revés:
+
+  ```
+  git rev-list --count main..develop   # commits que develop tiene de más
+  git rev-list --count develop..main   # commits que main tiene de más
+  git log --oneline develop..main      # cuáles son
+  ```
+
+  Al 2026-08-26: `main..develop = 0`, `develop..main = 4` — **main va ADELANTE** (incluye
+  `344787b` Sentry, `ae0ea91` ajustes del cliente, `c9d9a32` fix del POS y `59fbf8c` Fase 2).
+  O sea que hoy **no hay nada que promover de develop a main**; lo que falta es rebasar
+  develop sobre main antes de abrir trabajo nuevo ahí.
+  ⚠️ Ojo con la asimetría que sí es estable: **el SQL se aplica a la BD compartida apenas se
+  ejecuta**, independientemente de qué rama esté desplegada. Una migración "sin promover"
+  ya rige para las tres organizaciones.
 
 **PRODUCCIÓN (main, desplegado en Vercel) incluye:**
   - **Sentry activo con el filtro de PII por allowlist** (release 344787b). Se cazó ANTES de que
@@ -1020,7 +1104,7 @@ desarrollo que dependen de esto.
     - **NO se acota a `current_user = 'authenticated'`** (a diferencia del trigger de escalada): es
       un invariante de DATOS, no una regla de autorización; vale también para seeds y service_role.
     - Efecto colateral DESEADO: cambiar de sede a otra organización queda imposible a nivel BD.
-    - `restaurants.organization_id` es NULLABLE (`multi-tenant-rbac.sql:112`) → una sede sin
+    - `restaurants.organization_id` es NULLABLE (`multi-tenant-rbac.sql:113`) → una sede sin
       organización dejaría sus perfiles INACTUALIZABLES bajo el trigger. Verificación previa
       bloqueante incluida en el archivo (debe dar 0 filas).
     - 🔴 **`enforce_profile_organization` DEBE ser `SECURITY DEFINER` — NO se lo quiten.** La
