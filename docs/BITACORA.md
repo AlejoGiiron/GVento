@@ -1,0 +1,1560 @@
+# G-Vento — BITÁCORA (registro histórico)
+
+🔴 **ESTO NO ES REFERENCIA OBLIGATORIA. Es el archivo del PASADO.**
+No hace falta leerlo antes de trabajar: para eso está `CLAUDE.md`, que tiene las 10 reglas
+de clase. Acá vive lo que las respalda —las mediciones, los diagnósticos, qué se probó y qué
+se descartó— más el detalle de cada fase y sesión.
+
+**Se consulta cuando:** una regla de `CLAUDE.md` te parece discutible y querés ver la
+evidencia; o necesitás contexto de por qué algo quedó como quedó.
+
+⚠️ **Las afirmaciones de ESTADO de este archivo caducan.** La auditoría del 2026-08-26
+encontró que de 36 afirmaciones verificables, las 8 falsas eran TODAS de estado (qué rama
+tiene qué, cuántos tests hay, qué código existe). Los mecanismos y las reglas resultaron
+correctos. **Antes de actuar sobre un número o un estado de acá, reproducilo con el comando
+que lo acompaña.**
+
+---
+
+## Patrones aprendidos en desarrollo
+
+### Modales con flujo de cobro y Realtime activo
+Nunca usar directamente el estado reactivo de Supabase Realtime como condición
+para mostrar un modal de cobro. El Realtime puede actualizar ese estado durante
+el flujo y desmontar el modal antes de llegar al step de éxito.
+
+Patrón correcto:
+- Capturar el objeto necesario en un estado propio al abrir el modal (ej: checkoutOrder)
+- Usar ese estado capturado como condición del modal
+- El estado Realtime puede cambiar libremente sin afectar el flujo de cobro en progreso
+
+Ejemplo: TablesPage usa `checkoutOrder` en lugar de `selectedOrder` para controlar
+`TableCheckoutModal`. Si `selectedOrder` se vuelve null por Realtime durante el cobro,
+el modal no se desmonta.
+
+### Efecto que depende de una ref: CALLBACK REF, no `useRef`
+
+**Un `useEffect` que lee `ref.current` puede correr ANTES de que el nodo exista si el
+consumidor tiene un return temprano (un estado de carga). Y si sus `deps` no cambian
+después, NO VUELVE A CORRER NUNCA: el efecto queda muerto y la funcionalidad,
+ausente. El síntoma es que algo no aparece — sin error, sin log, sin nada que falle.
+Solo se detecta MIDIENDO, no leyendo el código.**
+
+El caso que lo fijó (2026-08-19, `src/hooks/useScrollOverflow.ts`). El hook montaba su
+`ResizeObserver` dentro de un efecto con `deps = [axis, deps]` y salía temprano si
+`ref.current` era null:
+
+```
+efecto corre, el= NULL      <- el consumidor estaba en su return de carga
+efecto corre, el= NULL
+(el nodo monta, pero `deps` no cambió ⇒ el efecto no se re-ejecuta)
+hasMore === false PARA SIEMPRE
+```
+
+En el POS el return de carga lo gobierna **una query distinta** de la que viaja en `deps`,
+así que el nodo montaba en un render donde el efecto no corría. **Productos y Delivery
+tenían exactamente la misma fragilidad y funcionaban por casualidad de timing.**
+
+Por qué es especialmente traicionero: **el modo de fallo es SILENCIOSO y BENIGNO en
+apariencia.** Una máscara de continuación que no aparece no rompe nada visible; solo
+significa que el cajero no se entera de que hay más contenido. Nadie abre un bug por eso.
+Se encontró midiendo la coherencia `desborda ⟺ máscara` en 18 combinaciones y viendo 14
+incoherentes, y se confirmó con una sonda `console.log` DENTRO del hook.
+
+**La regla:** si el setup de un efecto depende de que un NODO exista, atalo al nodo, no a
+las deps. Con callback ref el efecto se dispara cuando el nodo aparece —que es la
+condición real— y deja de depender del orden de los renders:
+
+```ts
+const [node, setNode] = useState<T | null>(null)
+const ref = useCallback((n: T | null) => setNode(n), [])   // identidad estable
+useEffect(() => { if (!node) return; /* observers */ }, [axis, deps, node])
+```
+
+⚠️ La identidad del callback **debe** ser estable (`useCallback` con deps vacías): si
+cambiara en cada render, React lo llamaría con `null` y con el nodo en cada pasada y el
+efecto se remontaría sin parar.
+
+Corolarios que salieron del mismo arreglo:
+- **Un `ResizeObserver` sobre el contenedor no ve crecer su CONTENIDO.** Si el contenedor
+  conserva su tamaño mientras entran más hijos, no dispara. Observar también los hijos.
+- Re-chequear en `requestAnimationFrame` (el layout del contenido recién insertado puede
+  no estar resuelto en el primer paso del efecto) y en `document.fonts.ready` (un cambio
+  de tipografía cambia el ancho de los hijos sin cambiar el del contenedor).
+
+### Filtros de privacidad: ALLOWLIST por clave, nunca deny-list
+
+**Un filtro de privacidad por deny-list no puede funcionar: un nombre propio es
+irreconocible por regex, y las columnas nuevas fugan calladas. El filtro es
+allowlist por clave; el modo de fallo es opacidad (`[Filtrado]`), nunca fuga.**
+
+El ejemplo que lo fijó (sesión 2026-08-05, `src/lib/sentry.ts`). `customers.document`
+y `suppliers.document` (cédula/NIT) no estaban en la lista de claves sensibles. Es
+texto libre con placeholder "C.C. / NIT", así que un cajero escribe ahí lo que sea.
+Medido contra el código real, no teorizado:
+
+```
+document: '900123456'              -> "[monto]"                 redactado, mal etiquetado
+document: 900123456   (number)     -> 900123456                 FUGA
+document: 'CC 79123456 Juan Perez' -> "CC [monto] Juan Perez"    FUGA del nombre
+```
+
+Los tres son la misma falla de categoría, no tres bugs:
+1. **El corte por tipo** (`if (typeof value === 'number') return value`) corría ANTES
+   de mirar la clave ⇒ toda la maquinaria numérica vivía dentro del redactor de
+   strings y solo alcanzaba lo que ya era string. `numeric(12,2)` vuelve de PostgREST
+   como number de JS ⇒ **toda columna monetaria del esquema estaba fugando**.
+   Agregar `document` a la lista no cerraba nada: cerraba esa clave.
+2. **No existe detector de nombres propios y no puede existir.** Cualquier filtro
+   sobre CONTENIDO necesita reconocer la PII. Solo una regla sobre la POSICIÓN
+   (qué clave) ataja un nombre. Este es el argumento decisivo, no una preferencia.
+3. La excepción numérica (`IDENTIFICADOR_NUMERICO`) era **inerte**: dejaba pasar
+   numbers bajo claves de confianza, pero los numbers ya pasaban bajo TODAS.
+   Su test pasaba con la lista vacía — verificaba una regla que no decidía nada.
+
+Reglas que quedan (ver el bloque de diseño en `src/lib/sentry.ts`):
+- **Allowlist por clave, evaluado en la HOJA, con recursión siempre.** Un objeto bajo
+  clave desconocida no se colapsa: se recorre. Conservar la forma del árbol es media
+  respuesta en triage.
+- **Redacción TIPADA** (`[Filtrado:number]`, `[Filtrado:string(24)]`, `[Filtrado:array(3)]`).
+  Es lo que hace vivible el allowlist: "¿vino null o 0?", "¿el array volvió vacío?"
+  se responden sin un byte de PII. Sin esto alguien afloja el filtro a los 3 meses.
+- **La denylist se queda, evaluada primero** (`allowlist ∧ ¬denylist`). Redundante a
+  propósito: un chequeo fail-closed extra no cuesta nada.
+- **Nada de exceptuar SUBÁRBOLES enteros.** `tags` y `user` estaban exentos con el
+  argumento "los construimos nosotros y ya están curados" — la misma suposición que
+  falló con `document`. Hoy pasan por su allowlist interno. `stacktrace` es la única
+  excepción de subárbol que queda, documentada y con el porqué (romper la
+  symbolication es peor que la opacidad).
+- **Alcance:** el allowlist va sobre `extra` y los contextos que seteamos nosotros.
+  El envelope del SDK sigue por deny-list + redactor de prosa: allowlistear claves
+  que define el SDK rompería el agrupamiento, y **un evento que Sentry no puede
+  procesar es peor que uno opaco**.
+- **Los arrays no tienen clave.** Bajo clave permitida heredan la forma del padre;
+  bajo clave desconocida se colapsan a `[Filtrado:array(n)]`. Recursar dejaría salir
+  cada string suelto — medido: `['Juan Perez']` salía intacto.
+
+**Los tests son ADVERSARIALES, no de cobertura.** Los 16 tests viejos estaban en
+verde y aun así el filtro fugaba: probaban lo que el filtro cubre, no lo que no
+cubre. `src/lib/sentry.test.ts` parte de una **tabla de columnas derivada del
+esquema real** y verifica que NADA de esas columnas sale, en 4 posiciones (primer
+nivel, anidada a 3, dentro de un array, y como string cuando el ejemplo es número).
+📌 **Agregar una columna al esquema obliga a agregarla a esa tabla, en la misma
+sesión.** Si no la agregás, el allowlist igual la redacta —ese es el punto de
+invertirlo— pero perdés la verificación.
+
+Efecto colateral que conviene saber: la deny-list también **costaba** diagnóstico.
+`error.code` de un PostgrestError (`'23505'`) salía como `"[monto]"` porque son 5
+dígitos. Con el allowlist llega intacto. El caso adverso real es el arqueo: se dejan
+pasar las DIFERENCIAS, nunca los absolutos; los importes se miran contra la BD con
+el `shift_id`, que sí viaja (regla del proyecto: confirmar contra la BD).
+
+⚠️ **`gcentro/src/lib/sentry.ts` sigue con la deny-list y por lo tanto sigue
+fugando.** Se decidió arreglarlo en su propio hilo. La divergencia está declarada en
+el encabezado de `src/lib/sentry.ts` para que no sea silenciosa.
+
+### Auditar una suite por MUTACIÓN, no leyéndola
+
+**Si una suite pasa entera a la primera, sospechá. Mutá el sujeto bajo prueba a
+identidad y corré: los que sobreviven no lo están probando. Y ojo con la clase que
+el mutante NO detecta: aserciones que pasan por la razón equivocada. El contraste
+—positivo y negativo en la misma aserción— es lo que discrimina.**
+
+Es el método más reutilizable que salió de todo el bloque de Sentry, y no es
+específico de un filtro de privacidad: sirve para cualquier módulo con una suite
+grande. Cómo se aplica en concreto:
+
+1. **Mutar a identidad.** Hacer que las funciones exportadas devuelvan su entrada sin
+   tocarla (un `return value` al principio). El árbol tiene que estar limpio y todo
+   commiteado — se revierte con `git checkout <archivo>` cuando terminás.
+2. **Correr con reporte JSON** (`--reporter=json --outputFile=…`) y listar los que
+   PASAN. Esos son los sospechosos: pasaron con el sujeto apagado.
+3. **Clasificar los sobrevivientes.** No todos son defectos:
+   - Los tests que verifican **ausencia de redacción de más** (que el stack trace
+     sobreviva, que el envelope conserve lo que Sentry agrupa, que un `no throw`
+     no explote) **no pueden** fallar contra un no-op. Es inherente a su forma.
+     Son legítimos y hay que dejarlos MARCADOS para que la próxima auditoría no
+     los "arregle".
+   - El resto sí es deuda: o no prueban nada, o el nombre promete una verificación
+     que las aserciones no hacen.
+4. **Buscar aparte la clase que el mutante no ve:** aserciones que pasan por la razón
+   equivocada. El olor típico es una aserción que daría verdadera para CUALQUIER
+   entrada. La forma de probarlo es meter en esa posición un caso del signo opuesto
+   —un valor que DEBERÍA pasar— y ver si el test también lo "aprueba". Si aprueba
+   las dos cosas, no está midiendo lo que dice medir.
+
+Resultado real de aplicarlo a `sentry.test.ts` (2026-08-07): de 246 tests,
+**221 murieron con el mutante (correcto), 25 sobrevivieron** — 8 legítimos y 17 con
+defecto. Y la clase invisible al mutante sumó 58 más. Ver la deuda de la auditoría.
+
+### 🔴 ANTE UN FALLO: LEER LOS ARTEFACTOS ANTES DE RE-CORRER
+
+**Playwright BORRA `test-results/` al arrancar cada corrida.** Re-correr para "ver
+si se repite" destruye el `error-context.md`, el screenshot, el video y el trace
+del fallo — que suelen ser la única forma de saber qué pasó, porque un flake por
+definición no se reproduce a pedido.
+
+Orden correcto ante un rojo:
+1. `test-results/**/error-context.md` — el **valor recibido** de la aserción.
+2. El trace si hace falta (`npx playwright show-trace …`).
+3. Recién ahí re-correr.
+
+### Un defecto de CLASE se barre en toda la suite, no solo donde estalló
+
+**Cuando arreglés un defecto que es de CLASE y no de instancia, buscá las otras
+instancias en la misma pasada. El conocimiento puede estar YA en el repo y no haber
+llegado a todos los archivos.**
+
+El caso que lo fijó (2026-08-19): `anular-venta.spec.ts` reventó por un locator
+`filter({ hasText: '#141' })` que matcheaba también la venta `#14` (el número y la fecha
+son `<span>` hermanos y el `textContent` concatena sin separador: `#14` + `11/08/26` =
+`#1411/08/26`, que contiene `#141`).
+
+Lo revelador no fue el bug sino **que la lección ya estaba escrita**: `fiado.spec.ts:295`
+documentaba esa misma concatenación y la evitaba con `getByRole` + regex sobre el nombre
+accesible, y `pago-mixto` y `vale-descuento` habían copiado el patrón. **`anular-venta`
+era una instancia HUÉRFANA de un defecto ya resuelto** — la corrección se aplicó donde
+dolió y no se barrió el resto. Estalló meses después, cuando el correlativo del lab cruzó
+141, y costó una corrida full más el diagnóstico.
+
+Cómo se aplica:
+1. Al arreglar, preguntarse **cuál es la clase** (acá: "locator por subcadena sobre una
+   fila cuyo texto concatena celdas"), no solo cuál es el síntoma.
+2. `grep` de esa forma en toda la suite y clasificar. No todo lo que matchea es la misma
+   clase: la mayoría de los `hasText` del repo buscan nombres con sufijo `Date.now()`, que
+   no colisionan por prefijo.
+3. Arreglar las que sí lo son **en el mismo commit**, aunque estén en verde. Las que
+   todavía no estallaron son las que van a costar más caro después: nadie las va a asociar
+   con este arreglo.
+4. Si una instancia tiene una raíz distinta, decirlo. Las filas de `historial-turnos` eran
+   la misma clase pero por otro motivo: de sus seis celdas, cinco tenían `data-testid` y el
+   monto de apertura era la única sin uno, así que no había forma de acotar el locator. Se
+   agregó el testid faltante.
+
+**🔴 EL CASO MÁS ELOCUENTE (2026-08-26): el hook que existe para prevenir este defecto
+salió MUDO por el mismo defecto.** Se escribió `.claude/hooks/sql-checklist.mjs` para
+inyectar un checklist antes de tocar SQL. La primera versión leía stdin con `require`
+dentro de un `.mjs` —donde `require` NO EXISTE— envuelto en un `try/catch` que devolvía
+`''` al fallar. Resultado: **exit 0, sin inyectar nada, sin error**. Un hook exitoso,
+silencioso e inútil.
+
+Leyéndolo se veía perfecto. Lo cazó el pipe-test: **10 de 10 casos callados, incluidos los
+6 que debían disparar.** La causa es la misma que la del guard deny-list que ese hook
+existe para atajar: **un `catch` que convierte un error en silencio es fail-OPEN.** El modo
+de fallo tiene que ser cerrarse, no dejar pasar. Hoy ese `catch` sale con código 1 y
+escribe a stderr.
+
+**Es el caso número once en 20 días de un error cuya lección ya estaba escrita en el
+repo** — y el único que ocurrió DENTRO del mecanismo diseñado para cortar la serie. Si
+hace falta un argumento de por qué esto no se arregla con más documentación, es este.
+
+### ⚠️ Trampas de TERMINAL — el síntoma no señala la causa
+
+Dos cosas que ya costaron tiempo, juntas porque son la misma familia: **la
+herramienta miente sobre lo que pasó, y uno termina diagnosticando el sistema
+equivocado.** Ante un resultado raro, descartar estas dos ANTES de sospechar del
+código.
+
+- **`playwright test | tail` devuelve el exit code de `tail`, no el de
+  Playwright** — un `exit 0` con la suite en rojo. Costó anunciar una corrida
+  verde que tenía un fallo. Para saber si pasó: redirigir a archivo y leer `$?`,
+  o mirar el resumen, nunca el código de salida de una tubería.
+
+- 🔴 **LA NOTIFICACIÓN DE TAREA EN SEGUNDO PLANO REPORTA EL EXIT DEL *SHELL*, NO EL DE
+  PLAYWRIGHT.** Misma familia que lo anterior y **peor**, porque la mentira llega en un
+  mensaje del sistema que parece autoritativo. Si el comando termina en cualquier cosa
+  que salga bien —un `echo`, un `tail`, un `;` final—, ESE es el código que se informa.
+  **Medido el 2026-08-19: dijo "exit code 0" las 4 de 4 veces, incluidas DOS suites
+  ROJAS** (una con 1 fallo, otra con 3).
+  **Obligatorio:** escribir el código real DENTRO del archivo de salida y leerlo de ahí:
+  ```
+  npx playwright test --reporter=list > /tmp/e2e.txt 2>&1; echo "PLAYWRIGHT_EXIT=$?" >> /tmp/e2e.txt
+  ```
+  Y verificarlo con `grep PLAYWRIGHT_EXIT` antes de decir que algo está verde. **Nunca
+  anunciar una corrida verde a partir de la notificación.**
+
+- 🔴 **"ES EL PATRÓN CANÓNICO" NO ES EVIDENCIA DE QUE FUNCIONE ACÁ.** El patrón oficial de
+  hooks de Claude Code parsea el payload con `jq`. **`jq` NO está instalado en esta
+  máquina.** Copiarlo sin verificar habría dejado el hook mudo desde el primer día —
+  fallando en silencio, que es el peor modo. Se reemplazó por `node`, que acá es la
+  dependencia más segura: si falta, el proyecto no compila igual. **Antes de copiar
+  cualquier patrón de referencia, verificar que sus dependencias existan en esta máquina**
+  (`command -v <herramienta>`), aunque el patrón venga de la documentación oficial.
+  Corolario práctico: los ejemplos de validación de settings con `jq -e` no corren acá; el
+  equivalente en node está escrito en el encabezado de `.claude/hooks/sql-checklist.mjs`.
+
+- **Un `curl` multilínea pegado en Git Bash rompe las continuaciones de línea**
+  (`\`), así que se ejecuta la primera línea sola: **la petición sale sin
+  headers**. El síntoma es un **401 idéntico** al de un secreto equivocado o una
+  firma mal calculada, así que se pierde el tiempo revisando la credencial en vez
+  de la terminal. Pasó probando la Edge Function `aplicar-estado`, donde el 401
+  legítimo por HMAC inválido y el 401 por "no llegó ningún header" se ven igual.
+  Mitigación: envolver la llamada en una **función de shell** —que se pega como
+  bloque y se invoca en una línea— en vez de pegar el `curl` crudo. Los comandos
+  de prueba de `aplicar-estado` están escritos así por este motivo.
+
+**Flake abierto — `vale-descuento.spec.ts:243` (REPORTE de vales), 2026-08-11.**
+Falló en corrida full con `expect(after - before).toBe(7000)`; pasó en la corrida
+full siguiente y aislado (8/8). **Causa NO determinada:** los artefactos se
+perdieron por re-correr antes de leerlos — este bloque existe por eso. Sospecha
+sin confirmar: acumulación de estado en LAB (ese día hubo 3 corridas full más
+varios specs sueltos). Si reaparece, el valor recibido discrimina: `0` = el KPI
+no se movió, `14000` = doble conteo, otro número = contaminación de datos.
+Con `retries: 0` un flake es DEUDA, no ruido: la config es así a propósito para
+que un fallo se investigue en vez de enmascararse con un reintento.
+
+🔶 **HIPÓTESIS con evidencia INDIRECTA (2026-08-19) — NO está cerrado.** La sospecha de
+"acumulación de estado en LAB" dejó de ser una corazonada: ese mismo día se DEMOSTRÓ que
+el lab acumula residuo entre corridas y que ese residuo **tumba tests ajenos** (las 5
+categorías `E2E NumFail` que voltearon `pos.spec` y `venta-espera` — ver el bloque del
+lab). Eso hace mucho más plausible la explicación, pero **no la verifica sobre ESTE
+test**: nadie reprodujo el fallo de `vale-descuento:243` con residuo controlado, y el
+mecanismo sería otro (contaminación de DATOS del KPI, no de layout).
+**Sigue abierto.** Para cerrarlo hace falta reproducirlo y leer el valor recibido, que
+es lo que discrimina. Si reaparece: **leer los artefactos ANTES de re-correr.**
+
+## Estado actual del proyecto
+[ACTUALIZAR AL INICIO DE CADA SESIÓN]
+Última fase completada: **FASE 1 del estado de suscripción de G-Centro** (sesión
+  2026-08-11/12, rama develop). Unit **261/261** · E2E full **182 passed + 2 skipped** *(medido 2026-08-12; al
+  2026-08-26 `npx playwright test --list` da **202 tests en 35 archivos** — reproducilo con
+  ese comando en vez de confiar en este número)* · tsc 0 · build verde ·
+  ⚠️ **eslint con 6 errores PREEXISTENTES** (ajenos, anotados con archivo y línea en
+  Deudas vigentes — la afirmación "eslint 0" que traía este bloque ya no era cierta).
+
+Después, sesión **2026-08-18**: **FASE 2 del estado de suscripción — el banner de lectura**
+  (bloque propio abajo). Solo `expiring` y `grace`, solo UI, fail-open, sin Realtime.
+  Verificado: unit **285/285** (261 previos + 24 nuevos), `suscripcion-banner.spec.ts`
+  **12/12** contra LAB y la Edge Function desplegada (exit 0 leído de archivo, no de una
+  tubería), tsc 0 y eslint limpio en los archivos tocados.
+  ⚠️ **La suite E2E full NO se volvió a correr en esta sesión** — pendiente antes de promover.
+  El conteo full sube en 12 solo si `E2E_GCENTRO_HMAC_SECRET` está en `.env.test`; sin esa
+  variable son 12 skips.
+
+Antes, sesión **2026-08-16/17**: auditoría de orden de operaciones de `aplicar-estado`
+  + el arreglo del `organization_id` malformado (commit `eb179d3`, ya desplegado). La
+  suite full NO se volvió a correr; lo verificado es `suscripcion-estado.spec.ts`
+  **8 passed + 1 skipped** contra la función desplegada, tsc 0 y eslint limpio en los
+  archivos tocados. Ese spec pasó de 6 a 9 casos, así que el conteo full sube a **185**
+  *solo si* `E2E_GCENTRO_HMAC_SECRET` está en `.env.test`; sin esa variable son los mismos
+  182 passed y 3 skips más.
+
+### FASE 1 — estado de suscripción (aplicada y desplegada)
+
+G-Centro (panel de suscripciones, **repo y BD aparte**) ESCRIBE una bandera en
+`organizations`; G-Vento solo LEE. Si G-Centro se cae, el POS sigue vendiendo.
+
+- **3 columnas aplicadas** en `organizations` (`supabase/organization-subscription.sql`):
+  `subscription_status` (text + CHECK sobre
+  `active|expiring|grace|restricted|suspended`, **not null default `'active'`**),
+  `subscription_message`, `subscription_updated_at`. El default es la decisión central:
+  **la ausencia de información nunca degrada a un cliente.** Se sumó también
+  `unique (name)` en `organizations` (onboard-org resuelve la org POR NOMBRE y sin unique
+  un re-seed con el nombre distinto creaba una org nueva en silencio).
+- **Protección en DOS CAPAS**, porque la policy `"organizations: editar con permiso"`
+  valida QUIÉN y no QUÉ COLUMNAS —la misma falla de categoría que se cerró en `profiles`—:
+  (1) privilegios de columna en **allowlist** (se revoca el UPDATE de tabla y se concede
+  solo `name, logo_url, config`), y (2) el trigger `protect_organization_subscription`.
+- 🔴 **La capa ACTIVA es el GRANT, no el trigger.** Medido: Postgres verifica los
+  privilegios de columna al arrancar el executor, antes de escanear filas y por lo tanto
+  antes de cualquier BEFORE ROW trigger. Da **`42501 permission denied for table
+  organizations`** — mensaje a nivel TABLA aunque la falla sea por columna, así que el
+  spec assertea el CÓDIGO y no el texto, y el caso de CONTRASTE (que el mismo owner SÍ
+  pueda escribir `name`) es lo único que distingue una protección puntual de una RLS rota.
+  **El trigger es la red para cuando alguien restaure el privilegio de tabla** — el modo de
+  fallo probable es una línea rutinaria tipo
+  `grant all on all tables in schema public to authenticated`, que borraría la allowlist en
+  silencio. No se puede ejercitar desde el spec (requiere que `authenticated` TENGA el
+  privilegio, que es lo que revocamos): su verificación manual está en la migración.
+- **Edge Function `aplicar-estado` DESPLEGADA y validada en dos tandas.**
+  (a) **7 casos manuales por `curl`** (2026-08-12) contra la función viva: firma válida
+  (`changed:true`), repetida (`changed:false` y `subscription_updated_at` sin moverse),
+  firma inválida, timestamp fuera de la ventana de 300s, estado fuera del enum, org
+  inexistente y sin header de firma.
+  (b) **3 casos AUTOMATIZADOS** en `tests/suscripcion-estado.spec.ts` (2026-08-17) que
+  verifican el **EFECTO, no solo la respuesta**: tras un rechazo (enum inválido, org
+  inexistente, UUID malformado) releen la fila y comparan **las tres columnas** contra el
+  snapshot previo. Los 7 manuales probaban únicamente el status HTTP y el mensaje, y una
+  validación que corriera DESPUÉS del UPDATE devuelve el mismo 400 dejando la fila escrita
+  — que es el fallo que apareció en G-Centro y disparó esta auditoría. Firman con HMAC
+  **válido** a propósito: con firma inválida la función corta antes y el test sería vacuo.
+  Requieren `E2E_GCENTRO_HMAC_SECRET` en `.env.test`; sin esa variable hacen skip.
+  Los tres son RECHAZOS, así que **el spec no escribe el estado de suscripción de LAB** —
+  no agregar ahí un caso de camino feliz sin pensarlo.
+- **El orden de validaciones está AUDITADO y es correcto**, con una garantía mejor que el
+  orden de líneas: **el cliente `service_role` se construye recién en la `:159`, después de
+  las 11 validaciones** — antes no existe el objeto con el que escribir. La firma HMAC es la
+  `:128`, el UPDATE la `:191`. Sobrevive a un refactor que reordene, que es justo lo que el
+  orden de líneas no hace.
+- **`organization_id` malformado da 400 legible** (`eb179d3`). Antes llegaba al
+  `.eq('id', ...)`, Postgres respondía `22P02` y caía en el 500 genérico *"Error de base de
+  datos"*: un mensaje que MIENTE sobre la causa y no le dice a G-Centro qué corregir. La
+  validación de forma va **DESPUÉS de la firma** (un llamante sin autenticar no debe obtener
+  señal sobre qué acepta el parser) y **ANTES del SELECT**. ⚠️ **Estrecha la aceptación
+  respecto de Postgres**: rechaza `{...}` y la forma sin guiones, que la BD sí acepta. Es
+  aceptable porque el id sale canónico de la BD de G-Centro, y el modo de fallo es un 400
+  explícito, nunca una escritura perdida.
+- **"Verify JWT" DESACTIVADO — DECISIÓN, NO DESCUIDO.** El llamante es un servidor, no un
+  usuario, así que un JWT de Supabase no significa nada acá. Consecuencia directa: **el
+  endpoint es públicamente alcanzable y el HMAC es la ÚNICA autenticación** — de ahí la
+  firma sobre timestamp+cuerpo, la ventana anti-replay y la comparación en tiempo constante.
+  **Si un redeploy lo reactiva, los 3 casos automatizados dan 401** y el síntoma se confunde
+  con secreto equivocado: verificar el toggle después de cada deploy.
+  `subscription_updated_at` significa *"cuándo CAMBIÓ el estado"*, no *"cuándo llamaron"*:
+  re-aplicar el mismo estado es un no-op.
+- 🔴 **CAMBIAR EL `CHECK` DE `subscription_status` EXIGE AVISAR A G-CENTRO ANTES DE
+  DESPLEGARLO.** El enum vive en **CUATRO** lados que no se enteran entre sí: el `CHECK` de
+  la BD, la constante `ESTADOS` de la Edge Function, el `ESTADOS` del spec de Fase 1 y —desde
+  la Fase 2— **el lector del frontend** (`resolveNotice` en `src/hooks/useSubscriptionStatus.ts`,
+  que decide qué estados producen aviso). **No existe ningún mecanismo que garantice el
+  aviso**: es coordinación entre dos repos con dueños distintos, no código. El aviso va
+  primero, el deploy después.
+  **La consecuencia CAMBIÓ con la Fase 2 — ya no es "da igual porque nadie lee":**
+  - Antes: un estado nuevo sin aviso lo rechazaba la función con 400 y el panel creía haber
+    aplicado algo que nunca se escribió.
+  - Ahora se suma un modo de fallo más silencioso: un estado que la BD SÍ acepte pero que el
+    frontend no conozca **cae en el default del switch y no muestra nada**. Eso es fail-open
+    y está BIEN —es la regla de la Fase 2, nada degrada por un valor que no entendemos—,
+    **pero significa que G-Centro puede creer que avisó a un cliente que nunca vio nada.**
+    La escritura fue exitosa y aun así el cajero no se enteró: los dos lados quedan
+    convencidos de que el aviso llegó.
+  **Esta sigue siendo la fragilidad real del puente**, y crece con cada fase: hoy el costo es
+  un aviso que no se ve; con `restricted`/`suspended` implementados sería un cliente que no
+  queda restringido, o uno restringido que no debía.
+- ✅ **LA FASE 2 YA ESTÁ IMPLEMENTADA (banner de lectura) — ver su bloque propio abajo.**
+  Lo que sigue SIN implementar es el **gating**: ningún flujo se bloquea, en ningún estado.
+  🔴 **Ojo con la confusión que YA tuvo G-Centro** (pusieron un tenant en `suspended`
+  esperando un banner en el POS y no pasó nada): **hoy sigue sin pasar nada con
+  `suspended`**, pero por otro motivo. Ya no es que ninguna pantalla lea la bandera — la lee
+  — sino que el alcance de la Fase 2 son SOLO `expiring` y `grace`. `restricted` y
+  `suspended` caen a propósito en el default del switch y no muestran nada.
+  **Para ver el banner desde G-Centro hay que escribir `expiring` o `grace`.**
+  Dos decisiones ya tomadas para cuando se construya el gating:
+  **`suspended` NO toca la apertura de turno** (bloquearla ES bloquear la venta, con un día
+  de retraso y en el peor momento; además el gate de turno es de UI y no de seguridad, así
+  que solo sacaría las ventas del cuadre) y **el export NUNCA se bloquea**, en ningún nivel.
+- **Lectura al login + refetch por foco, NO Realtime** (aunque G-Vento sí usa Realtime en 5
+  lugares y estaría disponible): para una bandera que cambia una vez al mes la latencia es
+  **amortiguación**, no carencia. Una bandera que cambia sola en medio de un cobro es
+  exactamente el modo de fallo que motivó el patrón `checkoutOrder`. **No "mejorar" esto
+  con Realtime.**
+- **Los UUID de las organizaciones NO están en este documento**: se consultan con la query
+  del encabezado de `supabase/organization-subscription.sql`, que los lee siempre
+  actualizados. Recordar que **LAB no es un cliente que pague** (ver la sección del lab).
+
+### 🔴 Desborde del POS por categorías — BUG DE PRODUCCIÓN corregido (2026-08-19)
+
+**El carrito del POS se encogía hasta ser inusable a medida que se agregaban categorías.**
+El modo de fallo es el peor posible: **el cajero no puede cobrar.**
+
+**Causa:** el panel del catálogo es `flex: '0 0 60%'` y **sin `minWidth: 0`** conserva el
+`min-width: auto` por defecto, así que se niega a bajar de su ancho min-content. Cuando los
+tabs de categorías no entran, el panel CRECE más allá del 60% y se come el carrito. El
+`overflowX: auto` del strip no alcanzaba: **nunca llegaba a activarse**, porque el panel le
+cedía el ancho antes de que hubiera algo que scrollear.
+
+**Medido** con los nombres reales de G-10 (área útil = viewport − 224 del sidebar):
+
+| viewport | categorías | catálogo | carrito | ¿cobrable? |
+|---|---|---|---|---|
+| 1024 | 2–4 | 480 (=60%) | 320 | sí |
+| 1024 | **5** | 548 | **253** | sí, degradado |
+| 1024 | **7** | 714 | **86** | **NO** |
+| 1280 | 2–5 | 634 (=60%) | 422 | sí |
+| 1280 | **10** | 974 | **82** | **NO** |
+
+🔴 **G-10 tiene 5 categorías reales** (Cocteles, Bebidas, Utensilios, Adiciones, Vaper):
+**ya estaba degradado en producción** —carrito de 253px en vez de 320, un 21% menos— y a
+**dos categorías** de que su cajero no pudiera cobrar en una terminal de 1024px.
+El umbral depende del **ancho del texto**, no del número: 5 categorías de nombre largo
+pesan más que 8 cortas.
+
+**El arreglo son TRES cosas, no una** (quitar cualquiera lo deja a medias):
+1. `minWidth: 0` en el panel del catálogo — la causa.
+2. `flexShrink: 0` en los botones de tab. Sin esto, una vez acotado el panel los tabs se
+   COMPRIMEN en vez de desbordar y el overflow sigue sin activarse: **el bug se muda en
+   vez de resolverse**.
+3. Máscara de continuación (`useScrollOverflow`), porque la scrollbar está oculta
+   (`scrollbarWidth: none`) y sin señal el cajero no sabe que puede desplazarse.
+
+Verificado después del fix en 18 combinaciones (2→10 categorías × 1024/1280): catálogo
+clavado en 60%, carrito íntegro (320 / 422) **en todas**, y máscara ⟺ desborde coherente
+en las 18. El caso común (pocas categorías) queda **idéntico** a antes del fix.
+
+🔴 **`useScrollOverflow` estaba ROTO y nadie lo sabía — `useRef` → callback ref.**
+El hook quedaba MUDO cuando el consumidor tiene un return temprano de carga: el efecto
+corría en un render donde el nodo aún no estaba montado (`ref.current === null`), salía sin
+montar observers, y al montarse el nodo **el efecto no volvía a correr** porque `deps` no
+había cambiado. `hasMore` se congelaba en `false` para siempre. Encontrado con una sonda
+`console.log` DENTRO del hook: la secuencia real era `efecto corre, el=NULL` repetido, con
+el strip desbordando de verdad (scrollWidth 666 vs clientWidth 432).
+El POS lo destapó porque su return de carga lo gobierna **otra query** distinta de la que
+viaja en `deps`; **Productos y Delivery tenían la misma fragilidad latente y funcionaban
+por casualidad de timing.** Con callback ref el montaje se ata a que el NODO aparezca, que
+es la condición real. Se sumaron además: observar los HIJOS (el contenedor puede no cambiar
+de tamaño mientras su contenido crece), un re-chequeo en `requestAnimationFrame` y otro en
+`document.fonts.ready`.
+
+**Spec:** `tests/pos-categorias-layout.spec.ts` (3). Usa **7 categorías a 1024px** a
+propósito: es el punto que rompe sin el fix — verificado quitando el `minWidth: 0`, el test
+da `Expected: 480, Received: 714`. Los nombres son realistas y no `cat-1`, `cat-2`: con
+nombres cortos entrarían de sobra y el test sería vacuo.
+
+🔴 **VERIFICADO EN PRODUCCIÓN (2026-08-19) — era PEOR de lo estimado:**
+
+| cliente | categorías activas | a 1024px | a 1280px |
+|---|---|---|---|
+| **Salchimelo** | **9** | **INUSABLE** (rompe en 7) | a UNA categoría del límite (rompe en 10) |
+| **G-10** | **5** | degradado 21% (carrito 253 en vez de 320) | con margen |
+
+**Salchimelo probablemente YA tenía el POS roto**, no estaba por tenerlo: con 9 categorías
+supera el umbral de 7 de una terminal de 1024px. G-10 venía operando con un 21% menos de
+carrito. **Esto no era un hallazgo de laboratorio: era producción.**
+
+Dato que conviene mirar antes de sacar conclusiones sobre un cliente: **el umbral depende
+del ANCHO DEL TEXTO y de la RESOLUCIÓN REAL de la terminal**, no solo del conteo. La query
+para repetirlo (hay que correrla en el SQL Editor: la RLS de `categories` es por sede y las
+credenciales del lab solo ven LAB):
+`select r.name, count(*) from categories c join restaurants r on r.id = c.restaurant_id
+where c.is_active group by 1 order by 2 desc;`
+
+### FASE 2 — banner de suscripción (implementada, sesión 2026-08-18)
+
+G-Vento **LEE** la bandera y muestra un aviso. **SOLO UI: no bloquea NADA.** Ni reportes, ni
+configuración, ni exportaciones, ni la venta. El bien protegido es la cobranza, no los datos
+del cliente: un falso positivo en una política de BD es un bar que no vende de madrugada; un
+moroso que abre devtools se resuelve con una llamada. **Sin RLS y sin triggers para esto.**
+
+- **Alcance deliberado: solo `expiring` (aviso DESCARTABLE) y `grace` (banner PERSISTENTE).**
+  `restricted` y `suspended` **NO se implementaron** — se dejan hasta saber si el aviso suave
+  alcanza. Caen en el default del switch como cualquier estado desconocido.
+- **Sin migración: la Fase 2 es frontend puro.** La policy `"organizations: ver la propia"`
+  ya permitía el SELECT y `organizationId` ya estaba en `AuthContext`. Las 3 columnas sí se
+  agregaron **A MANO** a `database.types.ts` (deuda del CLI 403, como el resto).
+- 🔴 **FAIL-OPEN, con el `switch` SIN `else`.** Todo lo que no sea exactamente `expiring` o
+  `grace` devuelve null y no muestra nada: `active`, los dos estados no implementados, un
+  valor nuevo que agregue G-Centro, la columna nula, y la lectura fallida. La asimetría es
+  la regla: mostrar de menos es aceptable, degradar a un cliente por una bandera que no
+  supimos leer no lo es.
+- 🔴 **EL TIMESTAMP NO DECIDE — y el pedido original decía lo contrario.** Se pidió asumir
+  activa si `subscription_updated_at` era viejo; es un error y se corrigió antes de
+  implementar. `subscription_updated_at` significa *"cuándo CAMBIÓ el estado"*: un cliente
+  estable en `grace` hace tres semanas tiene el timestamp viejo **y es correcto**. Caducar
+  por antigüedad haría desaparecer el banner solo — la degradación por timeout que se quería
+  evitar, invertida. Se lee solo como diagnóstico. La razón está escrita en el hook.
+- **Mensaje NULL → texto por defecto, NUNCA silencio** (aplica también a `''` y a solo
+  espacios). Si un NULL apagara el banner, G-Centro tendría un **interruptor accidental**:
+  un campo opcional decidiría si el cliente se entera. El estado es el contrato; el mensaje
+  es presentación.
+- **Dónde vive:** `SubscriptionBanner` en `AppLayout`, fila hermana debajo del header y
+  **ARRIBA** del banner de turno — el mismo slot que ya usaba el aviso de "no hay turno".
+  **Comprime `<main>`, no se superpone:** ninguna pantalla bajo AppLayout usa `100vh`
+  — todas derivan su alto del padre con `height:100%`. (Las 5 ocurrencias de `100vh` del
+  repo están en KitchenPage y LoginPage, ambas FUERA de AppLayout.)
+  Medido: 41px una línea, 61px dos, 81px tres — 6% a 12% del alto útil en 720p.
+  **Cocina NO lo recibe** y está bien: `/cocina` vive fuera de `ProtectedRoute` y de
+  `AppLayout`, sin Supabase Auth ni organización — es la tablet de cocina, no una pantalla
+  donde se cobre. **Apilamiento con el banner de turno: aceptado** (dos filas, 102px); es
+  infrecuente y el de turno se resuelve en segundos.
+- **Descarte (solo `expiring`): dura el DÍA CALENDARIO de Bogotá**, en `localStorage` bajo
+  `gvento:suscripcion:descartado` = `{estado, dia}` (precedente: `useCollapsedGroups`, mismo
+  degradado silencioso). Un descarte permanente anularía el aviso; uno que vuelve en cada
+  recarga entrena a ignorarlo. Se guarda el **estado junto al día** para que descartar
+  `expiring` no tape un `grace` que llegue el mismo día.
+  Es **por navegador, no por usuario**: en un POS compartido, si un cajero descarta, el del
+  turno siguiente no lo ve ese día. Asumido — es un aviso del negocio.
+  ⚠️ Residuo conocido, no bug: si la bandera va y vuelve al MISMO estado el mismo día
+  (`expiring`→`grace`→`expiring`), el descarte original sigue valiendo.
+- **Largo del mensaje: se le pidió a G-Centro un tope de 140 caracteres** (ellos proponían
+  280). Medido en Chromium, máximo en UNA línea: **106** @1024px, **145** @1280, **157**
+  @1366, **248** @1920. 280 **no rompe** el layout (2 líneas, 3 en 1024) — se bajó a 140 por
+  economía de espacio, no por necesidad. Ojo: el proyecto declara `Inter` pero **no la carga
+  como webfont**, así que resuelve a `system-ui` y las cifras se mueven según la máquina.
+- 🔴 **Texto sin espacios: se RECORTABA EN SILENCIO.** Una corrida sin oportunidad de corte
+  (un token, un id) desbordaba un flex item bajo un ancestro `overflow-hidden` y quedaba
+  invisible **sin ninguna señal** — no desbordaba la página, simplemente dejaba de verse. Se
+  arregló con `min-width:0` + `overflow-wrap:anywhere` **en los DOS banners**: el nuevo y el
+  de turno, que tenía la misma carencia y hoy no molesta solo porque su texto es una
+  constante nuestra. Un tope de caracteres NO protege de esto.
+- **SIN Realtime (decisión, no omisión).** Lectura al login + `refetchOnWindowFocus` (default
+  de React Query, no hay `defaultOptions.queries`) + `staleTime` de 5 min. Para una bandera
+  que cambia una vez al mes la latencia es **amortiguación**, no carencia; y una bandera que
+  cambia sola en medio de un cobro es el modo de fallo que se cazó con `checkoutOrder` en
+  TablesPage. **No "mejorar" esto con Realtime.** La razón está escrita en el hook.
+- **Tests: 24 unitarios + 12 E2E.**
+  - `src/hooks/useSubscriptionStatus.test.ts` — matriz fail-open de `resolveNotice`. Cubre lo
+    que el E2E NO PUEDE: un `subscription_status` fuera del enum lo rechazan la función y el
+    `CHECK`, así que ese caso solo se prueba sin red.
+  - `tests/suscripcion-banner.spec.ts` — escribe cada escenario **por la Edge Function
+    firmada con HMAC**, el mismo camino que usa G-Centro (authenticated no puede escribir
+    estas columnas: es el punto de la Fase 1). Beneficio lateral: cada corrida revalida que
+    la función siga viva y que "Verify JWT" siga desactivado.
+    ⚠️ **Este spec SÍ cambia el estado de suscripción de LAB** (el de Fase 1 a propósito no).
+    Snapshot + restore; `subscription_updated_at` queda con la hora de la corrida y no se
+    puede restaurar por ese camino. Requiere `E2E_GCENTRO_HMAC_SECRET`; sin él, skip.
+  - **Auditado POR MUTACIÓN en las dos direcciones** (método del proyecto): con
+    `resolveNotice`→null mueren los positivos y sobreviven los 3 de fail-open —inherente a su
+    forma, están MARCADOS en el spec para que una auditoría futura no los "arregle"—; con
+    `resolveNotice`→siempre-aviso mueren esos 3. Ninguno es vacuo.
+- **Nota de proceso:** `vitest.config.ts` no heredaba el alias `@` de `vite.config.ts` (es
+  una config aparte), así que ningún módulo de `src/` que importe con `@/...` era testeable.
+  Se le agregó el alias. Los tests viejos no lo notaron porque viven en `src/lib/` con rutas
+  relativas.
+
+### Sesión previa (2026-08-10) — ajustes del cliente + Delivery
+
+E2E pasó de 160 a 177 con 17 tests nuevos, uno por ajuste:
+  - **Categorías en Productos:** los tabs no se podían desplazar. El strip ya tenía
+    `overflowX: auto`; lo que faltaba era `flex:1` + `minWidth:0` (medido: `clientWidth`
+    3255 en un viewport de 900). + máscara de continuación.
+    ⚠️ **CORREGIDO 2026-08-19:** esta nota decía "no hijo en bloque **como en el POS**",
+    dando a entender que el POS estaba a salvo. **Era falso y mandaba a descartar justo el
+    lugar del bug** — ver el bloque del desborde del POS más abajo. La mecánica de verdad,
+    que es lo que hay que recordar: **un flex item sin `minWidth: 0` conserva
+    `min-width: auto`, se niega a bajar de su ancho min-content y SE COME AL HERMANO.**
+    Da igual si el contenedor con scroll es hijo en bloque o flex item: lo que decide es si
+    el ANCESTRO FLEX está acotado. En Productos el que faltaba acotar era el strip; en el
+    POS, el panel del catálogo.
+  - **Recibo al cerrar mesa:** Mesas no ofrecía ticket (solo `printComanda`). Usa
+    `printSaleTicket`, la misma función que la reimpresión del Historial ⇒ ticket
+    byte-idéntico. Con BOTÓN, como el POS (auto-imprimir gasta papel si nadie lo pide).
+  - **Reset del tipo de venta** tras CUALQUIER venta. El motivo es de datos, no de UX: un
+    `orderType` pegado grababa la siguiente venta de mostrador como delivery y ensuciaba el
+    desglose por canal del reporte Financiero.
+  - **Stock bajo en el POS** con `src/lib/stockStatus.ts` como regla ÚNICA. La regla estaba
+    duplicada Y divergente (el POS ignoraba `min_stock`; Inventario ignoraba
+    `kind`/`stock_tracking`). Un test compara ambas pantallas sobre el mismo producto para
+    que no vuelvan a bifurcarse.
+  - **Observaciones de cocina POR ÍTEM** en el picker de Mesas. `order_items.notes` ya estaba
+    cableada de punta a punta (incluida la comanda impresa); el único hueco era que
+    `PickerItem.note` existía y se enviaba, pero no había input que lo escribiera.
+  - **Delivery, 3 arreglos visuales:** el CTA de "Nuevos" era naranja porque tomaba el color
+    de la columna DESTINO (no inferible, y aplicado inconsistente) → emerald del design
+    system en ambas columnas; máscara de scroll en las columnas (siempre scrollearon, faltaba
+    la señal); estado vacío centrado. Hook compartido `useScrollOverflow`.
+
+⏸️ **El trabajo del filtro de PII de Sentry sigue PAUSADO** — se pausó por los pedidos del
+  cliente y no se retomó. El diagnóstico está COMPLETO y medido en Deudas vigentes
+  (hallazgos 1, 2a, 2b y 3), con el orden sugerido para retomar: 2b → 2a → 3 → 1.
+  Nada de eso es fuga consumada: no corresponde release de emergencia.
+
+**develop vs main — CONSULTALO, no lo leas de acá.** Un estado declarado caduca; la
+  instrucción para consultarlo, no. Este bloque decía durante semanas que develop iba
+  ADELANTE de main, y era al revés:
+
+  ```
+  git rev-list --count main..develop   # commits que develop tiene de más
+  git rev-list --count develop..main   # commits que main tiene de más
+  git log --oneline develop..main      # cuáles son
+  ```
+
+  Al 2026-08-26: `main..develop = 0`, `develop..main = 4` — **main va ADELANTE** (incluye
+  `344787b` Sentry, `ae0ea91` ajustes del cliente, `c9d9a32` fix del POS y `59fbf8c` Fase 2).
+  O sea que hoy **no hay nada que promover de develop a main**; lo que falta es rebasar
+  develop sobre main antes de abrir trabajo nuevo ahí.
+  ⚠️ Ojo con la asimetría que sí es estable: **el SQL se aplica a la BD compartida apenas se
+  ejecuta**, independientemente de qué rama esté desplegada. Una migración "sin promover"
+  ya rige para las tres organizaciones.
+
+**PRODUCCIÓN (main, desplegado en Vercel) incluye:**
+  - **Sentry activo con el filtro de PII por allowlist** (release 344787b). Se cazó ANTES de que
+    hubiera fuga consumada: Sentry tenía 1 solo issue (un test directo) y CERO PII capturada.
+  - **Bloque de seguridad RBAC completo:** escalada por auto-edición de `profiles` cerrada
+    (trigger), `is_active` efectivo en las CUATRO funciones base, invariante
+    organización↔sede, y alta de usuarios ATÓMICA server-side (`create-user` asigna el
+    `role_id` con compensación por `deleteUser` si falla — cierra el caso "perfil sin rol").
+  - **Anulación de ventas** del turno actual (RPC atómica con 6 guardas server-side).
+  - **Cartera fiado** maestro-detalle por cliente.
+  - **Imágenes de producto** completas (no recortadas).
+  - **Arreglo de numeración (B+A):** reintento del UPDATE + aviso al cajero con botón
+    Reintentar + reporte a Sentry con `area: 'numeracion'`. Es MITIGACIÓN, no el arreglo de
+    fondo — ver la opción C en Deudas.
+  - Previo ya en prod: arqueo multi-método, pago mixto, vale/ruletazo, fix compras no toca
+    caja, onboarding Salchimelo.
+
+## Infraestructura (fuera del repo, pero condiciona el trabajo)
+
+No vive en este repositorio y no se ve en el código, así que se anota acá: hay decisiones de
+desarrollo que dependen de esto.
+
+- **Servidor Ubuntu con Supabase self-hosted.** Cumple dos funciones: entorno de **staging**
+  y **destino de los backups** de producción.
+- **Ciclo nocturno en cron:** `backup de prod → restore sobre staging → lab-seed`.
+  - **Cada corrida PRUEBA que el backup es restaurable.** Ese es el punto del diseño, no un
+    efecto lateral: un backup que nunca se restauró no es un backup, es un archivo. Acá el
+    restore es parte del ciclo, así que un dump corrupto se descubre a la mañana siguiente y
+    no el día que haga falta de verdad.
+  - **El artefacto del dump es LO SAGRADO; el staging es DESECHABLE.** Si hay que elegir qué
+    proteger, es el dump. Staging se puede pisar entero sin pensarlo — de hecho se pisa todas
+    las noches. No guardar nada en staging que no se pueda regenerar.
+  - `lab-seed` corre al final: mantenerlo sincronizado con las migraciones de permisos (los
+    permisos por rol son POR ORG y el re-seed los pisa en LAB).
+- **Contraseña de BD del proyecto: ROTADA.** Cierra la deuda que estaba abierta desde que
+  quedó expuesta.
+- ⚠️ **Storage (imágenes de producto) NO entra en el ciclo de backup.** Ver Deudas.
+
+🔒 **Bloque de seguridad RBAC (sesión 2026-07-31) — SQL YA APLICADO Y RIGIENDO EN LAS 3 ORGS.**
+  Auditoría disparada por un hallazgo de G-Mura (`is_active` no aplicado server-side). En G-Vento
+  el hueco existía **y era peor**: la policy `"profiles: editar el propio"` no acotaba COLUMNAS, así
+  que cualquier autenticado podía escribir su propio `role_id` (el UUID del rol owner es legible por
+  `"roles: ver los de la org"`) → comodín `*` → acceso total; y su propio `organization_id` →
+  `get_my_organization_id()` apunta a otra org → con `usuarios.gestionar` se auto-inserta
+  `user_stores` hacia una sede ajena y cambia su sede activa → **datos de G-10 o Salchimelo**.
+  Dos migraciones NUEVAS, ambas aplicadas por el usuario en el SQL Editor:
+  - `supabase/protect-profile-self-escalation.sql` — trigger BEFORE UPDATE
+    `trg_protect_profile_self_escalation`: rechaza cambios a `role_id`, `role`, `is_active` y
+    `organization_id` cuando `new.id = auth.uid()`. Patrón de `protect_owner_role`
+    (`current_user = 'authenticated'` → seeds, `handle_new_user` y service_role pasan).
+    `IS DISTINCT FROM` (no `<>`) es OBLIGATORIO: `role_id`/`organization_id` son nullables y
+    PostgREST manda solo las columnas del `.update()` completando el resto de NEW desde OLD — por
+    eso el cambio de sede activa (update de `restaurant_id` solo) no se ve afectado.
+  - `supabase/profiles-is-active-enforced.sql` — `and is_active` en las CUATRO funciones base:
+    `has_permission`, `get_my_restaurant_id`, `get_my_role`, `get_my_organization_id`.
+    `get_my_organization_id` entró a propósito: sin él un desactivado sigue leyendo `roles`, que es
+    la materia prima de la escalada. Verificado antes de aplicar: cero perfiles inactivos y owner
+    activo en las 3 orgs (si algún owner quedara inactivo, se recupera SOLO por SQL Editor).
+  - `tests/rbac-escalada.spec.ts` (6): los 3 rechazos assertean el MENSAJE del trigger, no
+    `bloqueado()` laxo — un rechazo por RLS con cero filas sería verde por la razón equivocada
+    (patrón anular-venta:279). Probado empíricamente: el BEFORE UPDATE dispara ANTES del WITH CHECK.
+    Snapshot en `beforeAll` + restore en `afterAll` para no dejar el lab con el cajero desactivado.
+  - **Suite full 149/149 verde** con P1+P2 ya rigiendo → el filtro `is_active` es un no-op.
+  - Aprendizaje: `permissions` es **jsonb**, no array PG → `.contains('permissions', '["*"]')`;
+    pasar `['*']` lo serializa como `{*}` y Postgres devuelve `22P02 Token "*" is invalid`.
+  - **Pasada de APP (misma sesión, sin SQL nuevo):** (a) `create-user` verifica `is_active` del
+    LLAMANTE y pasó su gate de enum `role === 'admin'` a `has_permission('usuarios.gestionar')` vía
+    RPC con el cliente del llamante — cierra la persistencia "te desactivan, te creás otra cuenta";
+    (b) `AuthContext.fetchProfile` corta la sesión con mensaje si el perfil está inactivo (antes:
+    app en blanco sin explicación) — funciona gracias a la policy aditiva `"profiles: ver el propio"`
+    (`id = auth.uid()`), la única que le deja leer su fila tras P2; (c) ConfigPage oculta el toggle
+    de `is_active` en la fila propia (testid `user-toggle-self`). `tests/rbac-escalada.spec.ts`
+    pasó de 6 a 8 casos. Queda pendiente solo el baneo en `auth.users` (ver deudas).
+  - **`organization_id` de profiles — `supabase/profiles-organization-invariant.sql`, APLICADA y
+    verificada en la BD compartida (rige para LAB / G-10 / Salchimelo).** Hallazgo: `organization_id`
+    NO se seteaba en NINGÚN paso del flujo normal (ni `handle_new_user`, ni la metadata de
+    `create-user`, ni el UPDATE de `useUsers`, que solo escribe `role_id`) → **todo usuario creado
+    desde la app nacía con `organization_id` NULL**. Los perfiles sanos lo tienen porque los sembró
+    `onboard-org` / `multi-tenant-rbac` / `lab-seed`. Rompía la UI entera: `usePermissions` lee su
+    rol de `roles`, cuya RLS es `organization_id = get_my_organization_id()` → con NULL da NULL (no
+    TRUE) → cero filas → `permissions = []` → sidebar vacío y toda ruta con permiso rebotando.
+    **Asimetría clave:** `has_permission()` NO filtra por organización, así que server-side los
+    permisos SÍ funcionaban — el usuario quedaba roto en la UI, no en la API.
+    La migración hace tres cosas, en este orden dentro de la transacción:
+    (1) `handle_new_user` DERIVA `organization_id` de la sede (se arregla ahí y no en la Edge
+    Function porque cubre todos los caminos: Dashboard, signUp, scripts) + 3 guardas con `raise`
+    explícito — sin `restaurant_id` en metadata (con `hint` de qué poner), sede inexistente, y sede
+    sin organización. NO introduce un modo de fallo nuevo: `profiles.restaurant_id` ya es NOT NULL
+    (`schema.sql:57`), así que crear desde el Dashboard sin metadata YA abortaba; solo mejora el
+    mensaje. (2) backfill derivando de la sede. (3) trigger `trg_profiles_org_consistency`.
+    - **El trigger VALIDA, no fuerza** — decisión de diseño, no detalle: si forzara
+      `new.organization_id`, y `trg_protect_profile_self_escalation` disparara primero (no vería
+      cambio de org y dejaría pasar), el forzado reescribiría la organización EN SILENCIO →
+      reintroduce el salto de org que tapa P1. Validando, el rechazo ocurre en cualquier orden de
+      disparo y no dependemos del orden alfabético de los BEFORE ROW.
+    - **NO se acota a `current_user = 'authenticated'`** (a diferencia del trigger de escalada): es
+      un invariante de DATOS, no una regla de autorización; vale también para seeds y service_role.
+    - Efecto colateral DESEADO: cambiar de sede a otra organización queda imposible a nivel BD.
+    - `restaurants.organization_id` es NULLABLE (`multi-tenant-rbac.sql:113`) → una sede sin
+      organización dejaría sus perfiles INACTUALIZABLES bajo el trigger. Verificación previa
+      bloqueante incluida en el archivo (debe dar 0 filas).
+    - 🔴 **`enforce_profile_organization` DEBE ser `SECURITY DEFINER` — NO se lo quiten.** La
+      primera versión aplicada NO lo era, y fue un bug real que atrapó la suite
+      (`supabase/fix-enforce-profile-organization-definer.sql`, migración de corrección, APLICADA).
+      Sin `definer` la función corre con los privilegios de quien dispara el UPDATE, así que su
+      `select` sobre `restaurants` **pasa por RLS**. Tras el endurecimiento de `is_active`, un
+      usuario desactivado obtiene NULL de `get_my_restaurant_id()` Y de `get_my_organization_id()`
+      → no ve NINGUNA sede → `if not found` → rechazaba con
+      `'profiles.restaurant_id (<uuid>) no corresponde a ninguna sede'` sobre una sede que EXISTE.
+      **El invariante estaba evaluando datos filtrados por quién mira, no los datos reales** — y un
+      invariante de datos no puede depender de la visibilidad del observador: la organización de una
+      sede es la misma la mire quien la mire. Mismo motivo por el que `get_my_restaurant_id` /
+      `get_my_role` / `has_permission` son definer. El modo de fallo era *fail-closed* (rechazaba de
+      más, nunca de menos: sin bypass), pero dejaba una bomba de tiempo — cualquier ajuste futuro a
+      las policies de `restaurants` empezaría a rechazar updates de perfiles válidos con un mensaje
+      que apunta al lugar equivocado. `protect_profile_self_escalation` y `protect_owner_role` en
+      cambio NO necesitan definer: solo leen `OLD`/`NEW`, no tocan tablas.
+    - Cómo se detectó, y por qué la aserción del spec es así: `tests/rbac-escalada.spec.ts` exige el
+      **mensaje** del trigger en los rechazos, no un "bloqueado" laxo. Con `bloqueado()` (error O
+      cero filas) este bug habría pasado EN VERDE. Mismo patrón que anular-venta:279.
+      Consecuencia del tercer trigger: en el caso `organization_id`, los BEFORE ROW disparan por
+      orden alfabético y `trg_profiles_org_consistency` < `trg_protect_profile_self_escalation`, así
+      que hoy contesta el del invariante — el spec acepta CUALQUIERA de los dos mensajes a propósito,
+      porque el invariante VALIDA en vez de forzar justamente para no depender del orden.
+  - ✅ **`create-user` DESPLEGADA en producción (2026-08-01)** con los dos cambios en una sola
+    pasada, vía el **editor del Dashboard** (Edge Functions → la función → *Deploy updates*; el CLI
+    muerde con el 403 de management, ver deuda). Estrategia de deploy usada, reutilizable: se subió
+    primero con OTRO NOMBRE (`create-user-next`), se validó con el spec apuntado por
+    `E2E_CREATE_USER_FN`, y recién después se pisó `create-user`. Cada función es un endpoint
+    independiente, así que el staging no lo ve nadie — ni la UI, ni G-10, ni Salchimelo.
+    ⚠️ **El editor del Dashboard NO versiona ni permite rollback**: revertir es pegar el código
+    anterior a mano. El fuente previo se recupera con
+    `git show 56012cd:supabase/functions/create-user/index.ts`.
+    Lo que quedó desplegado:
+    1. `is_active` del llamante + gate por `has_permission('usuarios.gestionar')` en vez del enum
+       `role === 'admin'` — cierra la persistencia "te desactivan, te creás otra cuenta".
+    2. `role_id` server-side (punto 6): antes eran 2 pasos sin atomicidad — la función creaba la
+       cuenta y **el navegador** asignaba `role_id` después. Si ese paso fallaba o se cerraba la
+       pestaña, quedaba un perfil SIN ROL y por lo tanto **sin ningún permiso** (`has_permission`
+       hace JOIN contra `roles`): el caso Katherine. Ahora la función valida que el rol exista y
+       sea de la organización del llamante, hace el UPDATE con service role y **compensa con
+       `deleteUser` si falla** (cascadea a `profiles`). `useUsers` perdió su segundo paso.
+       DESCARTADO pasar `role_id` por metadata: convertiría la deuda del enum `role` en escalada
+       directa a owner (ver la nota de `raw_user_meta_data` en Deudas).
+    `tests/create-user.spec.ts` (5) cubre el flujo, que tenía cobertura CERO. Nombre de función por
+    env (`E2E_CREATE_USER_FN`) para correr el MISMO spec contra staging y contra prod.
+    ⚠️ **La rama de compensación (`deleteUser`) NO tiene cobertura**: con la validación del rol
+    ANTES de `createUser`, el caso "role_id inexistente" ejercita el rechazo temprano. Esa rama solo
+    corre si falla el UPDATE con un rol válido, que no hay forma limpia de forzar desde afuera.
+    Queda como defensa en profundidad sin test directo.
+    El frontend de `useUsers` (sin su segundo paso) viajó en el release **344787b**.
+  - ✅ **ORDEN DEL DEPLOY (función primero, frontend después) — RESUELTO, YA NO APLICA.**
+    La secuencia se completó: `create-user` se desplegó y verificó el 2026-08-01 (primero como
+    `create-user-next`, después sobre la real) y el frontend de `useUsers` salió en 344787b. Con
+    los dos lados desplegados **la ventana peligrosa está cerrada y no hay coreografía que
+    respetar**: los próximos deploys de features son frontend puro.
+    Se deja el porqué —no la instrucción— por si alguien vuelve a tocar `create-user`: el riesgo
+    era asimétrico. Frontend nuevo + función vieja rompía en SILENCIO (el frontend manda `role_id`
+    y ya no hace el segundo paso; la función vieja descarta el campo → usuarios creados SIN ROL, y
+    el alta "sale bien"). Por eso `role_id` quedó OPCIONAL en la Edge Function. **Si algún día se
+    cambia el contrato de `create-user`, vuelve a haber orden que respetar; hoy no.**
+  - ⏳ **LO ÚNICO DEL BLOQUE QUE NO ESTÁ CERRADO EN PRODUCCIÓN (1 ítem):**
+    **Apagar el signup público en el Dashboard de Supabase.** Verificado que NADA del código usa
+    `signUp` (solo `signInWithPassword`/`signOut`/`getSession`/`onAuthStateChange`) y que la Edge
+    Function usa la API admin, indiferente a ese toggle. Apagarlo no rompe ningún flujo y cierra el
+    vector de `raw_user_meta_data` → enum `role` descrito en Deudas.
+    Todo lo demás del bloque está APLICADO y rigiendo: P1 escalada, P2 `is_active`, invariante de
+    `organization_id` + su fix de `SECURITY DEFINER` (en la BD compartida, las 3 orgs) y la Edge
+    Function `create-user` (desplegada 2026-08-01). **Suite full 156: 155 passed + 1 skipped**
+    (la limpieza del spec de create-user hace skip sin `E2E_SERVICE_ROLE_KEY`).
+    (El frontend de `useUsers` ya se promovió: release 344787b.)
+
+⚠️ **BD ÚNICA COMPARTIDA (aprendizaje clave):** LAB / G-10 / Salchimelo son ORGANIZACIONES dentro
+  de UNA sola base. Las migraciones (funciones/columnas/índices/permisos globales) al aplicarse
+  "en LAB" quedan aplicadas para TODAS las orgs. No hay "aplicar en G-10 aparte": un deploy de
+  feature con migración aditiva = **solo frontend** (el SQL ya está puesto al probarlo). Ojo: los
+  permisos de rol POR ORG (ej. lab-seed re-siembra solo LAB) sí son por-org — mantener lab-seed
+  sincronizado con las migraciones de permisos o el re-seed los pisa en LAB.
+
+**Deudas vigentes (abiertas):**
+  - 📏 **MEDIR si la aritmética de dinero en JS tiene error de float en splits y descuentos**
+    (anotado 2026-08-26; NO es un bug confirmado, es una medición pendiente). Punto de
+    partida de lo que ya se sabe: los montos son `numeric(12,2)` en Postgres pero **llegan
+    al frontend como `number` de JS, que es float de 64 bits**, y ahí se hacen sumas de
+    líneas, descuentos (pct y fijo), splits de pago mixto y el cuadre del arqueo.
+    `src/lib/cashRounding.ts` **NO cubre esto**: es de chips de vuelto, no de seguridad
+    numérica. Dónde miraría primero: `PaymentSplitEditor` (el `remaining` tiene que dar
+    exactamente 0 para habilitar el cobro) y `calcShiftBalance`. Cómo medirlo: sumar líneas
+    con centavos que no sean representables en binario y comparar contra el total de la BD.
+    Se anota con este detalle a propósito — afirmarlo sin medirlo sería justo lo que
+    prohíbe R4 (verificar contra la cosa real, no contra la intuición).
+  - 🧹 **`eslint 0` ya no es cierto: 6 errores preexistentes** (constatado 2026-08-10).
+    Son AJENOS al trabajo de esa sesión: verificado stasheando los cambios, `eslint .` da
+    los mismos 12 problemas (6 errores + 6 warnings) con y sin ellos.
+    - `src/pages/KitchenPage.tsx:460` — `no-explicit-any`
+    - `tests/anular-venta.spec.ts:17` y `:150` — `no-unused-vars`
+    - `tests/arqueo.spec.ts:16` — `no-unused-vars`
+    - `tests/create-user.spec.ts:56` y `:66` — `no-explicit-any`
+    No se arreglaron (fuera de alcance). Queda anotado para que la próxima sesión no los
+    lea como regresión propia.
+  - ⏸️ **AUDITORÍA DEL FILTRO DE PII — DIAGNÓSTICO HECHO, SIN IMPLEMENTAR.**
+    (sesión 2026-08-07, PAUSADO por pedidos del cliente). Los cuatro hallazgos vienen
+    de la vuelta de G-Centro y están MEDIDOS contra el código real, no razonados. Nada
+    de esto es fuga consumada ni urgente: **no corresponde release de emergencia**.
+    Orden sugerido para retomar: 2b → 2a → 3 → 1 (el 1 va en el mismo commit que el
+    código para que la nota de divergencia quede coherente).
+    - **2b — `Date`/`Error`/`Map` salen como `{}`.** `typeof x === 'object'` es true
+      para todos y `Object.entries()` de un `Error` devuelve `[]` porque `message` y
+      `stack` son NO ENUMERABLES. No es fuga: es **mentira de diagnóstico**, misma
+      familia que el `hint: null` ya corregido. Pega donde más duele —
+      `TypeError: Failed to fetch` es el error más frecuente de esta app (el bar sin
+      internet). Un `PostgrestError` NO está afectado: es objeto plano y sus props
+      propias sobreviven (`code`/`details`/`hint` verificados).
+      **DECIDIDO:** emitir `[Filtrado:Date]`, `[Filtrado:Error]`, `[Filtrado:Map]`
+      (paridad con G-Centro) y, para `Error`, **preservar `name` + `message`, con el
+      `message` pasado por `scrubString`**. Eso nos separa de G-Centro en ese punto.
+      🔴 **PRIMERO auditar si la app interpola PII en `throw new Error` propios**
+      (`throw new Error(\`...${algo}\`)`): si lo hace, reconsiderar la preservación
+      del `message` — `scrubString` no detecta nombres propios.
+    - **2a — `RE_CODIGO` acepta cédulas, NIT y móviles.** Solo exige "sin espacios y
+      corto" (`^[A-Za-z0-9_.:/-]{1,48}$`), así que `'3001234567'`, `'JuanPerez'` y
+      `'juan.perez'` pasan verbatim bajo las 21 claves de forma `codigo`.
+      NO es la fuga de G-Centro: la nuestra ya valida cada hoja del array vía
+      `porForma`, así que `['cliente','Juan Perez']` (con espacio) SÍ se redacta.
+      **HOY INALCANZABLE:** ningún mutation del repo setea `mutationKey` (`App.tsx:42`
+      solo lo LEE) y ningún `queryKey` lleva texto libre — son slugs de tabla, UUID,
+      fechas, `page` y enums (verificado hook por hook). No urge.
+      **Endurecimiento decidido:** que `codigo` rechace corridas de **6+ dígitos**.
+      Deja pasar el corpus legítimo (`23505`, `409`, `PGRST116`,
+      `idx_orders_number_2026`) y bloquea cédula (8), NIT (9) y móvil (10). Es una
+      regla DISTINTA a la de G-Centro (constante de catálogo ≤64 sin espacios) porque
+      acá `error.code` numérico TIENE que pasar — es lo que se recuperó al invertir
+      el filtro.
+      Además: **un array en `tags` debe redactarse, no heredar la forma** (los tags de
+      Sentry son escalares; un array ahí ya está malformado).
+      Residuo ACEPTADO, no bug: `tags.sede = 'Juan Perez'` pasa — los tags llevan
+      nombres de negocio a propósito, y `etiqueta` ya rechaza corridas de 4+ dígitos.
+    - **3 — 75 de 246 tests con problema real.** Encontrado por MUTACIÓN (ver el
+      método arriba), no leyendo la suite.
+      - **Clase D (58) — la peor.** El bloque `«no sale dentro de un array»` mide el
+        COLAPSO del array, no la columna: `filas: [{…}]` sale `[Filtrado:array(1)]`
+        para CUALQUIER clave, así que la aserción `not.toContain(valor)` es verdadera
+        aunque la columna estuviera permitida (probado con `order_number`, que
+        debería viajar). **Una sola línea de código verificada 58 veces.** La posición
+        que sí discrimina es dentro de un array bajo clave PERMITIDA
+        (`qty: [{document:…}]`). Invisible al mutante — hay que buscarla aparte.
+      - **Clase A (15)** — el patrón INERTE replicado: los `«… viaja (decisión
+        deliberada)»` pasan con el filtro borrado. Es la misma forma del bug original
+        de `sentry.test.ts:134`; se mató una instancia y se crearon 15 del mismo molde
+        en el mismo commit. Arreglo: assertar el CONTRASTE en la misma aserción (la
+        clave permitida pasa Y el mismo valor bajo clave desconocida se redacta).
+      - **Clase B (1)** — `«el correlativo perdido llega diagnosticable y sin PII»`:
+        el nombre promete una verificación de ausencia de PII que las aserciones NO
+        hacen (son todas positivas).
+      - **Clase C (1)** — `«el stack trace pasa INTACTO — única excepción de
+        subárbol»`: afirma exclusividad y solo verifica identidad. Debe assertar, en
+        el mismo evento, que una rama hermana SÍ se redacta.
+      - **Los 8 sobrevivientes LEGÍTIMOS hay que MARCARLOS EN EL CÓDIGO** para que la
+        próxima auditoría no los "arregle": 3 de marcadores internos, 2 de robustez
+        (`no throw`), y los 3 anti-sobre-redacción (`envelope conserva lo que Sentry
+        necesita para agrupar`, `breadcrumb conserva ruta y código HTTP`, `conserva
+        UUID/ISO/#N`). Un test que existe para detectar redacción DE MÁS no puede
+        fallar contra un no-op: es inherente a su forma, no un defecto.
+    - **1 — reescribir el encabezado de `src/lib/sentry.ts`.** Hoy da una ORDEN
+      imperativa ("todo cambio obliga a revisar el otro EN LA MISMA SESIÓN") sobre un
+      flujo que ya no existe: los repos no se tocan entre sí, se sincronizan por
+      traspaso entre hilos. El archivo ya contiene esa regla Y su propia excepción al
+      lado, así que un lector nuevo concluye razonablemente que debe abrir G-Centro —
+      justo lo que no queremos. La divergencia se sigue declarando, pero como
+      INFORMACIÓN (qué está distinto hoy), no como instrucción.
+  - **La suposición viva de `scrubSobre`** (`src/lib/sentry.ts`, ya está en su docblock con la
+    instrucción exacta). En el modo SOBRE —el envelope del SDK— un STRING bajo clave desconocida
+    pasa solo por `scrubString`, o sea que un nombre propio saldría. Se sostiene porque los datos
+    de la app entran por `extra` (modo estricto) y `beforeBreadcrumb` ya borra `body` e `input`.
+    **Si alguien mete una fila de la BD en un breadcrumb o en un contexto del SDK, esta suposición
+    se cae:** rutear esa rama a `scrubEstricto` ANTES de hacerlo. Es deuda manejable justamente
+    porque está escrita — no la borres al "limpiar" el archivo.
+  - **`gcentro/src/lib/sentry.ts` sigue con la deny-list y por lo tanto sigue fugando.** Decisión
+    deliberada: se arregla en su propio hilo, no desde G-Vento. La divergencia está DECLARADA en
+    el encabezado de `src/lib/sentry.ts` (esa regla de duplicación existe para que las
+    divergencias no sean silenciosas, no para prohibirlas).
+  - Regenerar `database.types.ts` con `supabase gen types` cuando se resuelva el acceso de
+    management del CLI — hoy `register_sale_void` + columnas `cancelled_at/by/reason` están a mano
+    (verificadas), como `register_sale_payment` y las de vale/arqueo.
+  - **Abonos de fiado invisibles en el reporte Financiero (~$1.131.200 hoy).** El tab
+    Financiero se arma desde las vistas de ventas (`payments` de la orden), y un abono a una
+    venta a fiado vive en `debt_payments`, que no entra en ninguna de las 4 vistas de
+    `reports-views.sql`. Consecuencia: plata REALMENTE cobrada que no aparece en el reporte
+    del período en que entró. No es un error de cálculo, es una fuente de datos faltante —
+    el arqueo del turno sí los ve (el abono en efectivo genera su `cash_movement`), así que
+    el reporte y la caja NO cuadran entre sí y esa es la señal por la que se detectó.
+    Al arreglarlo, decidir explícitamente en qué fecha imputa el abono: la del abono (caja)
+    o la de la venta original (devengado). No son lo mismo y el cliente va a preguntar.
+  - **Storage (imágenes de producto) fuera del ciclo de backup.** El cron nocturno respalda
+    la BD; el bucket `restaurant-logos` y las imágenes de producto NO se respaldan. Un
+    restore deja la base íntegra con las imágenes rotas. Bajo impacto operativo (se vuelven
+    a subir), pero hay que saberlo ANTES de confiar en el restore como recuperación total.
+  - **`orders.payment_status` tiene `default 'paid'`** (`fiado-clientes.sql:82`, agregada así para
+    no romper las ventas existentes al introducir el fiado). Consecuencias vigentes:
+    - Toda orden de **mesa abierta** nace con `payment_status='paid'` y `order_number` NULL. Por
+      eso una consulta forense de "ventas cobradas sin número" **NO puede filtrar por
+      `payment_status='paid'`**: daría un falso positivo por cada mesa abierta. La prueba real de
+      cobro es que exista fila en `payments`.
+    - Si una de esas mesas (las de cuenta corriente interna — ver "Comportamientos del negocio")
+      se cerrara **por error**, entraría al cuadre **como venta**, porque ya viene marcada como
+      saldada. **No hay que hacer nada hoy**: el flujo intencional no las cierra. Queda anotado
+      porque es lo primero a revisar si algún día se rediseña esta columna (p. ej. un default
+      `'pending'` con migración de datos, o un estado explícito para la cuenta corriente).
+  - Endurecimiento anotado: gates de enum `get_my_role()` → `has_permission()`; RPC de cierre de
+    turno con recompute server-side del esperado; atomicidad del descuento de vale en Mesa.
+  - **Correlativo de venta atómico con el cobro (opción C) — el arreglo de FONDO de
+    `assignOrderNumber`.** Hoy el número se asigna desde el navegador DESPUÉS de que la RPC de
+    cobro hizo commit. La sesión 2026-08-05 mitigó el fallo (reintento del UPDATE + aviso al
+    cajero con botón Reintentar + reporte a Sentry con `area: 'numeracion'`), pero la ventana
+    sigue: entre el commit del pago y el UPDATE del número se puede cerrar la pestaña o morir la
+    red, y la venta queda **cobrada sin número** → invisible en Historial, sin ticket
+    reimprimible, y sin contar en `getShiftSalesCount` (que cuenta las gratis por
+    `order_number not null`). Cierre: asignar el número DENTRO de `register_sale_payment`, que ya
+    es una transacción SECURITY DEFINER.
+    - 🔴 **`store_sequences` es una TABLA, no una sequence de Postgres — NO migrarla a una
+      sequence real "para optimizar".** Es justo lo que hace limpia a la opción C: al ser tabla,
+      el incremento vive DENTRO de la transacción, así que un rollback del cobro devuelve el
+      número y no deja hueco. Las sequences de PG son deliberadamente NO transaccionales
+      (`nextval` no se revierte, para no serializar escritores): con una sequence real, cada cobro
+      fallido quemaría un número para siempre. La contención de la fila es irrelevante a escala
+      de un restaurante.
+    - **Asimetría de reintento** (ya implementada, no perderla): `next_order_number` NO es
+      idempotente (cada llamada quema un número → reintentarla genera huecos); `setOrderNumber`
+      SÍ lo es. Por eso solo se reintenta el UPDATE, y `AssignOrderNumberResult.numeroReservado`
+      hace que el reintento manual reuse el número ya entregado en vez de pedir otro.
+    - Falta cubrir los dos caminos que no pasan por `register_sale_payment`: fiado (sin pago) y
+      venta gratis por vale del 100% (total 0).
+    - **Opción D (backfill diferido) DESCARTADA por ahora:** asignaría números fuera de orden
+      cronológico, y el cliente lo nota. Reconsiderar solo si aparece volumen real — la huella
+      son las órdenes con fila en `payments` y `order_number is null` (OJO: no filtrar por
+      `payment_status='paid'`, es el DEFAULT de la columna y toda mesa abierta lo cumple), más
+      `store_sequences.last_order_number - count(order_number)` como números quemados.
+  - **Un admin puede seguir promoviendo a OTRO usuario a owner.** El trigger
+    `protect_profile_self_escalation` solo blinda la fila PROPIA (`new.id = auth.uid()`); la policy
+    `"profiles: admin edita cualquiera"` (gate por enum `get_my_role() = 'admin'`) sigue permitiendo
+    asignar cualquier `role_id` a un tercero. Es el diseño intencional de la sección Usuarios, pero
+    significa que un admin con una segunda cuenta bajo su control llega al comodín `*` igual.
+    Cerrarlo pide gatear la asignación de `role_id` **por permiso, no por enum** — encaja con la
+    deuda ya anotada de `get_my_role()` → `has_permission()`, resolver ambas en la misma pasada.
+  - ⚠️ **`handle_new_user` CONFÍA en `raw_user_meta_data` para el enum `role`** — canal que en un
+    `signUp` ABIERTO controla el propio usuario:
+    `coalesce(new.raw_user_meta_data->>'role', 'waiter')::user_role`. Con auto-registro habilitado,
+    alguien podría registrarse pidiendo `role: 'admin'` y quedarse con los gates legacy
+    `get_my_role() in ('admin','cashier')` que siguen vivos (RLS de payments/orders/cash_shifts,
+    policy `"profiles: admin edita cualquiera"`). **Por eso NUNCA meter `role_id` en la metadata:**
+    convertiría esta deuda en escalada directa a owner (por eso el fix de `organization_id` lo
+    DERIVA de la sede en vez de recibirlo). Nada en el código usa `signUp` — toda creación pasa por
+    la Edge Function `create-user` (`admin.auth.admin.createUser`, API admin, indiferente al toggle
+    de signup público) — así que apagar el auto-registro en el Dashboard no rompe ningún flujo.
+    **Si alguien lo reactiva, este vector vuelve.** Cierre definitivo: eliminar el enum `role` y
+    dejar solo `has_permission` (ver deuda de gates de enum).
+  - **Baneo en `auth.users` al desactivar — PENDIENTE (lo único que queda del bloque is_active).**
+    Hoy desactivar escribe el flag; la cuenta de `auth.users` sigue viva, así que el desactivado
+    puede volver a loguearse y obtener un JWT válido. `AuthContext` lo detecta y le corta la sesión
+    con mensaje, y la RLS no le da ni una fila — pero el token se emite igual. Cerrarlo requiere
+    mover el toggle a una **Edge Function con service role** (`admin.auth.admin.updateUserById` con
+    `ban_duration`): el navegador no puede banear. Prioridad baja: con P1+P2 el desactivado ya no
+    accede a datos.
+
+**Nota de proceso (para el próximo deploy):** este release SALTÓ la corrida full pre-main y se
+  validó con smoke en prod (OK). Para el próximo: **correr `pnpm test:e2e` completo sobre develop
+  ANTES de promover a main**.
+
+### Detalle Vale descuento / ruletazo (F, sesión 2026-07-03, rama feature/vale-descuento)
+- **Migración `supabase/orders-discount-vale.sql`** (APLICADA en LAB): `orders` +4 columnas
+  aditivas — `discount_amount numeric(12,2) default 0`, `discount_type ('pct'|'fixed')`,
+  `discount_kind ('normal'|'vale') default 'normal'`, `discount_reason text`. Constraint
+  `chk_vale_is_fixed` (vale ⇒ fixed) + índice parcial `idx_orders_vale`. Resuelve de paso la
+  deuda del descuento derivado: ahora se persiste el REAL (SalesHistoryPage ya no lo estima).
+- **Vale = MODO del descuento** (no un 2º descuento): toggle "Es vale (ruletazo)" que fuerza
+  monto fijo + `kind='vale'`. Descuento normal (toggle off) = comportamiento de hoy (`kind='normal'`).
+  Borde blindado: vale + monto 0 → se persiste `kind='normal'`/`type=null` (no viola la constraint).
+- **Mesa (TableCheckoutModal):** bloque descuento nuevo (input monto + toggle vale + razón,
+  testids `discount-amount`/`discount-vale-toggle`/`discount-reason`) ANTES del pago; el total
+  descontado alimenta el PaymentSplitEditor. IDEMPOTENTE: `subtotal = order.total +
+  order.discount_amount` (invariante recuperado del estado persistido, NO del total crudo) →
+  reintentar no doble-descuenta (mismo patrón anti-doble-descuento de stock). Helper
+  `applyOrderDiscount` (UPDATE, antes de registerSalePayment). El select de mesa es `*` → trae
+  discount_amount sin cambios.
+- **POS (CartPanel + CheckoutModal):** cartStore gana `discountKind`/`discountReason` +
+  `setDiscountKind` (vale ⇒ fuerza fixed) `setDiscountReason`; propagados en hold/resume/clear.
+  Toggle vale en la cabecera del descuento (oculta el selector %/$). Persiste en el createOrder
+  (INSERT único, sin el patrón de mesa: el subtotal del carrito es invariante en memoria).
+- **Venta GRATIS (vale 100% → total 0):** `handleConfirm` (POS+Mesa) salta register_sale_payment
+  cuando `total===0` (la RPC valida amount>0). La orden queda registrada con su vale, número
+  asignado, `payment_status='paid'` (saldada, NO fiado), delivered (Mesa) — SIN payment.
+  Historial: `methodDisplay` → "Cortesía" (total 0 sin pagos; distinto del fiado saldado que
+  tiene total>0). El botón "Continuar" va directo a handleConfirm si total 0.
+- **PaymentSplitEditor (compartido):** re-sembrado INTELIGENTE ante cambio de `total` (p.ej.
+  aplicar un descuento tras abrir el split): flag `dirty` — si la semilla está intacta se
+  re-siembra a `[efectivo: nuevoTotal]`; si el cajero ya editó, NO se tocan sus líneas (el
+  `remaining` reactivo lo guía). `remaining`/`valid` ya eran reactivos al prop total.
+- **Arqueo:** `getShiftVouchersTotal` (vales de órdenes con pago en la ventana + ventas GRATIS
+  vale/total=0/con número en la ventana); `ShiftReconciliation.vouchers_total` congelado en el
+  snapshot al cerrar. Línea informativa "Vales entregados" en el comprobante (printer.ts) y en
+  CloseShiftModal (`shift-vouchers-total`) — NO toca el cuadre (el vale no es dinero cobrado).
+  `getShiftSalesCount` extendido: cuenta las ventas gratis (total=0 + order_number no-null) además
+  de las con pago (una venta gratis es una venta; fiado sin pago sigue sin contar).
+- **Reporte:** `getVouchersTotal(restaurantId, fromISO, toISO)` (suma discount_amount kind='vale'
+  por rango, límites de día Bogotá porque created_at es UTC); `useReports` expone `vouchersTotal`;
+  KPI "Regalado en vales" (`report-vouchers`, ícono Gift) en ReportsPage tab Financiero.
+- **tests/vale-descuento.spec.ts** (8): vale en Mesa (+ invariante subtotal), vale en POS, descuento
+  normal ≠ vale, arqueo (vouchers_total + cuadre intacto), reporte (delta), venta gratis (clamp +
+  cierre sin pago + "Cortesía"), borde vale-sin-monto, limpieza. tsc 0 + build verde.
+- database.types.ts: `orders` +4 columnas agregadas A MANO (deuda CLI).
+- BORDE anotado: las ventas GRATIS se anclan al turno por `created_at` (no hay timestamp de pago).
+  Una mesa abierta en un turno previo y cerrada gratis en el actual no se cuenta en ese turno (sí
+  en el reporte mensual). Raro² (ruletazo 100% sobre mesa que cruzó turno).
+
+### Detalle Arqueo multi-método (F, sesión 2026-07-03, rama feature/arqueo-cierre)
+- **Migración `supabase/shift-reconciliation.sql`** (APLICADA en LAB): `cash_shifts` +2 columnas
+  nullable aditivas — `close_reconciliation jsonb` (snapshot del arqueo por método) +
+  `close_comment text`. No rompe cierres viejos (null → reimpresión deshabilitada).
+- **Por qué SNAPSHOT y no recomputar:** `payments` no tiene `shift_id` y `getShiftPayments`
+  filtra solo por `created_at >= opened_at` (sin cota superior). Recomputar el esperado de un
+  turno CERRADO sumaría pagos de turnos posteriores → hay que CONGELAR el esperado por método
+  al cerrar. Al cierre la ventana solo-`opened_at` sí es correcta (único turno abierto).
+- **Esperado por método:** efectivo = apertura + ventas efvo + ingresos − egresos (fórmula F1,
+  `calcShiftBalance`); card/transfer/nequi = solo ventas de ese método (`salesSummary[m]`, sin
+  apertura ni movimientos — los `cash_movements` son solo efectivo).
+- **`ShiftReconciliation`/`MethodReconciliation`** en `src/lib/shiftCalc.ts`: `{ methods:
+  {cash,card,transfer,nequi}:{expected,declared,difference}, expected_total, declared_total,
+  difference_total, sales_count }`. Diferencia = declared − expected en los 4 (uniforme).
+- **`sales_count`** = órdenes DISTINTAS con pago en la ventana (`getShiftSalesCount` →
+  `new Set(order_id).size`) — una venta mixta = 1 venta aunque tenga N filas payments.
+- **CloseShiftModal:** bloque F1 de efectivo INTACTO (caja.spec byte-estable; solo se añadió el
+  testid `shift-cash-difference` para desambiguar del total del arqueo) + sección "Otros
+  métodos" (esperado | declarado input opcional blanco=0 | dif con color, testids
+  `pay-declared-{m}`/`pay-diff-{m}`) + comentario (`close-shift-comment`) + total del arqueo
+  (`shift-arqueo-total`). Diferencia informativa NO bloqueante (`canClose` = efectivo declarado,
+  como F1). El efectivo del snapshot = `calcShiftBalance` (misma fuente que F1, no diverge).
+- **Cierre atómico:** `useCashShift.closeShiftMutation` computa `sales_count` al cerrar (no lo
+  recibe del cliente — blindado por `Omit<ShiftReconciliation,'sales_count'>`) y persiste TODO
+  en un solo UPDATE (`closeShift` helper, ahora con joins abrió/cerró). `close_comment` = null
+  si vacío (`.trim() || null`). Retorna la fila cerrada (snapshot + closed_at server).
+- **Comprobante `printCashReport`** (printer.ts) = `buildCashReportHtml` + `printThermal` (P4.1):
+  sede, turno (rango), abrió/cerró, apertura, ventas por método (efvo derivado =
+  esperado−apertura−ing+egr), ingresos/egresos, arqueo esp/dec/dif por método, totales,
+  comentario, nº ventas. **Auto-print al confirmar el cierre**.
+- **`buildCashReportData(row, ctx)`** (printer.ts, compartido): arma `CashReportData` desde una
+  fila de turno. Lo usan IDÉNTICO el cierre (fila recién persistida) y la reimpresión P3 (misma
+  fila) → reimpreso byte-a-byte idéntico (verificado 5157=5157). Usa el snapshot, NUNCA recomputa.
+- **P3 ShiftHistoryPage:** `getClosedShifts`/`ClosedShiftRow` + `close_reconciliation`/
+  `close_comment`; botón "Reimprimir arqueo" (`shift-reprint`) por fila → `buildCashReportData` +
+  `printCashReport`; movimientos re-leídos por `shift_id` (`getShiftMovementTotals`, persisten).
+  Deshabilitado con tooltip "Sin arqueo por método" si `close_reconciliation` null (turnos
+  viejos). Gating `can('caja.cerrar')` (la ruta P3 ya lo exige).
+- **tests/arqueo.spec.ts** (4, lab): cierre → snapshot correcto (efvo con apertura+mov, otros
+  solo ventas; el assert caza la mixta mal cargada) + sales_count 3 + comentario; no bloquea con
+  diferencia; reimpresión P3 lee el snapshot (stub window.print, verifica sin recomputar);
+  limpieza. `caja.spec` 6/6 (F1 intacto, `shift-cash-difference` desambiguado). tsc 0 + build verde.
+- database.types.ts: `cash_shifts.close_reconciliation`/`close_comment` agregadas A MANO
+  (regeneración pendiente por permisos de CLI — ver deuda).
+
+### Detalle Pago mixto (F, sesión 2026-07-03, rama feature/pago-mixto)
+- **RPC `supabase/register-sale-payment.sql`** (APLICADA en LAB, pendiente en G-10):
+  `register_sale_payment(p_order_id uuid, p_payments jsonb) → jsonb` SECURITY DEFINER.
+  Valida sede + gate `get_my_role() in ('admin','cashier')` (calca el RLS de INSERT de
+  payments; deuda: pasar a has_permission al eliminar el enum). Solo CONTADO: rechaza
+  `payment_status <> 'paid'` (el fiado se salda con register_debt_payment). Rechaza pagos
+  previos (doble cobro). Deriva el total de la BD y valida `Σ amounts = total` (raise si no
+  cuadra). Inserta N filas payments (una por método) atómico. NO crea cash_movement (el
+  efectivo se deriva de payments en el cuadre). revoke public/anon + grant authenticated.
+- **`PaymentSplitEditor`** (components/pos, compartido POS+Mesa): N líneas método+monto,
+  "restante" en vivo, máx 1 línea/método (4 del enum), reporta `(parts, valid)` al padre
+  (valid = restante 0 exacto y todo monto>0 → gobierna Cobrar, bloquea falta Y excedido).
+  Vuelto anclado a la línea de efectivo (recibido opcional, solo UI; la fila se registra por
+  el monto imputado). Semilla `[efectivo: total]` editable (no fuerza efectivo).
+- **POS (CheckoutModal) y Mesa (TableCheckoutModal):** botón "Dividir pago" (pay-split-toggle)
+  bajo demanda; el caso común de 1 método queda intacto. `handleConfirm` unificado: simple →
+  `[{method, amount:total}]`, dividir → splitParts; ambos por `registerSalePayment`. isFiado =
+  `!split && method==='fiado'` (en dividir no hay fiado, 3 capas: UI + lógica + RPC). El
+  efectivo entra a caja / el nequi no, derivado de payments (sin lógica nueva de caja).
+- **Historial (SalesHistoryPage):** `methodDisplay` agrega TODOS los métodos ("Efectivo +
+  Nequi"); detalle con desglose método+monto cuando hay >1 pago (sale-detail-payments).
+  Simple se ve igual que hoy. Filtro por método: con filtro activo la fila muestra solo el
+  método filtrado (acordado, por el `payments!inner` de PostgREST).
+- Helper `registerSalePayment(orderId, parts)` + tipo `SalePaymentPart`. Testids de soporte:
+  `checkout-total` (ambos modales), `shift-sales-{method}` (CloseShiftModal).
+- **tests/pago-mixto.spec.ts** (7 tests, lab): POS mixta (2 filas payments + efectivo a caja/
+  nequi no, vía Supabase directo + cuadre), historial, validación bloqueante (falta+excedido),
+  simple 1 fila, mesa mixta sin doble descuento de stock, fiado no se cruza, limpieza. 7/7 verde.
+- database.types.ts: `register_sale_payment` agregado A MANO (regeneración pendiente por
+  permisos de CLI — ver deuda). tsc 0 + build verde.
+
+### Detalle Compras / Proveedores (F5, sesión 2026-06-24, rama feature/compras-proveedores)
+
+**Parte 1 — BD** (`supabase/compras-proveedores.sql`, APLICADA + verificada):
+- Tablas `suppliers`, `purchase_invoices`, `purchase_invoice_items` (RLS por sede /
+  has_permission('compras.gestionar'); items heredan RLS vía la factura padre).
+- `products.cost_price numeric nullable` (último costo conocido). `stock_movements.type`
+  ahora acepta `'purchase'` (4 tipos). Permiso `compras.gestionar`: admin explícito,
+  owner vía comodín "*" (la siembra del punto 6 quedó solo `where name='admin'`).
+- RPC `register_purchase(p_invoice jsonb, p_items jsonb) → jsonb` SECURITY DEFINER:
+  crea factura + ítems, sube stock (solo stock_tracking) + `stock_movement('purchase',+qty)`,
+  actualiza `cost_price`, y si es efectivo CON turno abierto inserta `cash_movement('out')`.
+  Deriva total/subtotales/restaurant_id (no confía en el JSON). Retorna
+  `{invoice_id, total, cash_movement_created, shift_open}`.
+
+**Parte 2 — UI** (esta sesión, PENDIENTE de revisión):
+- Helpers (supabase-helpers): getSuppliers/upsertSupplier/deleteSupplier(soft),
+  registerPurchase, getPurchaseInvoices(paginado), getPurchaseInvoiceDetail.
+- Hooks: `useSuppliers` (CRUD), `usePurchases` (`usePurchaseInvoices`,
+  `usePurchaseInvoiceDetail`, `useRegisterPurchase`). El registro invalida
+  ['products'] + ['stock_movements'] + ['purchase_invoices'] + ['cash_movements'] +
+  ['shift_payments'] (inventario + caja se refrescan solos).
+- Toast inequívoco cuando efectivo + sin turno: "Compra registrada y stock actualizado.
+  El pago en efectivo no se registró en caja (sin turno abierto)." (no parece fallo).
+- `PurchasesPage` (/compras, sidebar+ruta con permiso compras.gestionar) con 2 pestañas
+  Compras (historial paginado + detalle) y Proveedores (CRUD). Modales:
+  `NewInvoiceModal` (proveedor + método + líneas producto/cantidad/costo con subtotal y
+  total en vivo; prefill de costo con cost_price), `SupplierFormModal`, `PurchaseDetailModal`.
+  Helper compartido `paymentMethods.ts`.
+- InventoryPage: 'purchase' mapeado como "Compra" (badge + filtro + referencia a factura).
+- tests/compras.spec.ts (6 tests, lab): crear proveedor, compra que sube stock + movimiento
+  'purchase', compra efectivo con turno → egreso, compra efectivo sin turno → advertencia,
+  gating del cajero, limpieza. Suite total: 79 (compila vía --list). PENDIENTE de correr.
+- tsc 0 + build verde.
+
+### RBAC — permiso comodín "*" (sesión 2026-06-24)
+- El rol **owner** usa `permissions = ["*"]` en vez de enumerar los permisos; hereda
+  automáticamente cualquier permiso nuevo sin sembrarlo por organización.
+- `has_permission(perm)` → true si el rol tiene `perm` O tiene `"*"`. SOLO el owner
+  (name=owner, is_system) usa el comodín; admin/cajero/mozo y roles custom siguen con
+  permisos explícitos (la UI nunca asigna el comodín a un rol custom).
+- Frontend: `usePermissions.can` contempla `"*"`; `isOwner = permissions.includes("*")`.
+  ConfigPage Roles muestra "Todos los permisos" + badge "Acceso total" para el owner.
+- `enumFromRoleName` (ConfigPage) sigue usando el string 'owner' para mapear al enum
+  legacy de la Edge Function create-user — NO es gating, no se tocó.
+
+### Detalle Inventario por recetas (sesión 2026-06-20, rama feature/inventario-recetas)
+
+**Parte 1 — BD** (migraciones APLICADAS):
+- `supabase/inventory-recipes.sql`: `products.kind` text ('simple'|'composite', default
+  simple); tabla `stock_movements` (auditoría append-only, qty CON SIGNO, type
+  sale/adjustment/return, reference_id FK lógico a order_id, RLS solo SELECT por sede —
+  escritura solo vía funciones DEFINER); tabla `product_components` (receta BOM 1 nivel,
+  parent CASCADE / component RESTRICT, qty>0, unique(parent,component)); función
+  `adjust_stock(product_id, qty, reason)` SECURITY DEFINER (valida sede + permiso
+  productos.editar + kind=simple; UPDATE stock + INSERT movimiento ATÓMICO).
+- `supabase/order-items-stock-recipes.sql`: extiende `add_order_items_with_extras`
+  (create or replace, NO edita order-extras-rpc.sql) para descontar stock del producto al
+  vender, en la MISMA transacción que los extras: simple+tracking → −qty propio; composite
+  → explota product_components y descuenta qty_receta×qty por insumo (solo insumos con
+  stock_tracking); el compuesto NO descuenta de su propio stock. Cada salida → un
+  stock_movement('sale', −qty, reference_id=order_id). ENFOQUE INTEGRADO aprobado: NO hay
+  deduct_stock_for_order suelto; el movimiento de stock va atado a insertar la línea (una
+  vez por ítem en POS y Mesas). Stock NEGATIVO permitido (señal de reponer).
+- `supabase/inventory-min-stock.sql`: `products.min_stock` integer not null default 0
+  (umbral de alerta de stock bajo; solo aplica a simple+tracking).
+
+**Parte 2 — UI** (esta sesión):
+- ProductModal: selector Tipo (`product-kind-simple`/`-composite`); inventario solo para
+  simple; **Stock actual SOLO-LECTURA al editar** (`stock-current`) — al crear arranca en 0
+  y se carga por ajuste; **Stock mínimo** editable (`product-min-stock`). Al editar se
+  PRESERVA stock_qty (no se reescribe para no pisar descuentos concurrentes); solo se toca
+  al crear (0/null) o al apagar tracking (null).
+- `RecipeEditor` (components/products): arma la receta con productos simple+tracking
+  (≠ él mismo, no compuestos), qty entero >0; advertencia no bloqueante si vacío. Se
+  reconcilia (add/update/remove) tras guardar vía `useProductComponents` (patrón reconcile
+  con parentId explícito, soporta productos recién creados).
+- `InventoryPage` (/inventario, sidebar+ruta con permiso productos.editar — REUSADO, no se
+  creó inventario.ver): pestaña Niveles (4 KPIs: total/sin stock/bajo/negativo; tabla con
+  badge out/low/ok/negative, búsqueda + filtro por estado; botón Ajustar por fila) y
+  pestaña Movimientos (paginada 25, filtro tipo+rango fechas, fecha zona Bogotá, qty con
+  signo verde/rojo, referencia = order_id truncado o notas).
+- `StockAdjustModal` (components/inventory): selector producto + signo (+/−) + cantidad con
+  PREVIEW del stock resultante (rojo si negativo) + motivo obligatorio → RPC adjust_stock.
+- POS: indicador `pos-stock-indicator` ("Sin stock"/"Reponer") en card de simple+tracking
+  con stock ≤0; NO bloquea la venta (stock negativo permitido).
+- Hooks: `useProductComponents`, `useStockMovements` (keepPreviousData), `useInventory`
+  (adjust). Helpers: getProductComponents/add/update/remove, adjustStock, getStockMovements.
+- Tests: extras-pos.spec.ts REESCRITO (readStock/setStock/createProduct ahora pasan por el
+  flujo real de Inventario — el stock dejó de editarse en la ficha). tests/inventario.spec.ts
+  (6 tests: receta, ajuste +/−, venta de compuesto descuenta insumo + movimiento, sobreventa
+  negativa con alerta, limpieza). Suite total 71 (compila vía `--list`).
+- tsc 0 + build verde; database.types.ts regenerado tras aplicar inventory-min-stock.sql.
+
+### Detalle Ventas numeradas + Historial (sesión 2026-06-19, rama feature/ventas-numeradas)
+- Migración `supabase/order-numbering.sql` (NUEVA, sin aplicar): columna
+  `orders.order_number int NULL` (solo ventas cobradas la reciben); tabla
+  `store_sequences` (contador por sede, 1 fila/sede sembrada en 0); función
+  `next_order_number(p_restaurant_id)` SECURITY DEFINER (valida sede activa,
+  incremento atómico INSERT ... ON CONFLICT ... RETURNING, revoke public/anon +
+  grant authenticated); NUMERACIÓN INDEPENDIENTE POR SEDE (cada una arranca en 1);
+  índice (restaurant_id, order_number desc); RLS en store_sequences solo SELECT de la
+  propia sede (escritura solo vía DEFINER). Permiso RBAC nuevo `ventas.historial`
+  sembrado en owner/admin/cajero (el cajero reimprime tickets del día; mozo NO).
+- Asignación del número AL COBRO EXITOSO (no antes): tras `createPayment` se llama
+  `assignOrderNumber(orderId, restaurantId)` (helper = next_order_number RPC + update).
+  Si falla, NO tumba el cobro (la venta queda registrada). Evita huecos por pagos
+  fallidos. Aplica en POS (CheckoutModal) y Mesas (TableCheckoutModal).
+- Visualización: PrintTicket (POS) y pantalla de éxito ("¡Venta #N registrada!",
+  data-testid `success-order-number`); `printSaleTicket` en printer.ts (recibo de venta
+  reutilizable para la reimpresión del historial, con "Venta #N"); tarjeta de Delivery
+  muestra "Venta #N" si ya tiene número.
+- Página `SalesHistoryPage` (ruta /historial, sidebar con permiso ventas.historial):
+  lista paginada (25/pág, server-side `.range`) por número desc; filtros rango de
+  fechas + método de pago (inner join cuando hay método) + búsqueda por número exacto;
+  click en fila → modal detalle con ítems, extras, subtotal/descuento derivado, quién
+  atendió, método; botón Reimprimir ticket. Hooks `useSalesHistory` (paginación/filtros,
+  keepPreviousData) y `useSaleDetail`. Helpers `getSalesHistory`/`getSaleDetail`/
+  `nextOrderNumber`/`setOrderNumber`/`assignOrderNumber` en supabase-helpers.
+- Nota descuento (DEUDA): orders no persiste el descuento; el detalle lo DERIVA como
+  max(0, suma_líneas − total). Es estimación, no dato de caja. MEJORA FUTURA: persistir
+  el discount real (monto y tipo pct/fixed) en orders al cobrar, y mostrarlo exacto en
+  el historial en vez de derivarlo.
+- tests/ventas-historial.spec.ts (6 tests): secuencia #N→#N+1, listado desc, búsqueda
+  por número, detalle con ítems+extras+reimpresión, setup/limpieza. Suite total: 65
+  (compila vía `--list`); PENDIENTE de correr en laboratorio.
+- tsc 0 + build verde; database.types.ts regenerado tras aplicar la migración.
+
+### Detalle Grupo B - Extras / subproductos reutilizables (sesión 2026-06-19)
+
+**Parte 1 — catálogo + asignación** (rama feature/extras-productos, merge a develop):
+- Migración `supabase/product-extras.sql`: tablas `extras` (catálogo por sede;
+  `linked_product_id` FK ON DELETE SET NULL = el insumo cuyo stock descuenta el extra),
+  `product_extras` (N:N producto↔extra, ON DELETE CASCADE), `order_item_extras`
+  (extras por línea, `extra_id` ON DELETE RESTRICT = no borrar extra en uso, `unit_price`
+  snapshot). RLS por `restaurant_id`/`has_permission('productos.editar')`; pertenencia de
+  las hijas vía fila padre.
+- Catálogo en ConfigPage (sección "Extras", precedente couriers): `useExtras` (CRUD),
+  `ExtraFormModal` con toggle "descuenta inventario" + selector de producto vinculado.
+  Borrado lógico (soft-deactivate); `handleDeactivate` chequea `countOrderItemsUsingExtra`
+  y avisa con `window.confirm` que se desactiva (no se elimina) — nunca FK error.
+- Asignación en ProductModal (sección "Extras disponibles"): `useProductExtras(productId)`
+  con `reconcile` que recibe el productId explícito (sirve para productos recién creados).
+- tests/extras.spec.ts (6 tests). Suite Parte 1: 51/51 verde (corrida histórica antes de
+  limpiar producción).
+
+**Parte 2 — venta en POS/Mesas + stock negativo** (rama feature/extras-pos):
+- RPC `supabase/order-extras-rpc.sql` `add_order_items_with_extras(p_order_id, p_items jsonb)`
+  SECURITY DEFINER: inserta order_items + order_item_extras y descuenta stock vinculado en
+  UNA transacción. DEFINER porque el descuento hace `UPDATE products` (RLS solo-admin) y un
+  cajero debe poder vender. SEGURIDAD: no confía en el JSON — del JSON usa solo `extra_id` y
+  `qty`; lee `price`/`linked_product_id` de la BD; valida extra activo+sede, producto de la
+  sede y que el extra esté asignado al producto (`product_extras`). `revoke execute` a
+  public/anon, `grant` a authenticated.
+- Migración `supabase/products-allow-negative-stock.sql`: quita el check `stock_qty >= 0`
+  (resuelve el constraint dinámicamente por definición). El stock de insumos puede ser
+  NEGATIVO = señal visible de sobreventa (estimación, no verdad de caja; un bar vende aunque
+  diga 0). La RPC descuenta sin `greatest(0,…)`.
+- Semántica de qty: el cliente envía qty del extra POR UNIDAD; la RPC guarda en
+  `order_item_extras.qty` el total de línea (qty_extra × qty_ítem) y descuenta esa cantidad.
+- cartStore: `CartExtra`, `CartItem.id+extras`, `addItem`/`updateItemExtras`, helper
+  `cartItemTotal`. `ItemConfigModal` (src/components/pos) reutilizable por POS y Mesas:
+  qty por extra + subtotal en vivo. `useProductsWithExtras` (set de productos con extras)
+  decide si abrir el modal o agregar directo (sin fricción si no hay extras).
+- Extras reflejados en: carrito (editable), PrintTicket, comanda (printer.ts) y KDS
+  (KitchenPage). ProductCard/ProductModal: alerta roja "Sobreventa: reponer N"
+  (data-testid `oversold-alert`, `stock-badge`) cuando el stock es negativo.
+- tests/extras-pos.spec.ts (8 tests, incl. sobreventa). Total suite: 59 (compila vía
+  `--list`); PENDIENTE de correr en laboratorio.
+
+### Detalle Grupo E - Identidad + reportes Financiero/Stock (sesión 2026-06-19, rama feature/identidad-reportes)
+- Branding por SEDE (restaurants), no por org: nombre/logo/dirección ya se capturan en
+  Config y los tickets necesitan la dirección de la sede (con 1 sede = la org)
+  - Sidebar (AppLayout): logo + nombre de la sede, fallback "G-Vento" (data-testid
+    sidebar-brand-name); POSPage PrintTicket: nombre + dirección reales; printer.ts
+    comanda + TablesPage: nombre de la sede; LoginPage queda genérico (pre-auth, RLS)
+- ReportsPage en dos tabs Financiero/Stock con selector de fechas COMPARTIDO:
+  - Financiero: KPIs ventas/órdenes/ticket, barras día·canal, línea horaria, pie métodos,
+    comparación vs período anterior, export financiero
+  - Stock: KPIs unidades/productos/categorías, top productos, ranking de categorías,
+    export stock; nota de stock-prep (inventario por unidad pendiente)
+  - data-testid: report-tab-financiero/stock, export-financiero/stock
+- Blindaje de colisión de puertos E2E (G-Mura ocupa 5173): puerto DEDICADO 5180 +
+  --strictPort + reuseExistingServer:false (Playwright siempre levanta su propio gvento);
+  tests/global-setup.ts con health check del marcador "G-Vento"; README documentado
+- Suite E2E ampliada a 45 tests (reportes 5); resultado 45/45 verde, aislado de G-Mura
+
+### Detalle Testing E2E (sesión 2026-06-14, ramas feature/e2e-tests + feature/e2e-coverage)
+
+### Detalle Testing E2E (sesión 2026-06-14, ramas feature/e2e-tests + feature/e2e-coverage)
+- Suite Playwright de 44 tests en 10 specs cubriendo los 10 módulos: auth, rbac, pos,
+  venta-espera, delivery, productos, caja, mesas, config, reportes
+- Helpers: auth (loginAsOwner/Cashier), shift (closeShiftIfOpen/openShiftIfClosed)
+- data-testid en la app donde el texto es ambiguo: product-card, cart-total,
+  close-shift-declared, open-shift-amount, movement-amount, checkout-received,
+  config-restaurant-name; títulos en botones de config de mesas
+- Determinismo: sufijo Date.now, limpieza por test, page.on('dialog') para window.confirm,
+  describe.serial donde hay dependencia de datos; retries:2 por backend compartido
+- Resultado: 43 passed + 1 flaky (pos-vuelto pasa en retry) = 44/44, exit 0
+- Ver "Política de testing (obligatoria)" y "Deuda de testing" arriba
+
+### Detalle Grupo D - Venta en espera (sesión 2026-06-12, rama feature/venta-en-espera)
+- cartStore: `heldOrders` en memoria (efímeras, SIN persistencia en Supabase ni
+  localStorage); `holdCurrentOrder(label)`, `resumeHeldOrder(id)`, `discardHeldOrder(id)`;
+  tipo `HeldOrder` (id, items, discount, discountType, customer, label, createdAt)
+- POS: botón "En espera" en el footer junto a Cobrar (mini-modal de referencia/label);
+  indicador "En espera (N)" en la cabecera del carrito; panel con label, ítems, total y
+  antigüedad, con Retomar/Descartar
+- Retomar con carrito activo no vacío → modal propio `ResumeConflictDialog` de 3 opciones
+  (guardar la actual / descartar la actual / cancelar); descartar usa window.confirm
+  (convención del repo)
+- `customer` queda null hasta que el POS capture cliente
+- tsc 0 + build verde; integrado a develop (Grupo D)
+
+### Detalle Grupo C - Delivery v2 (sesión 2026-06-12, rama feature/delivery-v2)
+- Kanban simplificado a 3 columnas (Nuevos/En camino/Entregados) mapeando el enum real
+  sin tocar la BD: pending/preparing→Nuevos, ready→En camino, delivered→Entregados;
+  avance de 3 pasos (ready, delivered)
+- Scroll independiente por columna (altura fija, header fijo, sin scroll horizontal de página)
+- Tarjeta mejorada: cliente destacado, dirección con ícono, hora absoluta + transcurrido,
+  indicador de urgencia (≥30 min, borde/badge ámbar), botones tel: (llamar) y mapas
+- Asignar/reasignar repartidor + tiempo estimado intactos; patrón checkoutOrder conservado
+- Fix de cleanup Realtime: unsubscribe antes de removeChannel en useDelivery y useDeliveryCount
+- Integrado con ARQ vía rebase: DeliveryPage usa can('delivery.gestionar')
+
+### Detalle Fase ARQ - Multi-tenant + RBAC (sesión 2026-06-12, rama feature/multi-tenant-rbac)
+- Migración multi-tenant-rbac.sql: organizations, roles (permissions jsonb), user_stores;
+  organization_id en restaurants/profiles, role_id en profiles; funciones SECURITY DEFINER
+  get_my_organization_id() y has_permission(); seed org G-10 + 4 roles de sistema
+- Capa de permisos frontend: usePermissions() con can()/isOwner/permissions[]; ProtectedRoute
+  por permiso; sidebar filtrado; checks role==='admin' reemplazados por can(); StoreSelector
+- Migración profiles-active-store-rls: cambio de sede activa validado contra user_stores
+- Migración restaurants-sedes-rls: SELECT por org + CRUD de sedes con has_permission('sedes.gestionar')
+- ConfigPage: sección Sedes (useStores: CRUD + asignación de usuarios via user_stores) y
+  sección Roles (useRoles: CRUD de roles custom, matriz de permisos por módulo, sistema protegido);
+  select de rol en Usuarios lista roles de la org y asigna role_id al crear
+- profiles.role (enum) se mantiene hasta migración posterior (ver deuda conocida)
+
+### Detalle Grupo A - Quick wins (sesión 2026-06-12, rama fix/quick-wins)
+- Fix 1 — Apertura de caja NO bloqueante: AppLayout dejó de bloquear; banner amber
+  descartable "No hay turno abierto" + botón Abrir turno; ShiftBanner muestra píldora
+  gris "Sin turno"; OpenShiftModal ahora cerrable (props onClose/onOpened); Cobrar en
+  POS y Mesas exige turno abierto (abre el modal de apertura si falta)
+- Fix 2 — Descuento %: cartStore.setDiscount clampa (pct 0–100, fijo ≥0, enteros, sin
+  NaN); POS pasa a input % editable + presets; input $ con borde constante (sin saltos)
+- Fix 3 — Responsable de mesa (texto libre): migración supabase/orders-waiter-name.sql
+  agrega orders.waiter_name text; OpenTableModal lo capta; visible en TableCard,
+  comanda (printer) y KDS
+- Fix 4 — Cerrar mesa sin consumo: botón "Cerrar mesa" en panel lateral cuando la orden
+  no tiene ítems; cancela la orden (status cancelled) y libera la mesa, con confirmación
+- Regeneración de tipos: database.types.ts regenerado con `supabase gen types` (formato
+  moderno, PostgrestVersion 14.5, Relationships reales, alias Views<> conservado). Reveló
+  que las vistas de reportes devuelven columnas number|null; se endureció ReportsPage y
+  useDailySummary (coalescer a 0, omitir filas con clave de agrupación nula)
+- Pendiente de aplicar por el usuario en Supabase: supabase/orders-waiter-name.sql (ya
+  aplicada — confirmada vía gen types que incluye waiter_name)
+
+### Detalle Fase 0 - Desbloqueo de tipos y build (sesión 2026-06-12)
+- Causa raíz de 129 errores `never`: el schema hand-written de `database.types.ts` no
+  cumplía `GenericSchema` de postgrest-js 2.104 — las 4 vistas de reportes (fase 08a) se
+  agregaron sin `Relationships`, lo que tumbaba el tipado del cliente Supabase entero
+- Fix: `__InternalSupabase.PostgrestVersion: '12'` + `Relationships: []` en las 4 vistas
+- useRestaurantConfig: `config` casteado a `Json` (no `Record<string, unknown>`)
+- ConfigPage: íconos de secciones tipados como `LucideIcon` (acepta `style`); removido
+  import `RestaurantConfig` sin usar. DeliveryPage: removido import `Plus` sin usar
+- Resultado: `tsc --noEmit` 0 errores y `pnpm build` de producción pasa
+- KitchenPage:758 no requirió null guard — al tiparse `restaurant_id` como string, `rid`
+  se estrecha solo
+- CLAUDE.md: nueva sección "Aprendizajes de proyectos hermanos (G-Quota)"; eliminado bloque
+  "Estado actual" duplicado (decía fase 02)
+- `supabase/security-definer-revoke.sql`: auditoría (verificación + revoke) de las 3
+  funciones SECURITY DEFINER — pendiente de ejecutar/verificar por el usuario en Supabase
+- Rama: `fix/types-postgrest-aprendizajes` (commit c0b6d1d)
+
+### Detalle fase 09 - Panel de configuración (sesión 2026-04-25)
+- ConfigPage.tsx: layout dos columnas (nav 220px + contenido scrollable), 6 secciones
+- Sección Restaurante: nombre, dirección, teléfono, slug (en config.slug), upload logo a bucket restaurant-logos
+- Sección Usuarios: tabla con rol select inline + toggle is_active; InviteModal con email/nombre/rol; llama a Edge Function invite-user via supabase.functions.invoke
+- Sección Caja: EditableList para motivos de egreso (config.cash_out_reasons); toggle buttons métodos de pago (config.payment_methods); upload QR Nequi a restaurant-logos (config.nequi_qr_url)
+- Sección Cocina: PIN 4 dígitos (config.kitchen_pin); EditableList estaciones (config.kitchen_stations); inputs timers semáforo verde/ámbar (config.kds_timers)
+- Sección Delivery: CourierFormModal reutiliza upsertCourier/deleteCourier; usa getAllCouriers (incluye inactivos); tiempo estimado default (config.default_delivery_time)
+- Sección Notificaciones: toggles delivery_sound y kitchen_sound (config.notifications)
+- useRestaurantConfig: carga restaurant + config tipado; updateRestaurant y updateConfig (merge parcial); staleTime 30s
+- useUsers: carga profiles del restaurante; updateUser (rol, is_active); inviteUser via Edge Function
+- Nuevos helpers: getRestaurantProfiles, updateProfile, inviteUser, uploadRestaurantLogo, uploadNequiQR, getAllCouriers
+- Migración: supabase/config-profile-active.sql agrega is_active boolean NOT NULL DEFAULT true a profiles
+- Rutas: /configuracion y /config (alias) bajo ProtectedRoute roles=['admin']; sidebar apunta a /configuracion
+
+### Detalle fase 08b - ReportsPage UI (sesión 2026-04-25)
+- ReportsPage.tsx: barra de controles fija + contenido scrollable (patrón flex h-full)
+- KPI cards con comparación % vs período anterior (período igual longitud, inmediatamente anterior)
+- BarChart apilado (recharts): ventas diarias por canal — dine_in/takeaway/delivery
+- LineChart: ventas por hora del día (0-23) agregadas en el período
+- PieChart con leyenda manual: distribución por método de pago (efectivo/tarjeta/transferencia/nequi)
+- Top 10 productos: tabla con unidades, revenue COP y % del revenue total
+- Atajos: Hoy / Esta semana / Este mes / Mes anterior con date-fns
+- Inputs manuales from/to + shortcut activo resaltado en emerald
+- Exportación Excel lazy-loaded (ExcelJS): 3 hojas, montos como números puros
+- Skeleton durante carga; estado vacío si totalOrd === 0
+- Deps nuevas: recharts 3.8.1 + exceljs 4.4.0
+
+### Detalle fase 08a - Reportes capa de datos (sesión 2026-04-25)
+- 4 vistas PostgreSQL con `security_invoker = true` en `supabase/reports-views.sql`
+  - `daily_sales_summary`: ventas por día × canal × método de pago; avg_ticket; order_count
+  - `product_performance`: unidades y revenue por producto/categoría por día
+  - `hourly_sales`: órdenes y revenue por hora del día (zona Bogotá)
+  - `waiter_performance`: ventas, órdenes y ticket promedio por mozo por día
+- RLS heredado de tablas subyacentes vía `security_invoker`; sin políticas extra en vistas
+- `Views<T>` alias + tipos completos de las 4 vistas en `database.types.ts`
+- `useReports({ from, to })` — carga las 4 vistas filtradas por rango de fechas; staleTime 5 min
+- `useDailySummary(date)` — resumen del día con agregación por canal y método de pago
+
+### Detalle fase 05b - KDS Cocina standalone (sesión 2026-04-25)
+- KitchenPage.tsx reescrito como pantalla independiente (sin AppLayout, sin Supabase Auth)
+- /cocina movida fuera de ProtectedRoute en App.tsx
+- Login por PIN de 4 dígitos leído de `restaurants.config.kitchen_pin`; sin PIN → acceso directo
+- Setup inicial: restaurant_id en localStorage; autenticación en sessionStorage
+- Cards dark (slate-900/800) con franja semáforo: verde <10min / ámbar 10-20min / rojo >20min
+- Elapsed time actualizado cada 30 s; clock en header zona horaria Bogotá
+- Filtros por estado: Todos / Nuevos / Preparando / Listos
+- Alerta sonora Web Audio API (triple beep) al llegar orden nueva en Realtime
+- Canal Realtime con nombre único Math.random() (patrón del proyecto)
+- Patrón checkoutOrder en handleAdvance: captura id/status antes del avance, aislado de Realtime
+- Screen Wake Lock API para mantener la tablet encendida en cocina
+- PWA: public/manifest.json (landscape, start_url /cocina) + public/sw.js (network-first) + meta tags en index.html
+
+### Fix (sesión 2026-04-24) - ShiftBanner total ventas no actualizaba tras cobros en Ventas y Mesas
+- Causa raíz: `queryClient.invalidateQueries` desde componentes externos (CheckoutModal, TableCheckoutModal) no disparaba refetch confiable del useQuery en useCashShift, por diferencias en el ciclo React Query v5
+- Fix: useCashShift expone `refetchSales` (refetch directo del useQuery de pagos); CheckoutModal y TableCheckoutModal llaman `refetchSales()` directamente tras createPayment, eliminando la dependencia de invalidateQueries externo
+- Adicional: refetchInterval reducido de 30 s a 5 s como fallback; getShiftPayments eliminó filtro .lte (innecesario y fuente de race condition por clock skew)
+
+### Detalle fase 07 - Delivery / Kanban Realtime (sesión 2026-04-24)
+- supabase/delivery-couriers.sql: tabla `couriers` (name, phone, is_active) + ALTER TABLE orders (delivery_address, courier_id FK, estimated_delivery_minutes) + RLS
+- database.types.ts: tipos completos para couriers + campos delivery en orders Row/Insert/Update/Relationships
+- supabase-helpers: getCouriers, upsertCourier, deleteCourier (soft), getDeliveryOrders (activos + entregados hoy), assignOrderCourier
+- useDelivery: órdenes agrupadas por columna kanban (new/accepted/preparing/in_transit/delivered), canal Realtime con nombre único Math.random(), alerta Web Audio API al llegar pedido nuevo, patrón checkoutOrder en AssignCourierModal
+- useDeliveryCount: hook ligero usado en AppLayout para el badge del sidebar
+- DeliveryPage: Kanban 5 columnas horizontal scroll; columna lógica = status + courier_id (pending sin courier = Nuevos, pending con courier = Aceptados); AssignCourierModal (select courier + tiempo estimado); CourierConfigModal (admin, CRUD repartidores); botones de avance de estado por columna
+- AppLayout: Delivery añadido al sidebar (ícono Truck), badge amber con conteo de órdenes activas
+
+### Fix (sesión 2026-04-24) - ShiftBanner no actualizaba al cobrar desde TablesPage
+- Causa raíz: TableCheckoutModal se desmontaba antes de step='success' porque
+  updateOrderStatus('delivered') disparaba Realtime → fetchAll → selectedOrder=null
+- Fix: checkoutOrder (estado capturado al abrir cobro, aislado del Realtime);
+  condición del modal usa checkoutOrder en vez de selectedOrder;
+  handleCheckoutComplete también invalida ['shift_payments'] como respaldo
+
+### Detalle fase 06 - Cocina / KDS (sesión 2026-04-24)
+- sent_to_kitchen: columna boolean en order_items (SQL en supabase/sent-to-kitchen.sql)
+- database.types.ts: sent_to_kitchen en Row/Insert/Update de order_items
+- supabase-helpers: markItemsSentToKitchen(itemIds), sent_to_kitchen en getActiveOrdersForTables + getActiveOrderByTable
+- useTables: sent_to_kitchen añadido a OrderItemRow
+- printer.ts (src/lib/): printComanda(ComandaData) — inyecta CSS 80mm en head, crea nodo DOM, window.print(); printToThermal() alias
+- TablesPage: botón "Cocina (N)" reemplaza botón Comanda; marca ítems como sent, actualiza orden a 'preparing', imprime solo ítems no enviados; badge "En cocina" + dim en ítems ya enviados; delete deshabilitado en ítems enviados
+- KitchenPage: KDS completo — tarjetas por orden con ítems enviados, flujo pending→preparing→ready, Realtime con canal único Math.random()
+
+### Detalle fase 05 - Gestión de mesas (sesión 2026-04-23)
+- TablesPage: mapa visual en grid auto-fill, split layout mapa + panel lateral
+- TableCard: colores por estado (gris=libre, verde=ocupada, ámbar=pide cuenta, azul=reservada)
+- useTables: carga tablas + órdenes activas en paralelo, Realtime en postgres_changes (tables + orders + order_items), reconexión en CHANNEL_ERROR
+- OpenTableModal: crea orden dine_in con total=0, actualiza status→'occupied'
+- TableSidePanel (380px): lista ítems, eliminar ítem, total, botones Agregar/Cocina/Pide cuenta/Cobrar
+- ProductPickerModal: selector de productos con búsqueda + tabs de categoría + selección con qty
+- TableCheckoutModal: mismo flujo method→amount→success que POSPage, pero para orden existente
+- TableConfigModal (admin): crear/editar/eliminar mesas, no permite borrar si tiene orden activa
+- waiting_bill añadido a table_status enum (SQL en supabase/tables-waiting-bill.sql + database.types.ts)
+- Nuevos helpers: createTable, updateTable, deleteTable, getTableActiveOrderCount, getActiveOrdersByTable, getActiveOrdersForTables
+
+### Detalle fase 04 - Turno de caja (sesión 2026-04-23)
+- useCashShift: currentShift, isOpen, salesSummary, movements, openShift, closeShift, addMovement
+- OpenShiftModal: modal bloqueante (z-100), sin cierre, monto de apertura obligatorio
+- ShiftBanner: píldora verde en header con hora de inicio, ventas totales, botones Movimientos y Cerrar turno
+- CloseShiftModal: resumen por método de pago, cálculo efectivo esperado, monto declarado, diferencia verde/rojo
+- MovementsModal: selector Ingreso/Egreso, monto + motivo, listado del turno con colores por tipo
+- AppLayout: ShiftBanner en header + bloqueo total si no hay turno abierto
+- cash_movements tabla: SQL migration + tipos TS + helpers Supabase (getCashMovements, createCashMovement)
+- movement_type enum: 'in' | 'out' agregado a database.types.ts y Enums
+
+### Detalle fase 03b - POSPage V2 mejoras UX (sesión 2026-04-23)
+- cartStore: DiscountType ('pct'|'fixed'), campo discountType, setDiscount acepta tipo
+- Atajo teclado `/` enfoca búsqueda; `Escape` limpia y desenfoca; indicador kbd visual
+- Descuento dual: botones rápidos % (0/5/10/15/20) o monto fijo COP con input numérico
+- Método de pago Transferencia añadido (mapea a 'transfer' en enum BD); modal 4 columnas
+- PrintTicket: componente de recibo 80mm, oculto en UI, visible con @media print
+- window.print() desde botón "Imprimir" en pantalla de éxito del modal
+- Pantalla de éxito mejorada: n.° orden abreviado, vuelto destacado, botones Imprimir + Nueva venta
+- Removido botón "Espera" no funcional; Cobrar ocupa ancho completo
+
+### Detalle fase 02b - LoginPage V1 (commit 661e666)
+- LoginPage: layout split 40/60 (panel marca + formulario), diseño handoff V1 aprobado
+- Panel izquierdo slate-900 con logo, tagline, 3 features y glows radiales verdes
+- Panel derecho: formulario con email, contraseña (toggle visibilidad), checkbox recordarme
+- Checkbox recordarme controla persistencia: si false, limpia claves sb-* de localStorage tras login
+- Banner de error inline rojo con icono X (sin toast)
+- Spinner animado durante autenticación, botón deshabilitado si campos vacíos
+- Redirección automática a /ventas si ya hay sesión activa (useEffect sobre useAuth)
+- Sin enlace de recuperación de contraseña — el admin resetea cuentas
+
+### Detalle fase 03 (commit dc5f144)
+- POSPage: layout split 60/40 (catálogo + carrito), diseño V2 aprobado
+- cartStore Zustand: add/setQty/setNote/remove/clear/setDiscount
+- useProducts y useCategories con React Query sobre supabase-helpers
+- CheckoutModal: flujo method → amount (efectivo) → success, graba en Supabase
+- ProductCard con placeholder coloreado por categoría + soporte image_url
+- Precios en COP con Intl.NumberFormat('es-CO')
+- QueryClientProvider en App.tsx
+- AppLayout main: overflow-hidden para layout POS full-height
+
+### Detalle fase 02 (commit 3424412)
+- AuthProvider + useAuth hook (user, profile, isLoading, signOut)
+- ProtectedRoute con control de acceso por rol (admin / cashier / waiter)
+- AppLayout: sidebar slate-900, header con nombre y rol del usuario
+- Router completo en App.tsx con rutas públicas y protegidas
+- Páginas placeholder: Ventas, Mesas, Cocina, Productos, Reportes, Config
