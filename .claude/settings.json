@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/sql-checklist.mjs",
+            "timeout": 10,
+            "statusMessage": "Checklist de SQL"
+          }
+        ]
+      }
+    ]
+  }
+}
