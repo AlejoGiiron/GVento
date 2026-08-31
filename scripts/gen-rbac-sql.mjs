@@ -43,6 +43,8 @@ const OUT = join(ROOT, 'supabase/seed-system-roles.sql')
 // no era el que funciona en esta máquina.
 const TSC = join(ROOT, 'node_modules/typescript/bin/tsc')
 
+const NL = String.fromCharCode(10)
+const CRLF = String.fromCharCode(13) + NL
 const check = process.argv.includes('--check')
 const preflight = process.argv.includes('--preflight')
 
@@ -233,7 +235,6 @@ ${esperado}
 // muestra el diff ANTES de aplicar; se genera desde la MISMA fuente que el seed,
 // así que las listas canónicas no pueden divergir de lo que se va a escribir.
 if (preflight) {
-  const NL = String.fromCharCode(10)
   const filas = ROLES.map(([rol, perms], i) =>
     "    ('" + rol + "'::text, " + arr(perms) + ')' + (i === ROLES.length - 1 ? '' : ','),
   ).join(NL)
@@ -331,8 +332,22 @@ select o.name as org, r.name as rol, jsonb_array_length(r.permissions) as n
 let previo = null
 try { previo = readFileSync(OUT, 'utf8') } catch { /* no existe todavía */ }
 
+// Comparar NORMALIZANDO los fines de línea. Este repo tiene core.autocrlf=true y
+// no tiene .gitattributes, así que git materializa el archivo con CRLF al hacer
+// checkout mientras el generador emite LF. Sin esto, gen:rbac:check falla en
+// CUALQUIER checkout limpio en Windows —el CI nacería en rojo— y gen:rbac
+// reescribiría el archivo entero por un cambio que no existe.
+//
+// Medido el 2026-08-31 al mergear a develop: el check pasaba en la rama donde el
+// archivo se había GENERADO y fallaba tras el checkout, CON EL MISMO ÁRBOL. Es R4:
+// comparar byte a byte contra el archivo que uno acaba de escribir es un PROXY del
+// archivo que git entrega, no el archivo real. La verificación tiene que correr
+// sobre lo que sale del checkout.
+const eolNorm = (s) => (s === null ? null : s.split(CRLF).join(NL))
+const igual = eolNorm(previo) === eolNorm(sql)
+
 if (check) {
-  if (previo === sql) {
+  if (igual) {
     console.log('✓ seed-system-roles.sql está al día con permissions.ts')
     process.exit(0)
   }
@@ -343,6 +358,6 @@ if (check) {
 }
 
 writeFileSync(OUT, sql)
-console.log('✓ supabase/seed-system-roles.sql ' + (previo === sql ? '(sin cambios)' : 'regenerado'))
+console.log('✓ supabase/seed-system-roles.sql ' + (igual ? '(sin cambios)' : 'regenerado'))
 console.log('  ' + ALL_PERMISSION_KEYS.length + ' permisos · ' +
             ROLES.map(([r, p]) => r + '=' + p.length).join(' · '))
