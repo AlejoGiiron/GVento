@@ -233,9 +233,10 @@ ${esperado}
 // muestra el diff ANTES de aplicar; se genera desde la MISMA fuente que el seed,
 // así que las listas canónicas no pueden divergir de lo que se va a escribir.
 if (preflight) {
+  const NL = String.fromCharCode(10)
   const filas = ROLES.map(([rol, perms], i) =>
     "    ('" + rol + "'::text, " + arr(perms) + ')' + (i === ROLES.length - 1 ? '' : ','),
-  ).join(String.fromCharCode(10))
+  ).join(NL)
 
   const nombres = ROLES.map(([r]) => "'" + r + "'").join(', ')
 
@@ -243,8 +244,17 @@ if (preflight) {
 -- PRE-FLIGHT de seed_system_roles() — SOLO LECTURA, no modifica nada.
 -- Generado por: pnpm gen:rbac -- --preflight   (catálogo de ${ALL_PERMISSION_KEYS.length} permisos)
 --
--- Contesta: si aplico el seed, ¿qué permisos PIERDE cada organización?
--- Correr en el SQL Editor ANTES de aplicar seed-system-roles.sql.
+-- Contesta dos cosas: sobre QUÉ organizaciones actúa el seed, y qué permisos
+-- pierde cada una. Correr en el SQL Editor ANTES de aplicar seed-system-roles.sql.
+--
+-- 🔴 CORREGIDO EL 2026-08-31. La primera versión arrancaba \`from public.roles\` y
+--    hacía join a organizations, así que una organización SIN roles era invisible.
+--    Mostró 4 organizaciones cuando había 5: LabCentro se crea con
+--    labcentro-org.sql, que inserta SOLO la fila de \`organizations\` y ningún rol.
+--    Falló ABIERTO — resultado limpio, cobertura incompleta. La causa es de clase:
+--    enumeraba LO QUE EXISTE (roles) en vez de LO QUE LA OPERACIÓN TOCA (orgs).
+--    Ahora arranca de \`organizations\` y hace LEFT JOIN, así que toda organización
+--    aparece aunque no tenga todavía un solo rol.
 -- ============================================================
 
 with canonico(rol, permisos) as (
@@ -252,31 +262,47 @@ with canonico(rol, permisos) as (
 ${filas}
 )
 
--- ── 1) EL DIFF. Una fila por org y rol de sistema. ─────────────────────────
+-- ── 0) CUÁNTAS ORGANIZACIONES TOCA. Mirá este número primero. ──────────────
+-- Si no coincide con las que esperás, pará: el resto del pre-flight está
+-- describiendo un universo distinto al de la operación.
+select count(*) as organizaciones_totales,
+       count(*) * ${ROLES.length} as filas_esperadas_en_bloque_1
+  from public.organizations;
+
+
+-- ── 1) EL DIFF, una fila por ORGANIZACIÓN × ROL canónico. ──────────────────
+-- accion     = 'SE CREA' si el rol todavía no existe en esa org.
 -- se_pierde  = está hoy en la BD y NO en el canónico  → el seed lo BORRA 🔴
 -- se_agrega  = está en el canónico y NO en la BD      → el seed lo agrega
--- Si se_pierde viene '[]' en todas las filas, aplicar es seguro.
-select o.name                              as org,
-       r.name                              as rol,
-       jsonb_array_length(r.permissions)   as tiene_hoy,
-       jsonb_array_length(c.permisos)      as quedara_con,
+-- es_system  = false 🔴 significa que es un rol CUSTOM del cliente con nombre
+--              colisionante: el seed lo pisa Y lo promueve a is_system (ver 2).
+-- Aplicar es seguro si se_pierde viene '[]' en TODAS las filas.
+select o.name                                as org,
+       c.rol,
+       case when r.id is null then 'SE CREA' else 'se reescribe' end as accion,
+       r.is_system                           as es_system,
+       jsonb_array_length(r.permissions)     as tiene_hoy,
+       jsonb_array_length(c.permisos)        as quedara_con,
        (select coalesce(jsonb_agg(x), '[]'::jsonb)
-          from jsonb_array_elements_text(r.permissions) x
-         where not c.permisos ? x)         as se_pierde,
+          from jsonb_array_elements_text(coalesce(r.permissions, '[]'::jsonb)) x
+         where not c.permisos ? x)           as se_pierde,
        (select coalesce(jsonb_agg(x), '[]'::jsonb)
           from jsonb_array_elements_text(c.permisos) x
-         where not r.permissions ? x)      as se_agrega
-  from public.roles r
-  join public.organizations o on o.id = r.organization_id
-  join canonico c              on c.rol = r.name
- where r.is_system
- order by o.name, r.name;
+         where not coalesce(r.permissions, '[]'::jsonb) ? x) as se_agrega
+  from public.organizations o
+  cross join canonico c
+  left join public.roles r
+         on r.organization_id = o.id
+        and r.name = c.rol          -- SIN filtrar is_system: la unique es
+                                    -- (organization_id, name) y tampoco lo mira.
+ order by o.name, c.rol;
 
 
--- ── 2) 🔴 ROLES QUE EL SEED SE VA A TRAGAR SIN QUE PAREZCA ────────────────
+-- ── 2) 🔴 ROLES CUSTOM QUE EL SEED SE VA A TRAGAR SIN QUE PAREZCA ─────────
 -- La unique es (organization_id, name) y NO mira is_system. Si un cliente creó
 -- desde la UI un rol llamado exactamente ${nombres},
--- el \`on conflict\` lo pisa Y ADEMÁS lo marca is_system = true. Deja de ser suyo.
+-- el on conflict lo pisa Y ADEMÁS lo marca is_system = true: deja de ser suyo y
+-- pasa a ser reescribible por cada seed futuro.
 -- Esperado: 0 filas. Si aparece alguna, decidir ANTES de aplicar.
 select o.name as org, r.name as rol, r.is_system, r.permissions,
        (select count(*) from public.profiles p where p.role_id = r.id) as usuarios_afectados
@@ -289,7 +315,7 @@ select o.name as org, r.name as rol, r.is_system, r.permissions,
 
 -- ── 3) Roles de sistema que el canónico NO contempla ──────────────────────
 -- El seed no los toca (quedan como están). Informativo: si aparece algo acá, el
--- catálogo de SYSTEM_ROLES en permissions.ts podría estar incompleto.
+-- SYSTEM_ROLES de permissions.ts podría estar incompleto.
 select o.name as org, r.name as rol, jsonb_array_length(r.permissions) as n
   from public.roles r
   join public.organizations o on o.id = r.organization_id
@@ -298,6 +324,7 @@ select o.name as org, r.name as rol, jsonb_array_length(r.permissions) as n
  order by o.name, r.name;
 `)
   process.exit(0)
+
 }
 
 // ── 4. Escribir, o comparar si es el check de CI ───────────────────────────
