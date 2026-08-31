@@ -72,6 +72,48 @@ Se anotó porque una sesión estuvo a punto de "descubrir" el problema y propone
 arreglarlo. Si volvés a encontrarlo mirando datos, ya está resuelto: es así a
 propósito.
 
+## Las organizaciones de la BD: cuáles son clientes y cuáles laboratorio
+
+**Se lee antes de cualquier operación que trate a las organizaciones como cuentas
+comerciales** — cobros, métricas, conteos de clientes activos, o un `update` que barra
+`organizations`. Confundir un tenant de prueba con un cliente es un error caro en las dos
+direcciones: facturarle a un laboratorio, o tocarle los datos a alguien que vende.
+
+**Para reconfirmar la lista** (va primero el comando, que no caduca):
+
+```sql
+select name, (config->>'es_laboratorio')::bool as es_lab, created_at
+  from public.organizations order by created_at;
+```
+
+**Al 2026-08-31 son CINCO:**
+
+| organización | qué es | origen |
+|---|---|---|
+| **G-10** | 🟢 cliente real | producción, anterior a la migración multi-tenant |
+| **Salchimelo** | 🟢 cliente real | producción |
+| **Café Aroma** | 🟢 cliente real | `onboard-org-paso1.sql` → `paso3.sql` (+ `demo-seed-cafeteria.sql`) |
+| **LAB** | 🔬 laboratorio | `lab-seed.sql` — 2 sedes, `owner.test` y `cajero.test`; contra esto corre la suite E2E |
+| **LabCentro** | 🔬 laboratorio | `labcentro-org.sql` — **solo la fila de `organizations`**, sin sede, sin roles, sin usuarios |
+
+**LabCentro existe por una restricción de G-Centro**, no de G-Vento: su esquema tiene un
+unique `(producto_id, organizacion_externa_id)` que impide vincular dos contratos al mismo
+tenant, y LAB ya estaba vinculado. Sirve para probar el lado de ESCRITURA (crear contrato,
+vincular, escribir la bandera con `aplicar-estado`, que usa service role). **No sirve para
+ver el banner:** sin sede ni usuarios nadie puede iniciar sesión ahí. Para efecto visible,
+LAB.
+
+🔴 **G-Vento NO tiene ningún concepto de "organización de prueba".** No hay columna
+`is_test`, ni vistas de cobranza, ni consultas que crucen organizaciones — cada una está
+acotada por RLS a la propia. El `config->>'es_laboratorio'` de LabCentro es **documentación
+dentro de la fila**: ningún código lo lee. La exclusión real de cobranza vive del lado de
+G-Centro (`es_prueba = true`). Si algún día G-Vento gana una vista multi-organización, ese
+marcador es el que hay que respetar — y LAB, que es anterior, **no lo tiene**.
+
+⚠️ **Que una organización no aparezca en una query no significa que no exista.** LabCentro
+no salió en el pre-flight de `seed_system_roles` porque la query arrancaba de `roles` y
+LabCentro no tenía ninguno. Al enumerar organizaciones, arrancá de `organizations`.
+
 ## 🔴 REGLAS DE CLASE — leer ANTES de trabajar (esto es lo único obligatorio)
 
 Diez reglas. Son la **forma corta**: accionables solas, sin abrir la evidencia. Cada una
