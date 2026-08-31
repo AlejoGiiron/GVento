@@ -246,8 +246,26 @@ escribir, y lo que no está en la lista no existe hasta que estalla. La allowlis
 cerrándose, que se nota. Corolario: **un `catch` que convierte un error en `''` es
 fail-open** — el error tiene que salir ruidoso.
 
+**LA FORMULACIÓN CORTA, que sirve para reconocer la situación:** el código enumeraba **LO QUE
+EXISTE** en vez de **LO QUE LA OPERACIÓN TOCA**. Describir el universo por sus instancias
+conocidas en lugar de por su definición. Cuatro instancias medidas, todas la misma forma:
+
+| dónde | enumeraba | omitía |
+|---|---|---|
+| filtro de Sentry | claves prohibidas | toda clave nueva |
+| hook `sql-checklist` | `Write|Edit` | `Bash` (heredoc, `sed -i`, `python -`) |
+| guard de seed | dos nombres de org | las demás |
+| pre-flight de `seed_system_roles` (#12) | `from roles join organizations` | **LabCentro, que no tenía roles** |
+
+🔴 **"Que esta vez no hubiera daño es SUERTE, no diseño."** El #12 no rompió nada porque
+LabCentro no tenía permisos que perder. Con una organización que sí los tuviera, el
+pre-flight habría dicho `se_pierde: []` en todas las filas y el `on conflict do update` los
+habría borrado igual. El modo de fallo no depende de que esta vez saliera bien. Y fue
+**fail-OPEN**: un resultado limpio y creíble, con una organización de menos.
+
 → **Evidencia:** [`docs/BITACORA.md`](docs/BITACORA.md) → *"Filtros de privacidad: ALLOWLIST
-por clave, nunca deny-list"* · en código: el guard de `supabase/demo-seed-cafeteria.sql`.
+por clave, nunca deny-list"* · en código: el guard de `supabase/demo-seed-cafeteria.sql` y el
+bloque 0 del `--preflight` en `scripts/gen-rbac-sql.mjs`.
 
 ---
 
@@ -340,6 +358,15 @@ Escribí el código **dentro** del archivo de salida y grepealo.
 
 **Modo de fallo:** verde falso anunciado como verdadero. Medido: la notificación dijo
 *"exit code 0"* **4 de 4 veces, con dos suites rojas**.
+
+**SEGUNDA TRAMPA, de la misma familia: `cmd1 || cmd2` NO ES REINTENTABLE si `cmd1` ya
+escribió.** Medido el 2026-08-31: un `python script.py || py script.py` —puesto como fallback
+inofensivo entre dos nombres del mismo intérprete— falló en su ÚLTIMO paso después de haber
+completado el primero, así que el fallback **re-ejecutó el script entero** y duplicó un bloque
+en este mismo archivo. El `||` de shell no distingue "no arrancó" de "arrancó y falló a la
+mitad". Regla: un fallback con `||` solo va sobre comandos **idempotentes o de solo lectura**;
+si el script escribe, se elige el intérprete primero (o se hace idempotente) y se deja que
+falle ruidoso.
 
 → **Evidencia:** [`docs/BITACORA.md`](docs/BITACORA.md) → *"Trampas de TERMINAL — el síntoma no
 señala la causa"*.

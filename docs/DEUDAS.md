@@ -132,6 +132,53 @@ con origen externo. No construir — solo no bloquear.
 
 ## Pendientes de verificar / deuda conocida
 
+### 🔴 "No hay concepto de organización de prueba" es una suposición tácita esperando a fallar (anotado 2026-08-31)
+
+**NO se construye ahora.** Se anota porque es exactamente la clase que este proyecto cazó once
+veces: una condición que hoy es verdad por accidente —no hay consultas que crucen
+organizaciones— y que deja de serlo en silencio el día que alguien escriba la primera.
+
+**El hecho:** G-Vento no tiene columna `is_test`, ni vistas de cobranza, ni ninguna consulta
+de la app que cruce organizaciones. Cada una está acotada por RLS a la propia. El
+`config->>'es_laboratorio'` de LabCentro es documentación dentro de la fila que **ningún
+código lee**, y LAB —anterior— ni siquiera lo tiene.
+
+**Por qué es deuda y no una simple ausencia:** cualquier consulta futura que cruce
+organizaciones —un reporte consolidado, una métrica de negocio, una vista de cobranza— va a
+contar **LAB y LabCentro como clientes** salvo que quien la escriba se acuerde de excluirlas.
+El default es incluir. Es fail-OPEN: el número sale plausible y alto, y nadie lo audita
+porque no hay con qué compararlo.
+
+**¿Hay HOY alguna consulta que cruce organizaciones?** Sí, tres, y las tres son **manuales de
+operador**, ninguna de la app:
+
+1. `organization-subscription.sql` → duplicados por nombre (pre-flight del unique). Cuenta las 5.
+2. `organization-subscription.sql` → la lista de UUID para G-Centro con `count(sedes)`. **Ya
+   lleva un aviso manual sobre LAB**, escrito cuando LAB era el único laboratorio: **no
+   menciona LabCentro**. Es justamente una allowlist de excepciones enumerada a mano, que se
+   quedó corta en cuanto apareció la segunda instancia.
+3. `organization-subscription.sql` → `select subscription_status, count(*) group by`. **Esta es
+   la peligrosa:** hoy devuelve `active | 5`, y de esos 5 **solo 3 son clientes**. Quien tome
+   ese número como "organizaciones activas" se equivoca en un 66%.
+
+**En la app: NINGUNA.** Y hay una señal de que va a haber: el permiso `reportes.consolidado`
+("ver reportes consolidados multi-sede") existe en el catálogo desde la migración
+multi-tenant, pero **no gatea nada** — es uno de los 6 de *"concedible pero inerte"*. O sea
+que el permiso ya anticipa una funcionalidad que todavía no existe, y cuando se construya va
+a caer justo en esta trampa.
+
+**Las salidas, cuando se retome:**
+- Lo barato y suficiente: `organizations.es_laboratorio boolean not null default false`, poblada
+  desde el `config` que ya tiene LabCentro, y **una vista `organizaciones_facturables`** que la
+  excluya. Que la consulta correcta sea la más corta de escribir; si hay que acordarse de
+  agregar un `where`, alguien no se va a acordar.
+- Lo que NO alcanza: seguir enumerando los nombres de laboratorio en un comentario. Ya falló
+  una vez —el aviso sobre LAB no cubrió a LabCentro— y es la misma deny-list de R2.
+
+**Señal para retomarlo:** la primera consulta de la app que cruce organizaciones, o el día que
+se implemente `reportes.consolidado`. Lo que llegue antes.
+
+
 ### Auditar los 40+ encabezados restantes de `supabase/` (anotado 2026-08-31)
 
 **Queda para la siguiente pasada, con el hallazgo YA caracterizado** — se anota para no
