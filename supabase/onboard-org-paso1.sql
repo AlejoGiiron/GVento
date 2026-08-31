@@ -126,54 +126,18 @@ begin
            'payment_methods', jsonb_build_array('cash', 'card', 'transfer', 'nequi'))
    where id = v_sede;
 
-  -- ── 3) roles de sistema — POR ORG ────────────────────────────────────────
-  -- owner: comodín "*" (hereda todo permiso presente y futuro).
-  -- El resto: listas EXPLÍCITAS, cotejadas contra PERMISSION_GROUPS de
-  -- src/lib/permissions.ts + `ventas.anular`.
+  -- ── Roles de sistema ─────────────────────────────────────────────────────
+  -- Los siembra `seed_system_roles()`, GENERADA desde src/lib/permissions.ts
+  -- (ver supabase/seed-system-roles.sql). Requiere esa migración aplicada antes.
   --
-  -- ⚠️ `ventas.anular` SÍ se enforcea (register-sale-void.sql:78 y
-  --    SalesHistoryPage.tsx:109) pero NO está en PERMISSION_GROUPS, así que no
-  --    aparece en la matriz de la UI de Roles: hoy solo se concede por SQL o se
-  --    hereda con "*". Es un hueco del catálogo, ajeno a este onboarding —
-  --    anotado, no arreglado acá.
-  --
-  -- protect_owner_role solo muerde con current_user = 'authenticated'; desde el
-  -- SQL Editor (postgres) el "*" del owner se inserta sin problema.
-  insert into public.roles (organization_id, name, is_system, permissions) values
-    (v_org, 'owner', true, '["*"]'::jsonb)
-  on conflict (organization_id, name)
-    do update set permissions = excluded.permissions, is_system = true;
+  -- Hasta el 2026-08-31 acá había 4 bloques `insert` inline, y las 4 copias del
+  -- repo habían divergido: `admin` valía 16/20/18/23 según el archivo que abrieras.
+  -- Ya no hay lista que mantener en este archivo. Ver R1 en CLAUDE.md.
+  perform public.seed_system_roles(v_org);
+  -- Nota: `ventas.anular` YA está en PERMISSION_GROUPS desde el 2026-08-31, así
+  -- que ahora se concede desde la UI de Roles como cualquier otro. La advertencia
+  -- que había acá sobre ese hueco quedó obsoleta y se eliminó.
 
-  insert into public.roles (organization_id, name, is_system, permissions) values
-    (v_org, 'admin', true, '[
-      "pos.vender","pos.descuento","pos.anular",
-      "caja.abrir","caja.cerrar","caja.movimientos",
-      "mesas.gestionar","mesas.cobrar","cocina.acceder","delivery.gestionar",
-      "productos.ver","productos.editar",
-      "compras.gestionar","fiado.gestionar",
-      "ventas.historial","ventas.anular",
-      "reportes.financiero","reportes.stock","reportes.consolidado",
-      "config.acceder","usuarios.gestionar","sedes.gestionar","roles.gestionar"
-    ]'::jsonb)
-  on conflict (organization_id, name)
-    do update set permissions = excluded.permissions, is_system = true;
-
-  insert into public.roles (organization_id, name, is_system, permissions) values
-    (v_org, 'cajero', true, '[
-      "pos.vender","pos.descuento","pos.anular",
-      "caja.abrir","caja.cerrar","caja.movimientos",
-      "mesas.cobrar","delivery.gestionar","fiado.gestionar",
-      "ventas.historial"
-    ]'::jsonb)
-  on conflict (organization_id, name)
-    do update set permissions = excluded.permissions, is_system = true;
-
-  insert into public.roles (organization_id, name, is_system, permissions) values
-    (v_org, 'mozo', true, '[
-      "pos.vender","mesas.gestionar","cocina.acceder"
-    ]'::jsonb)
-  on conflict (organization_id, name)
-    do update set permissions = excluded.permissions, is_system = true;
 
   raise notice 'PASO 1 OK — org "%" (%) · sede "%" (%) · uses_kitchen=%',
     v_org_name, v_org, v_sede_name, v_sede, v_uses_kitchen;

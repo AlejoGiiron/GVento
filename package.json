@@ -11,6 +11,8 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
     "typecheck": "tsc --noEmit",
+    "gen:rbac": "node scripts/gen-rbac-sql.mjs",
+    "gen:rbac:check": "node scripts/gen-rbac-sql.mjs --check",
     "test:unit": "vitest run",
     "test:e2e": "playwright test"
   },

@@ -246,18 +246,15 @@ commit;
 -- Descomentar para APLICAR:
 --
 -- begin;
+-- Deriva los permisos del rol 'admin' ya sembrado por seed_system_roles(), en vez
+-- de repetir la lista acá. Antes esto era una SÉPTIMA copia del catálogo, y con la
+-- divergencia que tenían las otras seis lo más probable era que naciera desfasada.
 -- insert into public.roles (organization_id, name, is_system, permissions)
--- select o.id, 'Administrador', false, '[
---     "pos.vender","pos.descuento","pos.anular",
---     "caja.abrir","caja.cerrar","caja.movimientos",
---     "mesas.gestionar","mesas.cobrar",
---     "productos.ver","productos.editar",
---     "compras.gestionar","fiado.gestionar",
---     "ventas.historial","ventas.anular",
---     "reportes.financiero","reportes.stock","reportes.consolidado",
---     "config.acceder","usuarios.gestionar","sedes.gestionar","roles.gestionar"
---   ]'::jsonb
---   from public.organizations o where o.name = 'CAMBIAR: nombre del negocio'
+-- select o.id, 'Administrador', false, r.permissions
+--   from public.organizations o
+--   join public.roles r
+--     on r.organization_id = o.id and r.name = 'admin' and r.is_system
+--  where o.name = 'CAMBIAR: nombre del negocio'
 -- on conflict (organization_id, name) do update set permissions = excluded.permissions;
 --
 -- update public.profiles p

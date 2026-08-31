@@ -29,7 +29,19 @@
 --     para no duplicar el efectivo en el cuadre del turno. debt_payments es el
 --     mayor de liquidación del fiado; `payments` queda para el cobro en el POS.
 --
--- Ejecutar en: Supabase Dashboard > SQL Editor. NO aplicada todavía.
+-- Ejecutar en: Supabase Dashboard > SQL Editor.
+--
+-- ✅ ESTÁ APLICADA. El "NO aplicada todavía" que decía acá era FALSO: el módulo
+--    Fiado corre en producción (FiadoPage, useDebts → register_debt_payment) y
+--    `tests/fiado.spec.ts` lo ejercita contra la BD viva.
+--    Corregido el 2026-08-31 al barrer la clase (R3).
+--
+-- NO DEDUZCAS EL ESTADO DE ESTE COMENTARIO — correlo (1 fila = aplicada):
+--   select 1 from pg_proc where proname = 'register_debt_payment';
+--
+-- RE-APLICAR FALLA, PERO NO ES DESTRUCTIVO: 2 `create table` sin `if not exists`
+--   y 6 `create policy` sin `drop` previo ⇒ aborta con 42P07/42710 y hace ROLLBACK
+--   completo por el begin/commit. Falla cerrado, no deja nada a medias.
 -- ============================================================
 
 begin;

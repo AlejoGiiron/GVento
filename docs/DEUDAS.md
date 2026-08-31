@@ -11,6 +11,47 @@ Se consulta **al planificar**, no antes de cada cambio.
 
 ---
 
+## Entrada pendiente para la FASE C — skill `demo-en-vivo` (anotado 2026-08-26)
+
+**NO es una idea de producto ni una deuda de código: es material que ya tenemos y que hay
+que convertir en skill cuando se haga la Fase C.** Se anota acá porque la próxima demo se
+va a armar dentro de meses y sin acordarse de nada de esto.
+
+**Por qué skill propia y no dentro de `spec-e2e`:** `spec-e2e` dispara al escribir o
+diagnosticar Playwright, y armar un seed de demo es trabajo de SQL. Cargarla ahí es
+repetir el modo de fallo de los 5 slash commands: existen, son correctos, y no corren
+porque nadie los invoca. Una demo además es **infrecuente y de alto riesgo** — el perfil
+donde peor funciona la memoria y mejor funciona un disparo automático.
+
+**La distinción que la funda:** un fixture de test necesita ser CORRECTO. Un escenario de
+demo necesita ser correcto **y CREÍBLE**. El segundo eje no lo verifica ningún `select`.
+
+Las tres reglas, todas medidas el 2026-08-26 armando Café Aroma:
+
+1. **NADA CONSTANTE.** Un valor repetido delata los datos justo donde vas a señalar.
+   Casos: la merma quedó en `−3` en las 50 filas de Ajustes (se cambió a variable por día
+   y por producto, escalada a la producción); y el Top Productos salía plano con selección
+   uniforme (se arregló con una bolsa ponderada por popularidad). Corolario: el patrón
+   tiene que ser el del negocio — pico de mañana en una cafetería, no de noche como el bar.
+
+2. **VERIFICAR LA PANTALLA, NO EL DATO.** "El dato existe" y "la pantalla lo muestra de
+   forma usable" son cosas distintas. Los dos hallazgos salieron de abrir el componente y
+   **ninguno era visible en el SQL**: `InventoryPage` → Movimientos NO filtra por producto
+   y pagina de a 25 (el guión pedía mostrar una secuencia que la UI no permite aislar), y
+   `AppLayout` → `NAV_GROUPS` deja Ventas y Mesas SIN permiso, o sea inocultables por
+   cualquier combinación de roles.
+
+3. **NO PROMETAS LO QUE LA APP NO CALCULA.** La merma se registra pero no se totaliza en
+   ningún lado (ni Inventario ni Reportes → Stock). Preguntar "¿cuánto estás botando?" y
+   mostrar solo una lista es abrir una puerta que no se puede cruzar.
+
+Sumar también el **checklist de 10 minutos antes** (impresión, turno abierto de otra
+corrida, banner de suscripción, residuo del lab, resolución real de la máquina) y el
+**guión de 13 minutos**, ambos ya redactados y probados en esta sesión.
+
+La evidencia larga va a la BITÁCORA; la skill se queda en forma corta y accionable, igual
+que las 10 reglas de clase.
+
 ## Ideas de producto — NO son pendientes, NO construir
 
 Esta sección NO es backlog. Nada de acá está aprobado ni pedido: son ideas
@@ -90,6 +131,85 @@ delivery, órdenes o catálogo, no tomar decisiones que hagan IMPOSIBLE un pedid
 con origen externo. No construir — solo no bloquear.
 
 ## Pendientes de verificar / deuda conocida
+
+### Auditar los 40+ encabezados restantes de `supabase/` (anotado 2026-08-31)
+
+**Queda para la siguiente pasada, con el hallazgo YA caracterizado** — se anota para no
+volver a pagar el diagnóstico.
+
+**Lo que ya está hecho:** se barrieron los 48 `.sql` buscando *declaraciones de estado de
+aplicación* y se corrigieron las 3 que había (`owner-wildcard-permission`,
+`compras-proveedores`, `fiado-clientes`). Esa subclase está cerrada. Reconfirmar con:
+
+```bash
+grep -rniE "no aplicada|ya aplicada|sin aplicar|pendiente de aplicar" supabase/*.sql
+```
+
+**Lo que NO se auditó, y es el trabajo pendiente:** el resto del CONTENIDO de esos
+encabezados. Cada `.sql` tiene entre 5 y 60 líneas de comentario describiendo qué hace, qué
+requiere y qué decidió — y **ninguna de esas afirmaciones se verificó contra el código
+actual**. Son ~40 archivos. Los tres tipos de afirmación, en orden de riesgo:
+
+1. **Referencias `archivo:línea`** — por la convención del proyecto solo son válidas si
+   apuntan a migraciones aplicadas (que no se editan). Las que apuntan a código vivo ya
+   están podridas: `onboard-org-paso1.sql` citaba `register-sale-void.sql:78` y
+   `SalesHistoryPage.tsx:109`.
+2. **Precondiciones entre migraciones** (*"requiere aplicada antes: X"*) — verificables
+   contra el repo, sin BD.
+3. **Descripciones de comportamiento** (*"no crea cash_movement"*, *"el retorno pierde
+   shift_open"*) — las más caras de verificar y las que más dirigen a quien lee.
+
+**Ya hay un caso confirmado de tipo 3 en el repo:** el comentario-catálogo de
+`multi-tenant-rbac.sql` lista **19 permisos** cuando el catálogo vivo tiene 23. No se corrige
+porque la migración está aplicada y es inmutable (R5) — es registro histórico. Pero alguien
+que la lea buscando "el catálogo" se lleva una lista incompleta, y ese es precisamente el
+modo de fallo de *"una nota que dirige mal cuesta más que una ausente"*.
+
+**Por qué no se hizo ahora:** son ~40 archivos y el criterio de verificación cambia por
+archivo. Es una pasada propia, no un arrastre de otra tarea.
+
+
+### 🔴 "Concedible pero inerte" — 6 permisos que la UI ofrece y que no gatean nada (hallado 2026-08-31)
+
+**Decisión: NO se arregla ahora.** Se anota porque *concedible pero inerte* es una **clase**
+de defecto que va a volver cada vez que se agregue un permiso, y porque su modo de fallo es
+el opuesto —y peor— que el de `ventas.anular`.
+
+**Los 6, medidos:** `pos.vender`, `caja.abrir`, `mesas.cobrar`, `productos.ver`,
+`reportes.stock`, `reportes.consolidado`. Están en `PERMISSION_GROUPS` —o sea, la matriz de
+Roles les dibuja su checkbox— y **no aparecen en un solo `can()` ni `has_permission()` del
+repo**: solo en seeds y en comentarios de catálogo. Para reconfirmar la lista:
+
+```bash
+for k in pos.vender caja.abrir mesas.cobrar productos.ver reportes.stock reportes.consolidado; do
+  echo "$k -> $(grep -rl "'$k'" src/ | grep -v permissions.ts | wc -l) usos reales"
+done
+```
+
+**Por qué es peor que `ventas.anular`.** Ese falla **cerrado**: el permiso se enforcea y no se
+puede conceder, así que alguien se queda sin poder hacer algo y **se queja** — el defecto se
+reporta solo. Este falla **abierto y en silencio**: un admin destilda "Cobrar mesa" del rol
+cajero, la UI se lo acepta, **y el cajero sigue cobrando**. No hay error, no hay test rojo, y
+el único que podría notarlo es justamente el que se quedó creyendo que ya lo había resuelto.
+La pantalla de Roles miente sobre lo que hace.
+
+**Las dos salidas, y por qué ninguna es gratis:**
+
+- **Escribirles el `can()` / `has_permission()` que falta.** Correcto en el papel, pero
+  `mesas.cobrar` y `caja.abrir` empezarían a gatear **en vivo, sobre clientes actuales**, con
+  roles que hoy no los tienen sembrados de forma consistente (ver la divergencia 16/20/18/23
+  del inventario de R1). Es un cambio de comportamiento disfrazado de arreglo, y el que se
+  queda afuera es un cajero en pleno turno.
+- **Sacarlos del catálogo.** Es lo barato y probablemente lo correcto —un permiso que no
+  gatea es una promesa falsa— pero cambia lo que el cliente ve en la pantalla de Roles. Va en
+  **commit propio y avisado**, nunca de arrastre con el generador de `seed_system_roles`.
+
+**La regla que deja, que es lo que hay que retener:** un permiso nuevo **no está terminado
+cuando se agrega al catálogo; está terminado cuando existe el gate que lo consume**. El
+catálogo es la promesa; el `can()` es la cosa real. Es R4 —verificar contra la cosa, no
+contra el proxy— aplicada al RBAC: que la clave figure en `PERMISSION_GROUPS` es exactamente
+el tipo de proxy que dice OK sin que nada funcione.
+
 
 - **Regenerar `database.types.ts` con `supabase gen types`** cuando se resuelva el acceso
   de management del CLI. Hoy la entrada de `register_sale_payment` (Functions) está agregada

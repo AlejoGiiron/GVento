@@ -81,6 +81,76 @@ const OBJETIVO = /supabase\/[^\s"'`;|&)]*\.sql/i
 //    perfecto. Es el modo de fallo que este hook existe para evitar, dentro del
 //    propio hook, y por la misma causa: un catch que convierte un error en
 //    silencio.
+
+// ============================================================
+// REGLA 2 — catalogo de permisos RBAC (desde 2026-08-31: 1 fuente + 1 generado)
+//
+// POR QUE NO MATCHEA POR RUTA: enumerar los archivos conocidos
+// (permissions.ts + los seeds que hoy existen) seria enumerar INSTANCIAS, que
+// es el defecto de clase que este hook existe para prevenir. Un `.sql` nuevo
+// con cualquier nombre que haga `update roles set permissions` no matchearia,
+// y ese es justamente el caso que ya nos mordio: `ventas.historial` se sembro
+// con un update de una pasada y `onboard-org.sql` quedo congelado.
+//
+// SE MATCHEA POR CONTENIDO, contra los tres anclajes del contrato — que no
+// dependen de donde viva el archivo:
+//   · PERMISSION_GROUPS / ALL_PERMISSION_KEYS  -> la fuente en TS
+//   · has_permission                            -> el enforcement en SQL
+//   · `roles` Y `permissions` juntos            -> cualquier SQL sobre la columna
+//
+// Se exigen las DOS palabras juntas a proposito: .claude/settings.json contiene
+// "permissions" pero no "roles", asi que no dispara sobre la config del harness.
+//
+// ⚠️ AGUJEROS QUE ESTO **NO** CIERRA, dichos explicitamente en vez de fingir
+//    cobertura total:
+//   1. Cambiar permisos desde la UI de Roles no escribe ningun archivo. Ningun
+//      hook lo ve. Lo cubre la RLS y protect_owner_role, no esto.
+//   2. Agregar un `can('nuevo.permiso')` en un componente SIN tocar el catalogo
+//      no dispara. Matchear `can(` haria ruido en cada componente. Ese caso es
+//      otro bug (consumir un permiso inexistente) y lo caza R1 al leerse.
+// ============================================================
+const PERMISOS_TS  = /PERMISSION_GROUPS|ALL_PERMISSION_KEYS/
+const PERMISOS_SQL = /has_permission/
+// Las dos palabras se exigen JUNTAS (no una alternancia): `permissions` sola
+// aparece en .claude/settings.json y en cualquier texto sobre permisos del
+// harness; `roles` sola aparece en prosa. Juntas senalan la tabla real.
+const PERMISOS_TABLA = /\broles\b/i
+const PERMISOS_COLUM = /\bpermissions\b/i
+
+/** Toca el catalogo de permisos, viva donde viva el archivo? */
+function tocaCatalogoDePermisos(texto) {
+  return PERMISOS_TS.test(texto)
+      || PERMISOS_SQL.test(texto)
+      || (PERMISOS_TABLA.test(texto) && PERMISOS_COLUM.test(texto))
+}
+
+const CHECKLIST_PERMISOS = `⚠️ Estás tocando el CATÁLOGO DE PERMISOS RBAC — y ESTO SE GENERA.
+
+Desde el 2026-08-31 el catálogo tiene UNA fuente y UN artefacto (antes eran 7 lados
+y las 4 copias del seed habían divergido: admin valía 16/20/18/23 según el archivo):
+
+  FUENTE     src/lib/permissions.ts   (PERMISSION_GROUPS + SYSTEM_ROLES)
+  GENERADO   supabase/seed-system-roles.sql   ← NO EDITAR A MANO
+  REGENERAR  pnpm gen:rbac      · CI: pnpm gen:rbac:check (falla si hay diff)
+
+Los seeds (lab-seed, onboard-org, onboard-org-paso1) ya NO llevan listas: llaman a
+seed_system_roles(v_org). Si estás por escribir un array de permisos dentro de un
+.sql, casi seguro estás en el archivo equivocado — editá permissions.ts y regenerá.
+
+TRIPWIRE: tests/roles.spec.ts clava el tamaño del catálogo con toBe(23). Si se pone
+rojo, mirá QUÉ permiso cambió ANTES de tocar el número.
+
+LO QUE ESTO **NO** ARREGLA, dicho explícitamente:
+ · Las organizaciones YA creadas siguen con el catálogo con el que nacieron. La
+   reconciliación es una migración APARTE y tiene que ser UNIÓN (agregar lo que
+   falta), nunca un "set permissions = <canónica>": eso pisa los ajustes del cliente.
+ · multi-tenant-rbac.sql está APLICADA ⇒ es registro histórico, no fuente. Su
+   comentario-catálogo tiene 19 claves y está desactualizado a propósito. No editar.
+ · 6 permisos del catálogo no gatean nada y fallan ABIERTO (pos.vender, caja.abrir,
+   mesas.cobrar, productos.ver, reportes.stock, reportes.consolidado). Ver
+   docs/DEUDAS.md → "concedible pero inerte". Que una clave esté en el catálogo NO
+   es evidencia de que algo esté protegido.`
+
 import fs from 'node:fs'
 
 let crudo
@@ -106,20 +176,32 @@ try {
 }
 
 const entrada = payload?.tool_input ?? {}
-const candidatos = [
-  entrada.file_path,   // Write, Edit
-  entrada.command,     // Bash
-  entrada.notebook_path,
-]
+
+// REGLA 1 mira DONDE se escribe (ruta o comando).
+const rutas = [entrada.file_path, entrada.command, entrada.notebook_path]
   .filter(v => typeof v === 'string')
   .join('\n')
-  .replace(/\\/g, '/')
+  .split('\\').join('/')
 
-if (!OBJETIVO.test(candidatos)) process.exit(0)
+// REGLA 2 mira QUE se escribe: el contenido, no la ruta. Por eso suma
+// `content` (Write) y `new_string` (Edit) — sin ellos, un archivo nuevo con
+// nombre cualquiera que siembre permisos pasaria invisible, que es justo la
+// enumeracion de instancias que esta regla evita.
+const contenido = [
+  entrada.file_path, entrada.command,
+  entrada.content,      // Write
+  entrada.new_string,   // Edit
+].filter(v => typeof v === 'string').join('\n')
+
+const avisos = []
+if (OBJETIVO.test(rutas)) avisos.push(CHECKLIST)
+if (tocaCatalogoDePermisos(contenido)) avisos.push(CHECKLIST_PERMISOS)
+
+if (avisos.length === 0) process.exit(0)
 
 process.stdout.write(JSON.stringify({
   hookSpecificOutput: {
     hookEventName: 'PreToolUse',
-    additionalContext: CHECKLIST,
+    additionalContext: avisos.join('\n\n' + '─'.repeat(70) + '\n\n'),
   },
 }))

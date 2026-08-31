@@ -84,6 +84,17 @@ La evidencia medida de cada una vive en [`docs/BITACORA.md`](docs/BITACORA.md), 
 pie de cada regla. **La regla no la necesita; la evidencia está para cuando alguien quiera
 discutirla.**
 
+> **🔴 POR QUÉ UN RECORDATORIO NO ALCANZA — y el hook sí.** Un recordatorio que se puede
+> **leer sin contestar se salta en silencio**; uno que **exige respuesta deja la omisión
+> visible**. Esa es la diferencia real entre este bloque y el hook `PreToolUse`, y no es de
+> contenido: los dos dicen lo mismo. Es de **distancia entre la carga y la decisión**.
+> Medido el 2026-08-26: CLAUDE.md estaba cargado y decía "allowlist, nunca deny-list", y el
+> guard deny-list igual se escribió — 200 líneas después de empezar la tarea, sin volver a
+> mirar. Una skill habría tenido el mismo destino: **se carga al empezar la tarea, no cuando
+> tomás la decisión.** Corolario para diseñar mecanismos: para lo que NO PUEDE FALLAR, hook
+> (se evalúa en cada llamada a herramienta y pide un acto visible); para el procedimiento de
+> una tarea infrecuente, skill; para la clase de decisión, estas reglas.
+
 > **Por qué existe este bloque.** Auditoría del 2026-08-26: de 36 afirmaciones verificables
 > del documento, 28 eran correctas y **las 8 falsas eran TODAS de estado**, ninguna de regla.
 > Y en 20 días hubo **11 errores cuya lección ya estaba escrita en el repo**. El problema
@@ -126,16 +137,38 @@ que un flujo se cae**. No hay error, no hay test rojo: hay una pantalla vacía m
 consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
 `grep -rln '<un valor del contrato>' src/ supabase/ tests/`.*
 
-1. **Catálogo de permisos RBAC — 6 archivos.** Fuente nominal: `src/lib/permissions.ts`
-   (`PERMISSION_GROUPS`). Copias: `supabase/multi-tenant-rbac.sql`, `supabase/lab-seed.sql`,
-   `supabase/onboard-org.sql`, `supabase/onboard-org-paso1.sql`, `supabase/onboard-org-paso3.sql`.
+1. **Catálogo de permisos RBAC — 7 lados.** Fuente nominal: `src/lib/permissions.ts`
+   (`PERMISSION_GROUPS`, 22 claves). Copias: `supabase/multi-tenant-rbac.sql`,
+   `supabase/lab-seed.sql`, `supabase/onboard-org.sql`, `supabase/onboard-org-paso1.sql`,
+   `supabase/onboard-org-paso3.sql` (comentado) — y **`tests/roles.spec.ts`**, que clava el
+   tamaño del catálogo con `expect(ALL_PERMISSION_KEYS.length).toBe(22)`. Ese séptimo lado
+   no es una copia más: es **el único mecanismo del repo que hoy vigila el contrato**, y por
+   eso se pone rojo a propósito cuando el catálogo crece. **No ajustar el número sin mirar
+   qué cambió** — ese rojo es el tripwire funcionando, no un test desactualizado.
    🔴 **Ya falló:** `ventas.historial` y `ventas.anular` se sembraron con un `update … where
    name='admin'` de UNA pasada sobre las orgs existentes; `onboard-org.sql` nunca se
    actualizó ⇒ **toda organización creada con él nacía sin Historial de ventas ni anulación**,
    más `sedes.gestionar`, `roles.gestionar` y `reportes.consolidado`, que nunca tuvieron
    migración. Corregido en `onboard-org-paso1.sql` (admin con 23 permisos).
-   ⚠️ Residuo abierto: **`ventas.anular` NO está en `PERMISSION_GROUPS`**, así que se
-   enforcea pero no se puede conceder desde la UI de Roles. Solo por SQL o por el comodín.
+   🔴 **Y SIGUE fallando: las 4 copias del seed divergen en 7 permisos** (medido 2026-08-31).
+   `admin` vale **16 / 20 / 18 / 23** según el archivo (`multi-tenant-rbac` / `lab-seed` /
+   `onboard-org` / `paso1`), y `cajero` **8 / 10 / 9 / 10**. Difieren en `compras.gestionar`,
+   `fiado.gestionar`, `ventas.historial`, `ventas.anular`, `reportes.consolidado`,
+   `sedes.gestionar` y `roles.gestionar`. **`mozo` es el único idéntico en las 4** — es el
+   único que nunca se tocó, que es exactamente la forma del defecto: lo que se agregó se
+   sembró en el archivo que estaba abierto ese día. Para reconfirmarlo:
+   `grep -A12 "'admin', true" supabase/lab-seed.sql supabase/onboard-org.sql supabase/onboard-org-paso1.sql`
+   ⚠️ **DOS residuos abiertos, en direcciones OPUESTAS** — el inventario listaba solo el primero:
+   - **`ventas.anular` se enforcea pero NO está en `PERMISSION_GROUPS`** ⇒ no se puede conceder
+     desde la UI de Roles, solo por SQL o por el comodín. Falla **cerrado**: alguien no puede
+     hacer algo, y se queja.
+   - **6 permisos son concedibles y no gatean nada.** Falla **abierto** y en silencio, que es
+     peor. Entrada propia en [`docs/DEUDAS.md`](docs/DEUDAS.md) → *"concedible pero inerte"*.
+   → **Salida de fondo decidida (2026-08-31), pendiente de construir:** generar
+   `seed_system_roles(p_org)` desde `PERMISSION_GROUPS` + una constante `SYSTEM_ROLES` nueva,
+   y que los seeds la **llamen** en vez de inlinear listas. Eso lleva 7 lados a 2 (fuente +
+   artefacto generado). Generar bloques y pegarlos en cada seed sería cosmético: una copia
+   generada se edita a mano igual de fácil que una escrita a mano.
 
 2. **Enum `subscription_status` — 4 lados, DOS REPOS.** El `CHECK` en
    `supabase/organization-subscription.sql`, la constante `ESTADOS` de
@@ -318,7 +351,7 @@ VITE_GVENTO_SUPABASE_URL=
 VITE_GVENTO_SUPABASE_ANON_KEY=
 Ver .env.example para la lista completa.
 
-## Cómo se escribe una nota en este documento (convención)
+## Cómo se escribe una nota — en este documento Y en los `.sql` (convención)
 
 Salió de auditar las 36 afirmaciones verificables del documento contra el código
 (2026-08-26). **Las 28 correctas eran reglas y mecanismos. Las 8 falsas eran TODAS
@@ -339,6 +372,61 @@ Ninguna regla resultó falsa. El estado es lo que se pudre, así que se escribe 
 - **UNA NOTA QUE DIRIGE MAL CUESTA MÁS QUE UNA AUSENTE.** Las dos peores del documento no
   eran omisiones: describían código eliminado y una relación de ramas invertida. Si no
   podés verificar una afirmación, no la escribas como hecho.
+
+### El estado de aplicación de una migración NO se declara (2026-08-31)
+
+**LA CLASE, en una frase: un `.sql` que declara su estado de aplicación es un dato que
+caduca, y vive FUERA DEL ALCANCE de la auditoría de este documento.** Esa segunda mitad es
+la que importa — no es que las notas de los `.sql` sean peores, es que **nadie las estaba
+mirando**. La auditoría del 2026-08-26 revisó `CLAUDE.md`, encontró 8 afirmaciones de estado
+falsas y concluyó que el problema estaba acotado al documento. **Miró el documento y no los
+`.sql`**, así que las que vivían ahí sobrevivieron intactas a la limpieza.
+
+Al barrer la clase (R3) el 2026-08-31 aparecieron **3 encabezados que declaraban "NO aplicada
+todavía", y las 3 eran falsas**: `owner-wildcard-permission.sql` (mintió >2 meses),
+`compras-proveedores.sql` y `fiado-clientes.sql`. Ninguna era ambigua: las tres estaban
+aplicadas y corriendo en producción. **Dos de las tres se podían refutar sin tocar la BD** —
+`compra-no-toca-caja.sql` dice en su propio encabezado *"no edita compras-proveedores.sql ya
+aplicada"*, o sea que el repo se contradecía a sí mismo y nadie lo había leído junto.
+
+🔴 **Corolario sobre el alcance de cualquier auditoría futura:** una auditoría que encuentra
+N defectos en el lugar donde miró no probó nada sobre los lugares donde no miró. Antes de
+declarar cerrada una clase, enumerá dónde MÁS puede vivir. Acá el costo fue bajo porque
+re-aplicar era inofensivo; con una migración destructiva, un "NO aplicada" falso es
+exactamente cómo se borran datos ajenos.
+
+**La raíz no es descuido: es que no hay ledger.** Las migraciones se aplican a mano desde el
+SQL Editor del Dashboard, así que **nada en el sistema sabe qué se corrió**. Un comentario es
+el único registro, y un comentario no se actualiza al aplicar — se actualiza cuando alguien
+se acuerda, que es nunca. Es el mismo error de forma que documentar qué rama va adelante en
+vez de escribir `git rev-list --count develop..main`.
+
+**LA CONVENCIÓN: un `.sql` describe QUÉ hace y sus PRECONDICIONES, nunca si ya corrió.**
+La BD es la fuente de esa verdad; el archivo no puede serlo, porque no se entera. Un
+encabezado bien escrito responde: qué cambia, qué necesita aplicado antes, qué pasa si se
+re-aplica — y para "¿ya corrió?" entrega la query, no la respuesta.
+
+**En detalle:**
+
+- 🔴 **NO escribir "aplicada" ni "NO aplicada todavía".** Es un dato sobre el mundo, y el
+  archivo no tiene forma de enterarse cuando el mundo cambia.
+- ✅ **En su lugar, la QUERY que lo responde.** No caduca, porque es una instrucción:
+  `select 1 from pg_proc where proname = '<la función>';` o el `information_schema` que
+  corresponda. Va bajo el rótulo **`NO DEDUZCAS EL ESTADO DE ESTE COMENTARIO — correlo:`**,
+  redactado como orden para que no se lea como decoración.
+- ✅ **Declarar en cambio el MODO DE FALLO AL RE-APLICAR**, que sí es atemporal porque es una
+  propiedad del SQL, no del mundo. Tres categorías: *idempotente* (`create or replace` +
+  upsert), *falla y hace rollback* (`create table` sin `if not exists` dentro de
+  `begin/commit`), o *destructivo*. **Este es el campo que de verdad importaba** y que ninguno
+  de los 3 encabezados tenía: acá re-aplicar era inofensivo, pero en una migración destructiva
+  un "NO aplicada" falso es exactamente cómo se borran datos ajenos.
+- 📌 **Si querés dejar constancia de que se aplicó**, fechala y decí contra qué se verificó
+  ("verificado el 2026-08-31: 4 orgs con comodín"), nunca en presente pelado. Una afirmación
+  fechada es historia honesta; una en presente es una bomba de tiempo.
+
+**Salida de fondo, cuando haya margen:** una tabla `schema_migrations` (o pasar a
+`supabase migration`) convierte esto en un dato consultable de verdad y hace innecesaria toda
+la convención. Hasta entonces, la query de verificación es el sustituto barato.
 
 ## Git
 - Rama activa de desarrollo: develop
