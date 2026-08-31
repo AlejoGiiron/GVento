@@ -98,7 +98,9 @@ select name, (config->>'es_laboratorio')::bool as es_lab, created_at
 
 **LabCentro existe por una restricción de G-Centro**, no de G-Vento: su esquema tiene un
 unique `(producto_id, organizacion_externa_id)` que impide vincular dos contratos al mismo
-tenant, y LAB ya estaba vinculado. Sirve para probar el lado de ESCRITURA (crear contrato,
+tenant, y LAB ya estaba vinculado. *(Esto último es lo que reportó G-Centro; **vive en su
+repo y su BD, así que no se puede verificar desde acá** — se escribe como lo que es, un
+dicho de terceros, no como hecho comprobado.)* Sirve para probar el lado de ESCRITURA (crear contrato,
 vincular, escribir la bandera con `aplicar-estado`, que usa service role). **No sirve para
 ver el banner:** sin sede ni usuarios nadie puede iniciar sesión ahí. Para efecto visible,
 LAB.
@@ -441,6 +443,25 @@ Ninguna regla resultó falsa. El estado es lo que se pudre, así que se escribe 
 - **UNA NOTA QUE DIRIGE MAL CUESTA MÁS QUE UNA AUSENTE.** Las dos peores del documento no
   eran omisiones: describían código eliminado y una relación de ramas invertida. Si no
   podés verificar una afirmación, no la escribas como hecho.
+- 🔴 **Y LA PEOR DE TODAS: UNA NOTA QUE DECLARA UNA PROTECCIÓN INEXISTENTE.** Es una
+  subclase de la anterior y es más grave, porque **no dirige mal: TRANQUILIZA mal.** Una nota
+  que apunta al lugar equivocado te hace perder una tarde; una que dice *"esto está aislado"*
+  o *"el check lo impide"* hace que **dejes de mirar**, y el costo aparece recién cuando algo
+  se rompe del otro lado de la barrera que no existía.
+  **Medido el 2026-08-31 (caso #13):** `docs/DEUDAS.md` afirmaba que LAB estaba en un
+  "Supabase separado de producción", que `VITE_GVENTO_*` apuntaba "al Supabase del lab", y
+  que "los health checks impiden correr E2E contra producción". Las tres falsas: LAB es una
+  organización dentro de la MISMA base que los clientes, `.env.test` ni siquiera define esa
+  variable, y el health check verifica la **organización de las credenciales**, no la base.
+  🔴 **El detalle que define la clase:** el repo YA contenía la verdad en tres archivos
+  (`tests/README.md`, `.env.test.example`, `create-user.spec.ts`, todos con "la BD es UNA
+  sola"). El ÚNICO que decía lo contrario era el documento de PLANIFICACIÓN — o sea el que se
+  lee para decidir, no el que se lee al codear. **Una garantía falsa en el documento de
+  planificación le gana a tres advertencias correctas enterradas en el código.**
+  **Al escribir una nota de protección, entonces:** decí qué impide **y qué NO**, y nombrá el
+  mecanismo concreto (aquí: *"RLS + credenciales de LAB; el check mira la organización, no la
+  base"*). Una protección sin mecanismo nombrado no es verificable, y lo que no es
+  verificable envejece hacia la mentira.
 
 ### El estado de aplicación de una migración NO se declara (2026-08-31)
 

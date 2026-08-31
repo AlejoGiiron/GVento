@@ -179,6 +179,35 @@ a caer justo en esta trampa.
 se implemente `reportes.consolidado`. Lo que llegue antes.
 
 
+### ✅ Barrido de AFIRMACIONES DE PROTECCIÓN — hecho el 2026-08-31, resultado abajo
+
+Disparado por el caso #13. Se grepearon `CLAUDE.md` y `docs/DEUDAS.md` por
+`impide|impiden|evita|garantiza|protege|aisla|separado|nunca puede|imposible|bloquea`, y se
+verificó cada coincidencia contra el código. Se anota el RESULTADO para que nadie lo repita:
+
+| afirmación | veredicto |
+|---|---|
+| DEUDAS · "LAB en Supabase separado de producción" | ❌ **falsa** → corregida |
+| DEUDAS · "`VITE_GVENTO_*` apunta al Supabase del lab" | ❌ **falsa** → corregida |
+| DEUDAS · "los health checks impiden correr contra producción" | ⚠️ **parcial** → precisada |
+| DEUDAS · "esto evita correr tests contra datos reales" | ⚠️ **parcial** → precisada |
+| CLAUDE.md · "un hook no puede garantizar su propia existencia" | ✅ cierta (y es una *limitación* declarada, no una protección) |
+| CLAUDE.md · "`ventas.anular` falla cerrado" | ✅ cierta |
+| DEUDAS · "nunca por RLS relajada" (pedidos entre negocios) | ✅ es una REGLA futura, no una afirmación de estado |
+| `playwright.config.ts` · "`reuseExistingServer:false` + `strictPort` ⇒ nunca se conecta a otra app" | ✅ cierta — configurado así, y el health check #1 lo respalda |
+| `tests/README.md` · "vive en el **mismo** Supabase que la app" | ✅ cierta |
+| `.env.test.example` · "la BD es UNA sola" | ✅ cierta |
+| CLAUDE.md · unique `(producto_id, organizacion_externa_id)` de G-Centro | ⏳ **no verificable desde este repo** (otro repo, otra BD) → marcada como dicho de terceros |
+
+**Regla que deja el barrido, y es el criterio para escribir la próxima:** una afirmación de
+protección tiene que nombrar **el mecanismo** y **su límite**. "Está aislado" no es
+verificable; "aislado por RLS + credenciales de LAB, y el check mira la organización, no la
+base" sí. Lo que no es verificable envejece hacia la mentira, y una garantía falsa **apaga la
+vigilancia** en vez de solo desviarla.
+
+⏳ **Lo que este barrido NO cubrió:** los encabezados de `supabase/*.sql` (entrada de abajo)
+y los docblocks de `src/`. Mismo modo de fallo, otro alcance.
+
 ### Auditar los 40+ encabezados restantes de `supabase/` (anotado 2026-08-31)
 
 **Queda para la siguiente pasada, con el hallazgo YA caracterizado** — se anota para no
@@ -355,19 +384,53 @@ el tipo de proxy que dice OK sin que nada funcione.
   La tabla con el origen de cada una está en `CLAUDE.md` → *"Las organizaciones de la BD"*.
   Los UUID se obtienen con la query del encabezado de
   `supabase/organization-subscription.sql` (no se hardcodean acá: se leen de la BD).
-- **✅ Laboratorio listo.** Existe la organización **LAB** (Supabase separado de
-  producción) con **2 sedes**, los usuarios **owner.test** (rol owner) y
-  **cajero.test** (rol cajero) con sus profiles, y productos de prueba. La suite
-  E2E corre contra LAB de forma determinista. **NUNCA correr E2E contra producción**
-  (org G-10): los health checks lo impiden.
-- **Credenciales en `.env.test`** (gitignored): `E2E_OWNER_EMAIL/PASSWORD` y
-  `E2E_CASHIER_EMAIL/PASSWORD`. El backend (`VITE_GVENTO_*`) apunta al Supabase del
-  lab. Ver `.env.test.example`.
+- 🔴 **CORREGIDO EL 2026-08-31 — acá había TRES afirmaciones falsas sobre el aislamiento
+  del laboratorio, y las tres tranquilizaban.** Decía "(Supabase separado de producción)",
+  "el backend (`VITE_GVENTO_*`) apunta al Supabase del lab" y "los health checks lo
+  impiden". **Ninguna de las tres era cierta como estaba escrita.** Lo notable: el repo ya
+  contenía la verdad en tres lugares —`tests/README.md` ("vive en el **mismo** Supabase que
+  la app"), `.env.test.example` ("⚠️ La BD es UNA sola") y `create-user.spec.ts` ("la BD es
+  UNA sola; el service role de este proyecto es también el de G-10 y Salchimelo")— y el único
+  archivo que decía lo contrario era **este**, el de planificación, o sea el que se lee al
+  decidir. Ver la clase en `CLAUDE.md` → *"una nota que declara una protección inexistente"*.
+
+- **✅ Laboratorio listo.** Existe la organización **LAB** con **2 sedes**, los usuarios
+  **owner.test** (rol owner) y **cajero.test** (rol cajero) con sus profiles, y productos de
+  prueba. La suite E2E corre contra LAB de forma determinista.
+
+- 🔴 **CUÁL ES EL AISLAMIENTO REAL.** LAB vive en el **MISMO proyecto Supabase que
+  producción** — la misma base que G-10, Salchimelo, Café Aroma y LabCentro. **No hay
+  separación de base de datos.** El aislamiento es **por ORGANIZACIÓN**, y descansa en dos
+  cosas:
+  1. **RLS**, que acota cada consulta a la organización del usuario autenticado.
+  2. **Las credenciales de `.env.test`**, que son de usuarios de LAB.
+
+  Corolario que hay que tener presente: **una falla de RLS no es un bug de aislamiento del
+  lab, es una fuga entre clientes.** No hay una segunda barrera detrás.
+
+- **Credenciales en `.env.test`** (gitignored): `E2E_OWNER_EMAIL/PASSWORD`,
+  `E2E_CASHIER_EMAIL/PASSWORD`, `E2E_WAITER_*`. **`.env.test` NO define
+  `VITE_GVENTO_SUPABASE_URL`** — el dev server que levanta Playwright lee `.env`, o sea el
+  backend de PRODUCCIÓN. Verificable: `grep VITE_GVENTO .env.test` no devuelve nada.
+  Ver `.env.test.example`.
+
+- ⚠️ **`E2E_SERVICE_ROLE_KEY` BYPASSEA EL RLS**, que es la barrera principal. Con la BD
+  compartida, esa key es la de TODAS las organizaciones, no "la del lab" (ya está advertido
+  en `.env.test.example` y en `create-user.spec.ts`). Hoy la usan **dos** specs, las dos
+  acotadas por id: `create-user.spec` (borra el usuario de prueba que ella misma creó) y
+  `suscripcion-estado.spec` (un `update ... .eq('id', orgId)` de LAB para probar el CHECK).
+  Reconfirmar con `grep -rn SERVICE_ROLE tests/`. Un spec nuevo que la use sin `.eq()`
+  acotado escribe sobre datos de clientes reales sin que nada lo frene.
 - **Doble health check en `tests/global-setup.ts`** (defensa en profundidad):
   (1) la app servida en el puerto dedicado **5180** es G-Vento (no otra app);
   (2) **las credenciales pertenecen a la org LAB** — hace login real, consulta
   `organizations` (RLS solo deja ver la propia) y ABORTA la suite si no es LAB.
-  Esto evita correr tests (que mutan estado) contra datos reales.
+  ⚠️ **Qué impide y qué NO.** Impide que la suite mute los datos de **otra organización**:
+  si `.env.test` tuviera credenciales de G-10, el check aborta. **NO impide** correr contra
+  la base de datos de producción — no la mira, y de hecho SIEMPRE se corre contra ella
+  (`.env.test` no define la URL). Y no cubre lo que pase por `E2E_SERVICE_ROLE_KEY`, que
+  saltea el RLS. Es una protección real y acotada; escribirla como "impide correr contra
+  producción" es lo que la volvía una garantía falsa.
 - **`retries: 0` por defecto** (lab determinista; un fallo es un fallo limpio que se
   investiga). Override puntual con `E2E_RETRIES=N`.
 - **Suites pendientes de correr en el lab:** `tests/extras.spec.ts`,
