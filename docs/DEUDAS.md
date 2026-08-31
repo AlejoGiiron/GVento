@@ -179,6 +179,35 @@ a caer justo en esta trampa.
 se implemente `reportes.consolidado`. Lo que llegue antes.
 
 
+### `.gitattributes` con `* text=auto eol=lf` (anotado 2026-08-31)
+
+**Commit propio, no de polizón.** Se anota con su razón porque el síntoma ya apareció una vez
+y va a volver.
+
+**El problema:** el repo tiene `core.autocrlf=true` y **ningún `.gitattributes`**, así que
+git materializa los archivos con CRLF en Windows mientras las herramientas los escriben con
+LF. **Cualquier artefacto generado que se compare byte a byte contra su fuente va a fallar
+espurio en un checkout limpio.** Ya pasó con `supabase/seed-system-roles.sql`: el
+`gen:rbac:check` daba verde en la rama donde se había generado y rojo en develop tras el
+fast-forward, con el mismo árbol.
+
+**Por qué importa más de lo que parece:** un check que falla sin motivo se desactiva a la
+semana. El mecanismo que existe para que el catálogo de permisos no vuelva a divergir se
+habría apagado solo, y el defecto que costó tres sesiones habría vuelto sin que nadie lo note.
+
+**El parche que ya está puesto** es local a ese generador: normaliza CRLF→LF antes de
+comparar. Resuelve el caso, **no la clase** — el próximo artefacto generado empieza de cero.
+
+**La salida de fondo:** `* text=auto eol=lf` en `.gitattributes` (o al menos
+`*.sql text eol=lf` + `*.mjs text eol=lf`). Cierra el problema para todos los archivos de una
+vez. **Por qué no se hizo junto con el fix:** renormaliza los finales de línea de TODO el
+repo, así que el diff son miles de líneas sobre decenas de archivos y taparía cualquier
+cambio real que viajara en el mismo commit. Va solo, con `git add --renormalize .` y nada
+más adentro.
+
+**Señal para retomarlo:** el próximo generador o snapshot que se compare byte a byte. O
+simplemente una tarde tranquila — es barato y no tiene riesgo funcional.
+
 ### ✅ Barrido de AFIRMACIONES DE PROTECCIÓN — hecho el 2026-08-31, resultado abajo
 
 Disparado por el caso #13. Se grepearon `CLAUDE.md` y `docs/DEUDAS.md` por

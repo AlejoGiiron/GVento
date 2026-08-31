@@ -295,6 +295,15 @@ reales. Y antes de copiar un patrón de referencia, `command -v` sus dependencia
 evidencia de que funcione acá:** `jq` no está instalado en esta máquina y el hook habría
 nacido mudo si se copiaba el ejemplo oficial.
 
+**COROLARIO PARA ARTEFACTOS GENERADOS (2026-08-31):** verificar contra el archivo que
+**acabás de escribir** NO es verificar contra el que **git materializa**. Con
+`core.autocrlf=true` y sin `.gitattributes` son literalmente archivos distintos: el tuyo
+sale con LF y el del checkout viene con CRLF. Medido: `gen:rbac:check` pasaba en la rama
+donde se había generado el `.sql` y **fallaba en develop tras el fast-forward, con el mismo
+árbol**. El archivo recién escrito es un PROXY del archivo real; el archivo real es el que
+sale del checkout. **Un check de artefacto generado se valida después de un
+`git checkout`/`stash`, no en la sesión que lo creó.**
+
 → **Evidencia:** más abajo en este archivo, *"Aprendizajes de proyectos hermanos (G-Quota)"* ·
 y [`docs/BITACORA.md`](docs/BITACORA.md) → *"Trampas de TERMINAL"*.
 
@@ -385,6 +394,18 @@ de redacción de más* no pueden fallar contra un no-op: son legítimos y van MA
 
 **Modo de fallo:** el test pasa **por la razón equivocada** y da confianza sin cobertura.
 Medido: de 246 tests, **25 sobrevivieron al mutante y 58 más eran invisibles para él**.
+
+🔴 **EL LÍMITE DE ESTA TÉCNICA, medido el 2026-08-31 — conviene saberlo ANTES de confiar en
+un "los 4 mutantes murieron".** **Un mutante no encuentra lo que la fixture no reproduce.**
+La auditoría por mutación detecta **tests vacuos** —los que pasarían con el sujeto convertido
+en identidad—, pero **no detecta casos que la fixture nunca representa**: para el mutante,
+esos casos simplemente no existen. Caso: los 4 mutantes de `gen:rbac:check` murieron
+correctamente, y aun así el check estaba roto para el escenario real (archivo con CRLF salido
+de un checkout), porque **los 4 corrieron sobre el mismo archivo recién generado, con LF**.
+La mutación validó la lógica de comparación sobre la única entrada que la fixture conocía.
+**Corolario:** "todos los mutantes murieron" prueba que los tests miran al sujeto, **no** que
+las entradas cubran el mundo. Son dos preguntas distintas y la mutación solo contesta la
+primera; la segunda se contesta enumerando de dónde salen los datos reales.
 
 → **Evidencia:** [`docs/BITACORA.md`](docs/BITACORA.md) → *"Auditar una suite por MUTACIÓN, no
 leyéndola"*.
