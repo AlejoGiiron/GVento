@@ -53,3 +53,6 @@ design_handoff_*/
 
 # Temporal que genera vite al cargar vite.config.ts
 vite.config.ts.timestamp-*.mjs
+
+# Empaquetado manual de las capturas — se regenera con `pnpm capturas`, no se versiona
+capturas-landing.zip
