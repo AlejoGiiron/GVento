@@ -12,6 +12,8 @@ const EGRESO = 12000 + (Date.now() % 3000)      // egreso único
 const EXPECTED = OPENING - EGRESO               // sin ventas ni ingresos
 const DECLARED = EXPECTED - 5000                // diferencia fija: −5000 → faltante
 const REASON = `E2E gasto ${SUFFIX}`            // motivo custom distintivo
+const COMENTARIO = `E2E cierre ${SUFFIX} — faltaron 5.000, los repone Ana`
+const DECL_NEQUI = 7000 + (Date.now() % 900)    // declarado en Nequi, único
 
 // Formato de miles es-CO ("134.567") — substring presente en la celda COP,
 // evita el símbolo/espacio de la moneda.
@@ -46,6 +48,11 @@ test.describe.serial('Historiales de turnos y gastos', () => {
     await page.getByRole('button', { name: 'Cerrar turno', exact: true }).click()
     await expect(page.getByText('Cerrar turno de caja')).toBeVisible()
     await page.getByTestId('close-shift-declared').fill(String(DECLARED))
+    // Declarado en un método NO-efectivo + comentario: es lo que el detalle
+    // tiene que devolver después, y sin esto el turno no ejercería el arqueo
+    // multi-método ni el comentario (las dos mitades del pedido del cliente).
+    await page.getByTestId('pay-declared-nequi').fill(String(DECL_NEQUI))
+    await page.getByTestId('close-shift-comment').fill(COMENTARIO)
     await page.getByRole('button', { name: 'Confirmar cierre' }).click()
     await expect(page.getByText('Sin turno')).toBeVisible({ timeout: 15_000 })
 
@@ -65,6 +72,50 @@ test.describe.serial('Historiales de turnos y gastos', () => {
     await expect(row.getByTestId('shift-declared')).toContainText(cop(DECLARED))
     await expect(row.getByTestId('shift-expected')).toContainText(cop(EXPECTED))
     await expect(row.getByTestId('shift-diff')).toContainText('faltante')
+  })
+
+  test('el detalle del turno muestra el arqueo y el comentario, sin reimprimir', async ({ page }) => {
+    // EL PEDIDO DEL CLIENTE: ver todo el arqueo y el comentario en pantalla. Se
+    // afirma contra lo que se DECLARÓ en el test anterior, no contra lo que la
+    // modal calcule: si la pantalla derivara distinto que el comprobante, acá
+    // se ve.
+    await loginAsOwner(page)
+    await page.goto('/historial-turnos')
+
+    const row = page.getByTestId('shift-history-row')
+      .filter({ has: page.getByTestId('shift-opening').filter({ hasText: cop(OPENING) }) })
+      .first()
+    await expect(row).toBeVisible({ timeout: 15_000 })
+
+    // "Ver detalle" está SIEMPRE habilitado — es la diferencia con reimprimir.
+    const verDetalle = row.getByTestId('shift-detail-btn')
+    await expect(verDetalle).toBeEnabled()
+    await verDetalle.click()
+
+    const modal = page.getByTestId('shift-detail-modal')
+    await expect(modal).toBeVisible()
+
+    // Apertura, cuadre de efectivo y diferencia: lo declarado, no otra cosa.
+    await expect(modal.getByTestId('detail-opening')).toContainText(cop(OPENING))
+    await expect(modal.getByTestId('detail-expected')).toContainText(cop(EXPECTED))
+    await expect(modal.getByTestId('detail-declared')).toContainText(cop(DECLARED))
+    await expect(modal.getByTestId('detail-difference')).toContainText(cop(5000))
+
+    // El egreso del turno, releído por shift_id.
+    await expect(modal.getByTestId('detail-mov-out')).toContainText(cop(EGRESO))
+
+    // El arqueo por método trae lo declarado en Nequi.
+    await expect(modal.getByTestId('detail-arqueo-nequi')).toContainText(cop(DECL_NEQUI))
+
+    // Y el comentario, que era la otra mitad del pedido.
+    await expect(modal.getByTestId('detail-comment')).toContainText(COMENTARIO)
+
+    // Con snapshot, reimprimir se ofrece habilitado DENTRO de la modal.
+    await expect(modal.getByTestId('shift-reprint')).toBeEnabled()
+
+    // Contraste: este turno SÍ tiene arqueo, así que el aviso NO aparece. Sin
+    // este negativo, un aviso que se mostrara siempre pasaría desapercibido.
+    await expect(modal.getByTestId('detail-sin-arqueo')).toHaveCount(0)
   })
 
   test('el egreso aparece en el historial de gastos y suma al total', async ({ page }) => {

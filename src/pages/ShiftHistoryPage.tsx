@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { ClipboardList, Calendar, ChevronLeft, ChevronRight, Printer } from 'lucide-react'
+import { ClipboardList, Calendar, ChevronLeft, ChevronRight, Eye } from 'lucide-react'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useRestaurantConfig } from '@/hooks/useRestaurantConfig'
 import { getShiftMovementTotals } from '@/lib/supabase-helpers'
-import { printCashReport, buildCashReportData } from '@/lib/printer'
+import { ShiftDetailModal } from '@/components/shift/ShiftDetailModal'
 import {
   useShiftHistory, SHIFTS_PAGE_SIZE,
   type ClosedShiftRow, type HistoryScope,
@@ -63,18 +63,21 @@ export function ShiftHistoryPage() {
   // Reimpresión del arqueo: mismo permiso que P3 (la ruta ya exige caja.cerrar).
   const canReprint = can('caja.cerrar')
 
-  // Reimprime el comprobante desde el SNAPSHOT persistido (no recomputa el
-  // esperado → inmune al bug de ventana). Movimientos re-leídos por shift_id.
-  // Mismo builder/print que el cierre → comprobante idéntico al original.
-  const handleReprint = async (row: ClosedShiftRow) => {
-    if (!row.close_reconciliation) return
-    const totals = await getShiftMovementTotals(row.id)
-    printCashReport(buildCashReportData(row, {
-      restaurantName: restaurant?.name,
-      restaurantAddress: restaurant?.address,
-      movementsIn: totals.in,
-      movementsOut: totals.out,
-    }))
+  // Detalle del turno. Los movimientos se re-leen por shift_id — la MISMA
+  // llamada que ya hacía la reimpresión, que ahora vive dentro de la modal.
+  //
+  // "Ver detalle" está SIEMPRE habilitado, también en turnos sin arqueo por
+  // método: la fila de F1 (apertura, cierre, quién, declarado vs esperado)
+  // existe en todo turno cerrado, y era justamente lo que el cliente no podía
+  // consultar sin reimprimir. El que se deshabilita sin snapshot es el botón de
+  // reimprimir, adentro.
+  const [detalle, setDetalle] = useState<
+    { row: ClosedShiftRow; movements: { in: number; out: number } } | null
+  >(null)
+
+  const handleVerDetalle = async (row: ClosedShiftRow) => {
+    const movements = await getShiftMovementTotals(row.id)
+    setDetalle({ row, movements })
   }
 
   const [from, setFrom] = useState(daysAgoBogota(30))
@@ -206,24 +209,19 @@ export function ShiftHistoryPage() {
                     </span>
                   </span>
                   <span style={{ textAlign: 'right' }}>
-                    {canReprint && (
-                      <button
-                        data-testid="shift-reprint"
-                        onClick={() => handleReprint(row)}
-                        disabled={row.close_reconciliation == null}
-                        title={row.close_reconciliation != null ? 'Reimprimir arqueo' : 'Sin arqueo por método'}
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 5,
-                          padding: '6px 10px', borderRadius: 7, border: '1px solid #e5e7eb',
-                          background: row.close_reconciliation != null ? '#fff' : '#f8fafc',
-                          color: row.close_reconciliation != null ? '#334155' : '#cbd5e1',
-                          cursor: row.close_reconciliation != null ? 'pointer' : 'not-allowed',
-                          fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
-                        }}
-                      >
-                        <Printer size={13} /> Arqueo
-                      </button>
-                    )}
+                    <button
+                      data-testid="shift-detail-btn"
+                      onClick={() => handleVerDetalle(row)}
+                      title="Ver el arqueo y el comentario del cierre"
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 5,
+                        padding: '6px 10px', borderRadius: 7, border: '1px solid #e5e7eb',
+                        background: '#fff', color: '#334155',
+                        cursor: 'pointer', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
+                      }}
+                    >
+                      <Eye size={13} /> Ver detalle
+                    </button>
                   </span>
                 </div>
               )
@@ -256,6 +254,17 @@ export function ShiftHistoryPage() {
             </button>
           </div>
         </div>
+      )}
+
+      {detalle && (
+        <ShiftDetailModal
+          row={detalle.row}
+          movements={detalle.movements}
+          restaurantName={restaurant?.name}
+          restaurantAddress={restaurant?.address}
+          canReprint={canReprint}
+          onClose={() => setDetalle(null)}
+        />
       )}
     </div>
   )
