@@ -187,6 +187,154 @@ Resultado real de aplicarlo a `sentry.test.ts` (2026-08-07): de 246 tests,
 **221 murieron con el mutante (correcto), 25 sobrevivieron** — 8 legítimos y 17 con
 defecto. Y la clase invisible al mutante sumó 58 más. Ver la deuda de la auditoría.
 
+### 🔴 Caso #15 — la nota que se declara verificada, y las dos pruebas que no probaban (2026-09-07)
+
+Salió de la sesión de `delivered_at` + abono en lote. **Tres hallazgos de la misma
+familia: en los tres, algo que parecía evidencia no lo era.**
+
+---
+
+#### 1. La nota falsa que decía "verificado" — subtipo peor de la clase
+
+`supabase/delivery-delivered-at.sql` afirmó, en el encabezado y en el `comment on column`:
+
+> *"orders.updated_at es un default now() sin trigger, o sea la hora de INSERCIÓN, no la del
+> último cambio (verificado en schema.sql)"*
+
+**Falso.** `schema.sql` define `trg_orders_updated_at`, un BEFORE UPDATE que ejecuta
+`handle_updated_at()` y hace `new.updated_at = now()`.
+
+🔴 **LA DISTINCIÓN QUE HAY QUE GUARDAR, porque es la que sube el costo un escalón:**
+una nota falsa **desorienta** — el que la lee se va al lugar equivocado y vuelve. Una nota
+falsa **que se declara verificada DESACTIVA LA VERIFICACIÓN DEL QUE LA LEE.** No manda a
+mirar mal: **convence de no mirar**, con la autoridad de un chequeo que nunca ocurrió.
+El paréntesis "(verificado en schema.sql)" era la parte dañina. Sin él, el próximo lector
+habría ido a comprobarlo; con él, no tenía por qué.
+
+Corregido en `supabase/fix-delivered-at-comentario.sql` — archivo NUEVO, porque la original
+ya estaba aplicada en el laboratorio y en la nube (R5). La original queda como registro de lo
+que se ejecutó, con su error incluido.
+
+**La columna seguía siendo necesaria, por otro motivo.** Que `updated_at` se mantenga no la
+vuelve un sustituto: dice *"cuándo se tocó por última vez"*, no *"cuándo se entregó"*. Medido
+sobre la misma fila, con sentencias separadas:
+
+| paso | `delivered_at` | `updated_at` |
+|---|---|---|
+| nace | null | 19:53:00.144 |
+| entregada | 19:53:00.149 | 19:53:00.149 |
+| update ajeno, 1,1 s después | 19:53:00.149 ← **intacta** | 19:53:01.254 ← **se movió** |
+
+Con `updated_at` como clave de la ventana, esa orden reaparecería en "Entregados" de un turno
+que no la entregó, por haber sido **editada**. Mismo perfil de fallo que la columna vino a
+cerrar: un número plausible y equivocado, que no revienta.
+
+---
+
+#### 2. La causa: DENY-LIST AL BUSCAR EVIDENCIA (instancia nueva de R2)
+
+El trigger se buscó por los nombres que uno espera —`set_updated_at`, `moddatetime`,
+`update_updated_at`— y acá se llama `handle_updated_at`. Ninguno matcheó, y el cero se leyó
+como *"no existe"*.
+
+🔴 **Lo que esta instancia agrega a R2: la clase NO era "escribir un guard", era "buscar
+evidencia".** Las cuatro instancias anteriores son código que decide. Esta es un `grep`, y por
+eso se pasó por alto — nadie siente que está diseñando un filtro cuando busca. Pero un grep
+por los nombres que uno imagina **es una deny-list de lo que uno se acordó de escribir**, y
+falla igual de callado: devuelve cero, que no se distingue de "no busqué bien".
+
+**La forma correcta es buscar por la CLASE, no por el nombre supuesto.** La pregunta era
+"¿algo mantiene `orders.updated_at`?", así que se busca por la TABLA o por el catálogo:
+
+```bash
+grep -n "trigger.*public.orders" supabase/*.sql
+```
+```sql
+select tgname, p.proname from pg_trigger t join pg_proc p on p.oid = t.tgfoid
+ where t.tgrelid = 'public.orders'::regclass and not t.tgisinternal;
+```
+
+Aplica a todo resultado vacío que se vaya a usar como prueba de ausencia.
+
+---
+
+#### 3. La prueba vacua: `now()` es la hora de la TRANSACCIÓN (instancia literal del límite de R10)
+
+La primera verificación del trigger corrió **entera dentro de un `begin/commit`**. Ahí `now()`
+devuelve la hora de la transacción, no la del reloj: **todas las marcas salían idénticas
+pasara lo que pasara.** El caso *"un update ajeno NO repisa `delivered_at`"* comparaba dos
+valores que eran iguales por construcción — **habría pasado incluso con un trigger que
+repisara la marca en cada update.** Y `pg_sleep` no ayuda: lo que avanza es
+`clock_timestamp()`, no `now()`.
+
+🔴 **Es R10 literal: el mutante no encuentra lo que la fixture no reproduce.** La fixture
+—una sola transacción— no reproducía el escenario real, donde cada `update` del cliente llega
+en su propia transacción. La lógica estaba bien; la prueba no podía verla.
+
+**El arreglo es el que la vuelve discriminante:** sentencias de nivel superior, cada una en su
+propia transacción (autocommit), de modo que `now()` avance entre una y otra. Con eso, el
+caso separa un trigger correcto de uno que repisa — y de hecho fue así como se midió la tabla
+del punto 1.
+
+**Corolario reutilizable:** antes de creerle a una prueba de "X no cambió", preguntarse **si X
+podía cambiar en esa fixture**. Si la respuesta es no, la prueba no mide nada.
+
+---
+
+#### 3-bis. 🔴 LA FORMA QUE SE REPITIÓ TRES VECES EN UNA SOLA SESIÓN: *el caso existe, pero la ruta no lo alcanza*
+
+**Esto no es "otro test vacuo". Es la MISMA forma tres veces, y nombrarla es lo que la vuelve
+reconocible la próxima.** Las tres comparten estructura exacta:
+
+> El test nombra un caso. El caso está escrito. **Pero la ejecución nunca pasa por él**, así que
+> la aserción se evalúa sobre un estado que no es el que el nombre promete — y pasa.
+
+No es un test que asserta de más ni de menos: es un test que **asserta sobre otra cosa**. Por eso
+no lo encuentra leerlo (el código dice lo correcto) y sí lo encuentra mutar el sujeto: el mutante
+no cambia nada en la ruta que el test recorre.
+
+| # | instancia | por qué la ruta no llegaba |
+|---|---|---|
+| 1 | **clase D de los 75** *(esta sesión; su detalle vive donde se registró ese trabajo, no se repite acá para no afirmarlo de memoria)* | el caso quedaba fuera del recorrido que ejercía la prueba |
+| 2 | **`anular-venta:279`** — un `bloqueado()` laxo que aceptaba *error O cero filas* | un rechazo por RLS con **cero filas** entraba por la rama "cero filas" y daba verde sin que el trigger hubiera hablado. Ver más arriba en este documento (`rbac-escalada.spec.ts` assertea el MENSAJE, no `bloqueado()`) |
+| 3 | **`splitFifo` — la deuda con saldo 0** (2026-09-07) | la fixture la ponía ÚLTIMA en el orden FIFO y el monto se agotaba antes: el bucle **salía por `break` sin visitarla**, así que la rama `applied <= 0` nunca se ejecutaba |
+
+**Cómo se cazó la tercera, que es el método reutilizable:** mutar `applied <= 0` → `applied < 0`.
+El mutante **sobrevivió**, y sobrevivir era la señal — si la rama se hubiera ejercido, invertir su
+condición habría roto algo. El arreglo fue mover la deuda de saldo 0 **al principio** del orden y
+dejar monto sin repartir después de ella; con eso el mutante muere.
+
+🔴 **LA PREGUNTA QUE HAY QUE HACERSE, y que las tres veces habría bastado:**
+**"¿por dónde pasa la ejecución en este test, y toca la línea que digo estar probando?"**
+No "¿la aserción es correcta?" —lo era en las tres—, sino **"¿el sujeto llega a correr?"**.
+Señales de que conviene preguntárselo:
+
+- el caso depende de un **orden** (de filas, de ítems, de triggers) que la fixture fija de pasada;
+- la aserción tiene un **OR** (`error O cero filas`, `A o B`): cada rama es una ruta distinta y
+  puede estar entrando siempre por la barata;
+- el caso ejerce una **rama de borde** (saldo 0, lista vacía, primer/último elemento) que además
+  es la que el resto de la fixture tiende a evitar.
+
+Es la contracara del límite de R10 del punto 3: allá el mutante no ve lo que la fixture no
+reproduce; acá el mutante **sobrevive**, y esa supervivencia es justamente el indicio. **Un
+mutante que sobrevive no siempre significa "el test es débil": puede significar "el test no llega".**
+
+#### 4. La tabla temporal que choca consigo misma — es propiedad del LLAMADOR, no de la función
+
+`register_debt_payments_batch` hace `create temp table tmp_lote on commit drop`. `on commit
+drop` limpia **al commit**, así que **dos llamadas dentro de la MISMA transacción** chocan con
+`relation "tmp_lote" already exists`.
+
+🔴 **La distinción que importa: hoy no ocurre por una propiedad del LLAMADOR, no de la
+función.** Vía PostgREST cada RPC es su propia transacción, así que el segundo llamado nunca
+comparte transacción con el primero. Eso **no es una garantía de la función**: es una
+casualidad de quién la llama hoy. El día que alguien la invoque desde otra función plpgsql, o
+dos veces dentro de un `do $$ ... $$`, va a fallar por una razón que no tiene nada que ver con
+fiado — y el síntoma no va a señalar la causa.
+
+Se le puso `drop table if exists tmp_lote;` delante. Es la misma forma que R1: **una condición
+que hoy es verdad por accidente y deja de serlo en silencio.**
+
 ### 🔴 ANTE UN FALLO: LEER LOS ARTEFACTOS ANTES DE RE-CORRER
 
 **Playwright BORRA `test-results/` al arrancar cada corrida.** Re-correr para "ver
