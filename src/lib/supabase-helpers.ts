@@ -1285,6 +1285,40 @@ export interface RegisterDebtPaymentResult {
 
 // Registra un abono de forma atómica (valida saldo, y si es efectivo con turno
 // abierto genera el ingreso de caja). SECURITY DEFINER.
+/** Una imputación del lote, tal como la devuelve la RPC. */
+export interface BatchAllocation {
+  order_id: string
+  order_number: number | null
+  applied: number
+  saldo_restante: number
+  new_status: string                 // 'paid' | 'partial'
+}
+
+export interface RegisterDebtPaymentsBatchResult {
+  batch_id: string
+  orders: BatchAllocation[]
+  cash_movement_created: boolean
+  shift_open: boolean
+}
+
+/**
+ * Reparte UN pago entre varias ventas a fiado del MISMO cliente, FIFO por
+ * antigüedad, en UNA transacción (supabase/fiado-abono-lote.sql). SECURITY
+ * DEFINER; valida sede, permiso, sobrepago y cliente único del lado del
+ * servidor. Los ids van como conjunto: el ORDEN DEL ARREGLO NO IMPORTA, lo
+ * impone la RPC.
+ */
+export const registerDebtPaymentsBatch = (
+  orderIds: string[],
+  amount: number,
+  paymentMethod: string,
+) =>
+  supabase.rpc('register_debt_payments_batch', {
+    p_order_ids: orderIds,
+    p_amount: amount,
+    p_payment_method: paymentMethod,
+  })
+
 export const registerDebtPayment = (
   orderId: string,
   amount: number,

@@ -1,8 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-hot-toast'
 import {
-  getDebts, getDebtPayments, registerDebtPayment,
+  getDebts, getDebtPayments, registerDebtPayment, registerDebtPaymentsBatch,
   type DebtRow, type DebtPaymentRow, type RegisterDebtPaymentResult,
+  type RegisterDebtPaymentsBatchResult,
 } from '@/lib/supabase-helpers'
 import { useAuth } from '@/hooks/useAuth'
 import type { SentryArea } from '@/lib/sentry'
@@ -127,4 +128,60 @@ export function useRegisterDebtPayment() {
   })
 
   return { registerDebtPayment: mutation.mutateAsync, isRegistering: mutation.isPending }
+}
+
+/**
+ * Abono en LOTE: un pago repartido FIFO entre varias ventas del mismo cliente.
+ * Una sola RPC atómica — NO N llamadas a `useRegisterDebtPayment`: si la 2ª de 3
+ * fallara, quedaría estado parcial y plata cobrada a medias.
+ *
+ * Invalida lo mismo que el abono individual (cartera, órdenes, historial de
+ * abonos y caja) para que el nuevo saldo y el ingreso aparezcan sin recargar.
+ */
+export function useRegisterDebtPaymentsBatch() {
+  const queryClient = useQueryClient()
+
+  const mutation = useMutation({
+    meta: { area: 'fiado' satisfies SentryArea },
+    mutationFn: async (
+      { orderIds, amount, paymentMethod }:
+        { orderIds: string[]; amount: number; paymentMethod: string },
+    ) => {
+      const { data, error } = await registerDebtPaymentsBatch(orderIds, amount, paymentMethod)
+      if (error) throw error
+      return data as unknown as RegisterDebtPaymentsBatchResult
+    },
+    onSuccess: (result, { paymentMethod }) => {
+      queryClient.invalidateQueries({ queryKey: ['debts'] })
+      queryClient.invalidateQueries({ queryKey: ['orders'] })
+      queryClient.invalidateQueries({ queryKey: ['debt_payments'] })
+      queryClient.invalidateQueries({ queryKey: ['cash_movements'] })
+      queryClient.invalidateQueries({ queryKey: ['shift_payments'] })
+
+      const saldadas = result.orders.filter((o) => o.new_status === 'paid').length
+      const tocadas = result.orders.length
+
+      if (paymentMethod === 'cash' && !result.shift_open) {
+        // Inequívoco, igual que en el abono individual: el lote SÍ quedó; lo
+        // único que no pasó es el ingreso de caja (no hay turno al cual
+        // atribuirlo).
+        toast(
+          `Pago repartido en ${tocadas} venta${tocadas === 1 ? '' : 's'}. ` +
+          'El efectivo no entró a caja (sin turno abierto).',
+          { icon: '⚠️', duration: 7000 },
+        )
+      } else {
+        const extra = result.cash_movement_created ? ' · Entró a caja.' : ''
+        toast.success(
+          `Pago repartido en ${tocadas} venta${tocadas === 1 ? '' : 's'}` +
+          (saldadas > 0 ? ` · ${saldadas} saldada${saldadas === 1 ? '' : 's'}` : '') +
+          extra,
+        )
+      }
+    },
+    onError: (err) =>
+      toast.error(err instanceof Error ? err.message : 'Error al registrar el pago'),
+  })
+
+  return { registerBatch: mutation.mutateAsync, isRegistering: mutation.isPending }
 }
