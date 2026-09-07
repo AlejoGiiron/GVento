@@ -132,6 +132,58 @@ con origen externo. No construir — solo no bloquear.
 
 ## Pendientes de verificar / deuda conocida
 
+### 🔴 Registrar un movimiento y cerrar turno EN SEGUIDA puede persistir un esperado sin ese movimiento (hallado 2026-09-07)
+
+**NO se arregló en esta sesión.** Se anota porque es plata mal declarada en un snapshot que
+después nadie recalcula — el arqueo se congela al cerrar, a propósito, así que un esperado
+equivocado queda equivocado para siempre.
+
+**Cómo apareció, que importa porque no se buscaba:** montando la captura de la modal de detalle,
+el script registró un egreso de 12.000 y cerró el turno de inmediato. El resultado quedó así:
+
+| dato | valor | de dónde sale |
+|---|---|---|
+| esperado persistido | 141.000 | snapshot del cierre — **no incluye el egreso** |
+| egreso del turno | 12.000 | `cash_movements`, leído por `shift_id` |
+| esperado correcto | 129.000 | 141.000 − 12.000 |
+
+Con una espera de ~1,5 s entre el movimiento y el cierre, el mismo script da 129.000. **O sea
+que es una carrera, no un error de fórmula.**
+
+**Mecanismo (hipótesis con la evidencia que hay, NO verificada leyendo la ejecución):**
+`CloseShiftModal` calcula `movementsOut` desde `movements`, que viene de `useCashShift` →
+React Query con clave `['cash_movements', shift.id]`. `addMovementMutation.onSuccess` llama a
+`invalidateMovements()`, pero invalidar **agenda** un refetch, no lo espera. Si el cajero cierra
+el modal de movimientos y toca "Cerrar turno" antes de que ese refetch vuelva, el cálculo usa la
+lista vieja.
+
+**Por qué no lo cazó la suite:** `historiales.spec.ts` afirma `EXPECTED = OPENING − EGRESO` y
+pasa. Entre el egreso y el cierre hace varias interacciones de Playwright, cada una con su
+espera, y eso alcanza para que el refetch llegue. **La suite no reproduce la ventana**; es otra
+vez la misma forma —el caso existe, pero la ruta no lo alcanza— y acá apareció por accidente al
+scriptear una captura sin esperas.
+
+⚠️ **Lo que NO se sabe todavía, y hay que medir antes de tocar nada:** si un cajero real puede
+ganarle a ese refetch. En una máquina con red local rápida quizá nunca ocurra; con la nube y una
+conexión mala, es plausible. **La verificación no es leer el código: es reproducirlo con la red
+degradada** (throttling en devtools, o un `page.route` que demore la respuesta de
+`cash_movements`).
+
+**Para reproducirlo hoy** (va primero el comando):
+
+```
+abrir turno con apertura conocida → registrar un egreso → cerrar turno SIN esperar
+→ comparar cash_shifts.expected_amount contra (apertura − egreso)
+```
+
+**Salida de fondo, si se confirma:** que el cierre no dependa de una lista cacheada en el
+cliente. Las dos formas conocidas son (a) `await refetch()` antes de habilitar "Confirmar
+cierre", o (b) que el esperado lo calcule el servidor al cerrar, leyendo `cash_movements` por
+`shift_id` — que es lo que hace el detalle del historial y por eso ahí el número sí está bien.
+La segunda es la que elimina la clase entera, no solo esta ventana.
+
+---
+
 ### 🔴 "No hay concepto de organización de prueba" es una suposición tácita esperando a fallar (anotado 2026-08-31)
 
 **NO se construye ahora.** Se anota porque es exactamente la clase que este proyecto cazó once
