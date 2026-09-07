@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { toast } from 'react-hot-toast'
 import { supabase } from '@/lib/supabase'
 import {
   getDeliveryOrders,
   getCouriers,
+  getOpenShift,
   updateOrderStatus,
   assignOrderCourier,
 } from '@/lib/supabase-helpers'
@@ -26,6 +28,7 @@ export type DeliveryOrder = {
   customer_name: string | null
   customer_phone: string | null
   delivery_address: string | null
+  delivered_at: string | null
   courier_id: string | null
   estimated_delivery_minutes: number | null
   notes: string | null
@@ -83,9 +86,35 @@ export function useDelivery() {
   const prevIdsRef = useRef<Set<string>>(new Set())
   const isFirstFetchRef = useRef(true)
 
+  // Turno abierto: define la ventana de la columna "Entregados". MISMA queryKey
+  // que useCashShift → una sola consulta compartida por React Query, y al abrir
+  // o cerrar turno esa invalidación mueve también este tablero. No se usa
+  // useCashShift() entero a propósito: arrastra el poll de 5 s de las ventas del
+  // turno, que acá no se mira.
+  const { data: openShift, isLoading: isLoadingShift } = useQuery({
+    queryKey: ['cash_shift_open', profile?.restaurant_id],
+    queryFn: async () => {
+      const { data, error } = await getOpenShift(profile!.restaurant_id)
+      if (error) throw error
+      return data ?? null
+    },
+    enabled: !!profile?.restaurant_id,
+    staleTime: 10_000,
+  })
+  const shiftOpenedAt = openShift?.opened_at ?? null
+
+  // La ventana viaja por ref para que `fetchOrders` siga siendo estable: es
+  // dependencia del efecto que monta el canal Realtime, y si cambiara de
+  // identidad en cada apertura de turno el canal se desuscribiría y volvería a
+  // suscribirse sin motivo.
+  const deliveredSinceRef = useRef<string | null>(null)
+
   const fetchOrders = useCallback(async () => {
     if (!profile) return
-    const { data, error } = await getDeliveryOrders(profile.restaurant_id)
+    const { data, error } = await getDeliveryOrders(
+      profile.restaurant_id,
+      deliveredSinceRef.current,
+    )
     if (error) {
       toast.error('Error al cargar órdenes de delivery')
       return
@@ -113,8 +142,12 @@ export function useDelivery() {
     setCouriers(data ?? [])
   }, [profile])
 
+  // La ventana se aplica ANTES de la primera consulta y en cada cambio de turno.
+  // Mientras el turno se está resolviendo no se consulta: hacerlo mostraría
+  // "Entregados" vacío por un instante y después lleno.
   useEffect(() => {
-    if (!profile) return
+    if (!profile || isLoadingShift) return
+    deliveredSinceRef.current = shiftOpenedAt
 
     const init = async () => {
       await Promise.all([fetchOrders(), fetchCouriers()])
@@ -158,7 +191,7 @@ export function useDelivery() {
       channel.unsubscribe()
       supabase.removeChannel(channel)
     }
-  }, [profile, fetchOrders, fetchCouriers])
+  }, [profile, isLoadingShift, shiftOpenedAt, fetchOrders, fetchCouriers])
 
   // Órdenes agrupadas por columna kanban (3 columnas)
   const grouped: Record<DeliveryColumn, DeliveryOrder[]> = {
@@ -205,5 +238,7 @@ export function useDelivery() {
     assignCourier,
     refetch: fetchOrders,
     refetchCouriers: fetchCouriers,
+    /** null = no hay turno abierto → "Entregados" no tiene ventana que mostrar. */
+    shiftOpenedAt,
   }
 }

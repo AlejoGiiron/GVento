@@ -95,6 +95,7 @@ const COLUMNAS_DEL_ESQUEMA: ColumnaEsquema[] = [
   { tabla: 'orders', columna: 'discount_reason', ejemplo: 'Ruletazo de Ana' },
   { tabla: 'orders', columna: 'cancel_reason', ejemplo: 'Cliente se arrepintio' },
   { tabla: 'orders', columna: 'estimated_delivery_minutes', ejemplo: 30 },
+  { tabla: 'orders', columna: 'delivered_at', ejemplo: '2026-09-07T02:15:00.000Z' },
   { tabla: 'orders', columna: 'order_number', ejemplo: 1247, permitida: true },
   { tabla: 'orders', columna: 'payment_status', ejemplo: 'partial', permitida: true },
   { tabla: 'orders', columna: 'discount_kind', ejemplo: 'vale', permitida: true },
