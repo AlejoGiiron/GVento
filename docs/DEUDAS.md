@@ -132,6 +132,52 @@ con origen externo. No construir — solo no bloquear.
 
 ## Pendientes de verificar / deuda conocida
 
+### 🔴 PRECONDICIÓN DE MERGE — `preparar-local.mjs` y `delivery-delivered-at.sql` están en ramas distintas (anotado 2026-09-07)
+
+**Esto no es una tarea suelta: es una condición que hay que cumplir AL MERGEAR, y el
+único momento en que se puede cumplir es después del primer merge.** Por eso se anota
+acá y no en un backlog — quien mergee tiene que leerlo antes, no enterarse después.
+
+**La situación.** Dos ramas tocan lados distintos del mismo contrato (R1) y ninguna puede
+cerrarlo sola:
+
+| rama | qué trae |
+|---|---|
+| `feat/delivery-por-turno` | `supabase/delivery-delivered-at.sql` (la migración) |
+| `chore/capturas-landing` | `scripts/capturas/preparar-local.mjs` (el array `ORDEN`) |
+
+El array `ORDEN` es el ledger de migraciones verificado por ejecución: `pnpm capturas:preparar`
+reconstruye la base local aplicando esos archivos en ese orden. **Agregar la entrada en
+cualquiera de las dos ramas por separado la rompe:** en la de capturas, `ORDEN` nombraría un
+`.sql` que en esa rama no existe y el script muere en el `readFileSync`; en la de delivery no
+está el archivo que hay que editar.
+
+🔴 **LA CONSECUENCIA, que es lo que hay que ver a tiempo.** Entre el primer merge y la
+actualización del array hay una ventana en la que **todo laboratorio local que se levante nace
+sin `orders.delivered_at`**. En esa ventana `tests/delivery-turno.spec.ts` falla — y falla **por
+una razón que no es el código**: la consulta pide una columna que en esa base no existe. Es
+justo el modo de fallo que hace perder una tarde, porque el síntoma (spec de delivery en rojo)
+no señala la causa (el laboratorio quedó viejo).
+
+**Qué hacer, en orden:**
+
+1. Mergear la primera rama, cualquiera de las dos.
+2. Mergear la segunda.
+3. **En la misma pasada**, agregar `'delivery-delivered-at.sql'` al array `ORDEN` de
+   `scripts/capturas/preparar-local.mjs`. Va **después** de `'schema.sql'` (crea `orders`) y
+   puede ir junto a `'delivery-couriers.sql'`, que es la otra migración de este módulo.
+4. Correr `pnpm capturas:preparar` y confirmar que la lista imprime la nueva línea en verde.
+
+**Para saber si esta deuda sigue viva** (va primero el comando, que no caduca):
+
+```bash
+grep -c "delivery-delivered-at.sql" scripts/capturas/preparar-local.mjs
+```
+
+`0` = sigue viva. `1` = cerrada, y esta entrada se borra.
+
+---
+
 ### 🔴 "No hay concepto de organización de prueba" es una suposición tácita esperando a fallar (anotado 2026-08-31)
 
 **NO se construye ahora.** Se anota porque es exactamente la clase que este proyecto cazó once
