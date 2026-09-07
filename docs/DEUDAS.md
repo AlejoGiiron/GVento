@@ -132,6 +132,55 @@ con origen externo. No construir — solo no bloquear.
 
 ## Pendientes de verificar / deuda conocida
 
+### ⚠️ FLAKE ABIERTO — `pago-mixto.spec.ts:247` (MESA: cierre mixto) falló 1 de 5 veces (2026-09-07)
+
+**No se arregló: no se entiende todavía, y un flake no se reproduce a pedido.** Se anota con la
+evidencia que hay para que la próxima vez no se empiece de cero.
+
+**Qué pasó.** En la 2ª corrida completa sobre `develop` integrado, el click sobre la tarjeta del
+producto no abrió el modal de configuración:
+
+```
+Locator: getByTestId('item-config-modal')   Expected: visible   → element(s) not found
+```
+
+**Qué NO es** (descartado, no supuesto):
+
+- **No es una regresión de esta sesión.** El mismo test pasó **7/7 en las tres corridas
+  completas anteriores del mismo día**, incluida la primera con las cuatro ramas ya integradas.
+- **No es del código que se tocó.** Ni mesas, ni el picker de productos, ni `openTableAndAddItems`
+  aparecen en ningún commit de la sesión.
+- **No reproduce aislado:** `pago-mixto.spec.ts` solo → **7/7 verde**.
+
+🔴 **LA PISTA QUE VALE, y que hay que mirar primero:** el snapshot de la página al fallar dice
+**"Mapa del salón · 15 ocupadas · 161 libres"** — **176 mesas** en el laboratorio, y 15 de ellas
+ABIERTAS. Es residuo acumulado de corridas viejas (cada spec que crea una mesa deja una si la
+limpieza no llega a correr, y la limpieza no corre cuando el test anterior falla en un
+`describe.serial`). Un mapa de 176 tarjetas es mucho más lento de renderizar que uno de 10, y
+este test depende de que el picker esté montado cuando se clickea el producto.
+
+**Hipótesis a verificar (NO verificada):** el volumen del mapa alarga el render lo suficiente
+como para que el click del producto llegue antes de que el picker termine de montar. Encaja con
+que falle en la corrida larga —donde el lab ya juntó mesas de los specs previos— y no aislado.
+
+**Cómo investigarlo la próxima vez:**
+
+```sql
+-- ¿cuántas mesas tiene el laboratorio, y cuántas quedaron abiertas?
+select status, count(*) from public.tables
+ where restaurant_id = '<sede Lab Norte>' group by status;
+```
+
+1. Contar las mesas del lab con esa query. Si son cientos, **limpiar las de prueba** (nombre con
+   sufijo de timestamp) y volver a correr la suite completa: si el flake desaparece, la causa era
+   el volumen y el arreglo de fondo es que los specs borren su mesa en un `afterAll` (que corre
+   aunque el test falle), no en un test de limpieza al final del `describe.serial`.
+2. Si persiste con el lab limpio, la causa es otra y hay que mirar el trace de la corrida
+   fallida, no re-correr.
+
+**Lo que NO hay que hacer:** re-correr hasta que dé verde y darlo por resuelto. Un flake que
+pasa en el reintento sigue siendo un flake, y este toca el camino de mesa + pago mixto, que es
+plata.
 ### 🔴 Registrar un movimiento y cerrar turno EN SEGUIDA puede persistir un esperado sin ese movimiento (hallado 2026-09-07)
 
 **NO se arregló en esta sesión.** Se anota porque es plata mal declarada en un snapshot que
