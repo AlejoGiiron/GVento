@@ -118,6 +118,10 @@ end $reset$;
 // sede todavía no existe (la crea lab-seed) → se desactiva alrededor del
 // insert. Es fiel al estado real: en producción estas cuentas también
 // existieron un rato "huérfanas", sin profile.
+// ⚠️ CONTRATO COMPARTIDO (R1): este default es la MISMA contraseña que
+// scripts/capturas/local.config pone en E2E_OWNER_PASSWORD / E2E_CASHIER_PASSWORD.
+// Si cambia una, cambia la otra en la misma pasada: si no, la base se siembra
+// con una y el login del globalSetup intenta con la otra.
 const PASS = process.env.CAPTURAS_LOCAL_PASSWORD ?? 'lab-local-2026'
 const AUTH = `
 alter table auth.users disable trigger on_auth_user_created;

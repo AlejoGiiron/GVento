@@ -39,12 +39,26 @@ Todo vive en una sede llamada **"Bar La Ronda"**, dentro de la organización
 la organización — por eso la captura dice "Bar La Ronda" y no delata que es un
 laboratorio.
 
-Aunque la base sea descartable, el guard de organización sigue puesto: el
-`globalSetup` de la suite E2E hace login real y **aborta si las credenciales no
-son de LAB**, y `capturas.config.ts` **pisa** las variables de entorno con las de
-`.env.capturas` sin condiciones — si eso fuera un "si no está definido", un
-`.env.test` presente bastaría para apuntar la corrida a la base compartida sin
-que nadie se entere.
+Aunque la base sea descartable, los guards siguen puestos, y son dos con
+alcances distintos:
+
+- **`capturas.config.ts` pisa las variables de entorno con las de
+  `scripts/capturas/local.config`, sin condiciones**, exige que las cuatro claves
+  estén presentes, y **aborta si la URL de Supabase no es loopback**. Eso impide
+  apuntar la corrida a un backend remoto. No impide que el Supabase local tenga
+  adentro datos que no sean del laboratorio.
+- **El `globalSetup` de la suite E2E hace login real y aborta si las credenciales
+  no son de LAB.** Ese es el que cubre lo otro: mira la organización de las
+  credenciales, no la base.
+
+Si el volcado de variables fuera un "si no está definido", un `.env.test`
+presente bastaría para apuntar la corrida a la base compartida sin que nadie se
+entere. Por eso es asignación directa.
+
+El archivo **no se llama `.env.capturas`**: en este repo `.env*` significa "no se
+versiona", y este se versiona. Como Vite ya no lo carga solo por convención de
+nombre, `capturas.config.ts` le pasa las variables `VITE_*` al dev server de
+forma explícita (`webServer.env`), que en Vite 5 le gana a lo que traiga `.env`.
 
 **"Marcela", "Wílmer Ospina", "Andrés" y "Valeria" son personajes.** El cliente
 de fiado se siembra sin cédula y sin teléfono a propósito: la ficha los mostraría
