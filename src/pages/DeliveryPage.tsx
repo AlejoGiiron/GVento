@@ -416,7 +416,7 @@ function DeliveryCard({
   // y badge de urgencia.
 
   return (
-    <div style={{
+    <div data-testid="delivery-card" style={{
       background: '#fff',
       border: urgent ? '1.5px solid #f59e0b' : `1.5px solid ${cfg.border}`,
       borderRadius: 12,
@@ -593,6 +593,7 @@ function KanbanColumn({
   onAdvance,
   onCancel,
   isAdmin,
+  shiftOpenedAt,
 }: {
   column: DeliveryColumn
   orders: DeliveryOrder[]
@@ -600,6 +601,9 @@ function KanbanColumn({
   onAdvance: (order: DeliveryOrder) => void
   onCancel: (order: DeliveryOrder) => void
   isAdmin: boolean
+  /** null = sin turno abierto. Solo cambia el texto del estado vacío de
+   *  "Entregados": esa columna es la única con ventana de tiempo. */
+  shiftOpenedAt: string | null
 }) {
   const cfg = COLUMN_CONFIG[column]
 
@@ -609,7 +613,7 @@ function KanbanColumn({
   const { ref: scrollRef, hasMore } = useScrollOverflow<HTMLDivElement>('y', orders)
 
   return (
-    <div style={{
+    <div data-testid={`delivery-column-${column}`} style={{
       flex: 1,
       minWidth: 0,
       height: '100%',
@@ -666,11 +670,20 @@ function KanbanColumn({
           }}
         >
           {orders.length === 0 ? (
-            <div style={{ padding: '24px 12px', textAlign: 'center', color: '#94a3b8' }}>
+            <div data-testid={`delivery-empty-${column}`} style={{ padding: '24px 12px', textAlign: 'center', color: '#94a3b8' }}>
               <div style={{ fontSize: 22, marginBottom: 6, opacity: 0.4 }}>
                 {column === 'delivered' ? '✓' : '—'}
               </div>
-              <div style={{ fontSize: 12 }}>Sin pedidos</div>
+              {/* "Entregados" muestra los del TURNO abierto. Sin turno no hay
+                  ventana, y decir "Sin pedidos" ahí sería mentir: puede haber
+                  entregas del turno anterior. Se dice por qué está vacía. */}
+              {column === 'delivered' && !shiftOpenedAt ? (
+                <div style={{ fontSize: 12, lineHeight: 1.45, maxWidth: 190, margin: '0 auto' }}>
+                  Sin turno abierto.<br />Los entregados se ven al abrir turno.
+                </div>
+              ) : (
+                <div style={{ fontSize: 12 }}>Sin pedidos</div>
+              )}
             </div>
           ) : (
             orders.map((order) => (
@@ -712,6 +725,7 @@ export function DeliveryPage() {
     loading,
     activeCount,
     newCount,
+    shiftOpenedAt,
     updateStatus,
     assignCourier,
     refetch,
@@ -842,6 +856,7 @@ export function DeliveryPage() {
             onAdvance={handleAdvance}
             onCancel={handleCancel}
             isAdmin={isAdmin}
+            shiftOpenedAt={shiftOpenedAt}
           />
         ))}
       </div>

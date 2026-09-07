@@ -148,50 +148,31 @@ begin
   -- c) 4 roles de sistema para LAB — fiel al estado de G-10 tras las migraciones
   --    aplicadas. Upsert: si el rol ya existe, se reescriben permisos (mantiene
   --    LAB al día). ⚠️ MANTENER SINCRONIZADO con las migraciones de permisos:
-  --      - owner usa el comodín "*" (owner-wildcard-permission.sql): hereda TODO
+  --      - owner usa el comodín "*" (lo resuelve has_permission() en
+  --        profiles-is-active-enforced.sql): hereda TODO
   --        permiso, presente y futuro, sin reseed. NO volver a enumerarlo aquí.
   --      - admin/cajero/mozo son explícitos: al agregar un permiso nuevo a un rol
   --        en una migración (p. ej. compras.gestionar en admin), reflejarlo aquí
   --        o el reseed lo borra de LAB.
   -- ========================================================
-  insert into public.roles (organization_id, name, is_system, permissions) values
-    (v_org, 'owner', true, '["*"]'::jsonb)
-  on conflict (organization_id, name)
-    do update set permissions = excluded.permissions, is_system = true
-  returning id into v_role_owner;
+  -- ── Roles de sistema ─────────────────────────────────────────────────────
+  -- Los siembra `seed_system_roles()`, GENERADA desde src/lib/permissions.ts
+  -- (ver supabase/seed-system-roles.sql). Requiere esa migración aplicada antes.
+  --
+  -- Hasta el 2026-08-31 acá había 4 bloques `insert` inline, y las 4 copias del
+  -- repo habían divergido: `admin` valía 16/20/18/23 según el archivo que abrieras.
+  -- Ya no hay lista que mantener en este archivo. Ver R1 en CLAUDE.md.
+  perform public.seed_system_roles(v_org);
 
-  insert into public.roles (organization_id, name, is_system, permissions) values
-    (v_org, 'admin', true, '[
-      "pos.vender","pos.descuento","pos.anular",
-      "caja.abrir","caja.cerrar","caja.movimientos",
-      "mesas.gestionar","mesas.cobrar","cocina.acceder","delivery.gestionar",
-      "productos.ver","productos.editar",
-      "reportes.financiero","reportes.stock",
-      "ventas.historial","ventas.anular",
-      "config.acceder","usuarios.gestionar","compras.gestionar","fiado.gestionar"
-    ]'::jsonb)
-  on conflict (organization_id, name)
-    do update set permissions = excluded.permissions, is_system = true
-  returning id into v_role_admin;
+  -- La función no devuelve ids y los profiles de abajo los necesitan. `into strict`
+  -- a propósito: si un rol faltara, esto revienta acá en vez de dejar un profile
+  -- con role_id null —que entra al sistema pero con permissions = [] y el sidebar
+  -- vacío—. Fail-closed, no fail-open.
+  select id into strict v_role_owner  from public.roles where organization_id = v_org and name = 'owner';
+  select id into strict v_role_admin  from public.roles where organization_id = v_org and name = 'admin';
+  select id into strict v_role_cajero from public.roles where organization_id = v_org and name = 'cajero';
+  select id into strict v_role_mozo   from public.roles where organization_id = v_org and name = 'mozo';
 
-  insert into public.roles (organization_id, name, is_system, permissions) values
-    (v_org, 'cajero', true, '[
-      "pos.vender","pos.descuento","pos.anular",
-      "caja.abrir","caja.cerrar","caja.movimientos",
-      "mesas.cobrar","delivery.gestionar","fiado.gestionar",
-      "ventas.historial"
-    ]'::jsonb)
-  on conflict (organization_id, name)
-    do update set permissions = excluded.permissions, is_system = true
-  returning id into v_role_cajero;
-
-  insert into public.roles (organization_id, name, is_system, permissions) values
-    (v_org, 'mozo', true, '[
-      "pos.vender","mesas.gestionar","cocina.acceder"
-    ]'::jsonb)
-  on conflict (organization_id, name)
-    do update set permissions = excluded.permissions, is_system = true
-  returning id into v_role_mozo;
 
   -- ========================================================
   -- d) Profiles de los 2 usuarios huérfanos, ligados a LAB.

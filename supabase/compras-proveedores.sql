@@ -23,7 +23,22 @@
 --     invoice_number, payment_method, notes y, por ítem, product_id/qty/unit_cost
 --     (unit_cost es legítimamente capturado del documento físico).
 --
--- Ejecutar en: Supabase Dashboard > SQL Editor. NO aplicada todavía.
+-- Ejecutar en: Supabase Dashboard > SQL Editor.
+--
+-- ✅ ESTÁ APLICADA. El "NO aplicada todavía" que decía acá era FALSO, y el propio
+--    repo lo contradecía: `compra-no-toca-caja.sql` dice en su encabezado "NO edita
+--    compras-proveedores.sql ya aplicada". Además el módulo Compras corre en
+--    producción y `tests/compras.spec.ts` lo ejercita contra la BD viva.
+--    Corregido el 2026-08-31 al barrer la clase (R3).
+--
+-- NO DEDUZCAS EL ESTADO DE ESTE COMENTARIO — correlo (1 fila = aplicada):
+--   select 1 from pg_proc where proname = 'register_purchase';
+--
+-- RE-APLICAR FALLA, PERO NO ES DESTRUCTIVO: tiene 3 `create table` sin
+--   `if not exists` y 7 `create policy` sin `drop policy if exists` previo, así que
+--   aborta con 42P07/42710. Como toda la migración va en begin/commit, el error
+--   hace ROLLBACK completo y no deja nada a medias. Falla cerrado, que es lo
+--   correcto — pero significa que no sirve para "asegurarse por las dudas".
 -- ============================================================
 
 begin;

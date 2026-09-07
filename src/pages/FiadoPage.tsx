@@ -4,6 +4,7 @@ import { useCustomers, useCustomerMutations, type Customer } from '@/hooks/useCu
 import { useDebts, type Debt } from '@/hooks/useDebts'
 import { CustomerFormModal } from '@/components/fiado/CustomerFormModal'
 import { DebtPaymentModal } from '@/components/fiado/DebtPaymentModal'
+import { BatchPaymentModal } from '@/components/fiado/BatchPaymentModal'
 
 type Tab = 'debts' | 'customers'
 
@@ -46,6 +47,23 @@ function DebtsTab({ onAbono }: { onAbono: (d: Debt) => void }) {
   const { customers } = useCustomers()
   const [search, setSearch] = useState('')
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  // Selección para el pago en lote. Se limpia al cambiar de cliente: un id de
+  // otro cliente colado en el lote haría que la RPC lo rechace entero
+  // ("no son del mismo cliente"), y el cajero no entendería por qué.
+  const [checked, setChecked] = useState<Set<string>>(new Set())
+  const [batchOpen, setBatchOpen] = useState(false)
+
+  const pickCustomer = (key: string) => {
+    setSelectedKey(key)
+    setChecked(new Set())
+    setBatchOpen(false)
+  }
+  const toggleCheck = (id: string) =>
+    setChecked((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
 
   // Teléfono por cliente (para el buscador) — sin queries nuevas.
   const phoneById = useMemo(() => {
@@ -96,6 +114,15 @@ function DebtsTab({ onAbono }: { onAbono: (d: Debt) => void }) {
   // `groups` y `selected` queda null → el detalle se limpia solo (sin efecto).
   const selected = groups.find((g) => g.key === selectedKey) ?? null
 
+  // Deudas efectivamente seleccionadas, en el MISMO orden que la tabla (ASC por
+  // fecha) — que es el orden FIFO que impone la RPC. Si acá se armara en otro
+  // orden, la previsualización mostraría un reparto que no es el que ocurre.
+  const seleccionadas = (selected?.fiados ?? []).filter((d) => checked.has(d.id))
+  const todasMarcadas =
+    (selected?.fiados.length ?? 0) > 0 && seleccionadas.length === selected!.fiados.length
+  const toggleTodas = () =>
+    setChecked(todasMarcadas ? new Set() : new Set((selected?.fiados ?? []).map((d) => d.id)))
+
   const kpis = [
     { key: 'por-cobrar', label: 'Total por cobrar', value: formatCOP(totalPorCobrar), Icon: Wallet, color: '#dc2626' },
     { key: 'clientes-deuda', label: 'Clientes con deuda', value: String(clientesConDeuda), Icon: Users, color: '#0f172a' },
@@ -139,7 +166,7 @@ function DebtsTab({ onAbono }: { onAbono: (d: Debt) => void }) {
                 <button
                   key={g.key}
                   data-testid="customer-row"
-                  onClick={() => setSelectedKey(g.key)}
+                  onClick={() => pickCustomer(g.key)}
                   style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', border: 'none', borderTop: idx > 0 ? '1px solid #f1f5f9' : 'none', borderLeft: `3px solid ${active ? '#10b981' : 'transparent'}`, background: active ? '#ecfdf5' : '#fff', cursor: 'pointer' }}
                 >
                   <div style={{ width: 38, height: 38, borderRadius: '50%', background: active ? '#10b981' : '#e2e8f0', color: active ? '#fff' : '#475569', display: 'grid', placeItems: 'center', fontSize: 13, fontWeight: 700, flexShrink: 0 }}>
@@ -183,10 +210,44 @@ function DebtsTab({ onAbono }: { onAbono: (d: Debt) => void }) {
                 </div>
               </div>
 
+              {/* Barra de selección — aparece SOLO con algo marcado. Sin
+                  selección no hay nada que ofrecer, y una barra siempre visible
+                  con "(0)" es ruido permanente. */}
+              {seleccionadas.length > 0 && (
+                <div
+                  data-testid="batch-bar"
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '11px 20px', background: '#ecfdf5', borderBottom: '1px solid #a7f3d0' }}
+                >
+                  <span style={{ fontSize: 12.5, color: '#065f46' }}>
+                    {seleccionadas.length} venta{seleccionadas.length === 1 ? '' : 's'} ·{' '}
+                    <span data-testid="batch-bar-saldo" style={{ fontFamily: 'monospace', fontWeight: 700 }}>
+                      {formatCOP(seleccionadas.reduce((acc, d) => acc + d.saldo, 0))}
+                    </span>
+                  </span>
+                  <button
+                    data-testid="abonar-seleccionados"
+                    onClick={() => setBatchOpen(true)}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 14px', border: 'none', background: '#10b981', borderRadius: 8, cursor: 'pointer', fontSize: 12.5, fontWeight: 700, color: '#fff', boxShadow: '0 3px 8px rgba(16,185,129,.3)' }}
+                  >
+                    <HandCoins size={13} /> Abonar seleccionados ({seleccionadas.length})
+                  </button>
+                </div>
+              )}
+
               {/* Fiados individuales */}
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: '#f8fafc', textAlign: 'left', color: '#64748b', fontSize: 11.5 }}>
+                    <th style={{ padding: '10px 8px 10px 16px', fontWeight: 600, width: 34 }}>
+                      <input
+                        type="checkbox"
+                        data-testid="credit-check-all"
+                        aria-label="Seleccionar todas"
+                        checked={todasMarcadas}
+                        onChange={toggleTodas}
+                        style={{ width: 15, height: 15, accentColor: '#10b981', cursor: 'pointer' }}
+                      />
+                    </th>
                     <th style={{ padding: '10px 16px', fontWeight: 600 }}>Venta</th>
                     <th style={{ padding: '10px 16px', fontWeight: 600 }}>Fecha</th>
                     <th style={{ padding: '10px 16px', fontWeight: 600, textAlign: 'right' }}>Total</th>
@@ -199,7 +260,17 @@ function DebtsTab({ onAbono }: { onAbono: (d: Debt) => void }) {
                   {selected.fiados.map((d) => {
                     const badge = STATUS_BADGE[d.payment_status] ?? STATUS_BADGE.pending
                     return (
-                      <tr key={d.id} data-testid="credit-row" style={{ borderTop: '1px solid #f1f5f9' }}>
+                      <tr key={d.id} data-testid="credit-row" style={{ borderTop: '1px solid #f1f5f9', background: checked.has(d.id) ? '#f0fdf4' : undefined }}>
+                        <td style={{ padding: '11px 8px 11px 16px' }}>
+                          <input
+                            type="checkbox"
+                            data-testid="credit-check"
+                            aria-label={`Seleccionar venta ${d.order_number ?? d.id}`}
+                            checked={checked.has(d.id)}
+                            onChange={() => toggleCheck(d.id)}
+                            style={{ width: 15, height: 15, accentColor: '#10b981', cursor: 'pointer' }}
+                          />
+                        </td>
                         <td style={{ padding: '11px 16px', fontFamily: 'monospace', fontWeight: 700, color: '#0f172a' }}>{d.order_number != null ? `#${d.order_number}` : '—'}</td>
                         <td style={{ padding: '11px 16px', color: '#64748b', fontFamily: 'monospace', fontSize: 12 }}>{fmtDate(d.created_at)}</td>
                         <td style={{ padding: '11px 16px', textAlign: 'right', fontFamily: 'monospace', color: '#0f172a' }}>{formatCOP(d.total)}</td>
@@ -224,6 +295,15 @@ function DebtsTab({ onAbono }: { onAbono: (d: Debt) => void }) {
           )}
         </div>
       </div>
+
+      {batchOpen && selected && seleccionadas.length > 0 && (
+        <BatchPaymentModal
+          customerName={selected.customerName}
+          debts={seleccionadas}
+          onClose={() => setBatchOpen(false)}
+          onDone={() => { setBatchOpen(false); setChecked(new Set()) }}
+        />
+      )}
     </div>
   )
 }

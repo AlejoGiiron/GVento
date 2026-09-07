@@ -211,10 +211,10 @@ export function printSaleTicket(data: SaleTicketData): void {
 // Se reusa idéntico al cerrar (datos en vivo) y al reimprimir desde el
 // historial (datos del snapshot persistido). Una sola forma: CashReportData.
 
-const ARQUEO_METHOD_LABEL: Record<ArqueoMethod, string> = {
+export const ARQUEO_METHOD_LABEL: Record<ArqueoMethod, string> = {
   cash: 'Efectivo', card: 'Tarjeta', transfer: 'Transferencia', nequi: 'Nequi',
 }
-const ARQUEO_ORDER: ArqueoMethod[] = ['cash', 'card', 'transfer', 'nequi']
+export const ARQUEO_ORDER: ArqueoMethod[] = ['cash', 'card', 'transfer', 'nequi']
 
 export interface CashReportData {
   restaurantName?: string | null
@@ -231,6 +231,36 @@ export interface CashReportData {
   comment?: string | null
 }
 
+/**
+ * Ventas por método derivadas del SNAPSHOT del arqueo.
+ *
+ * Efectivo = esperado_cash − apertura − ingresos + egresos (el inverso de la
+ * fórmula con la que se calculó el esperado). Para los demás, ventas = esperado
+ * del método, porque su esperado NO lleva apertura ni movimientos.
+ *
+ * 🔴 VIVE ACÁ, EXPORTADA, A PROPÓSITO (R1): la usan el COMPROBANTE impreso y la
+ * modal de detalle del historial. Si cada uno hiciera su propia cuenta serían
+ * dos fórmulas que nadie sincroniza, y la pantalla podría mostrar un desglose
+ * distinto del papel para el mismo turno. Con una sola función, "pantalla y
+ * papel muestran lo mismo" es una propiedad del código, no una intención.
+ *
+ * Tolera snapshots viejos: un método ausente en `methods` cuenta 0 en vez de
+ * reventar (los primeros cierres pueden no traer las 4 claves).
+ */
+export function deriveCashReportSales(
+  data: CashReportData,
+): { byMethod: Record<ArqueoMethod, number>; total: number } {
+  const rec = data.reconciliation
+  const esperado = (m: ArqueoMethod) => rec.methods?.[m]?.expected ?? 0
+  const byMethod: Record<ArqueoMethod, number> = {
+    cash: esperado('cash') - data.openingAmount - data.movementsIn + data.movementsOut,
+    card: esperado('card'),
+    transfer: esperado('transfer'),
+    nequi: esperado('nequi'),
+  }
+  return { byMethod, total: ARQUEO_ORDER.reduce((s, m) => s + byMethod[m], 0) }
+}
+
 function buildCashReportHtml(data: CashReportData): string {
   const rec = data.reconciliation
   const fmtDT = (iso: string) =>
@@ -239,17 +269,7 @@ function buildCashReportHtml(data: CashReportData): string {
       hour: '2-digit', minute: '2-digit', timeZone: 'America/Bogota',
     })
 
-  // Ventas efectivo = esperado_cash − apertura − ingresos + egresos (inverso de
-  // la fórmula del esperado). Para los demás, ventas = esperado del método.
-  const cashSales =
-    rec.methods.cash.expected - data.openingAmount - data.movementsIn + data.movementsOut
-  const salesByMethod: Record<ArqueoMethod, number> = {
-    cash: cashSales,
-    card: rec.methods.card.expected,
-    transfer: rec.methods.transfer.expected,
-    nequi: rec.methods.nequi.expected,
-  }
-  const salesTotal = ARQUEO_ORDER.reduce((s, m) => s + salesByMethod[m], 0)
+  const { byMethod: salesByMethod, total: salesTotal } = deriveCashReportSales(data)
 
   const money = (n: number) => formatCOP(n)
   const signed = (n: number) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${formatCOP(Math.abs(n))}`
@@ -265,8 +285,12 @@ function buildCashReportHtml(data: CashReportData): string {
     .join('')
 
   // Arqueo por método: esperado | declarado | diferencia (compacto).
+  // Mismo cuidado que deriveCashReportSales (R3, la clase se barre entera): un
+  // snapshot viejo puede no traer las 4 claves, y `rec.methods[m].expected`
+  // sobre undefined reventaría la reimpresión — con el botón habilitado, porque
+  // su única condición es que close_reconciliation no sea null.
   const arqueoRows = ARQUEO_ORDER.map((m) => {
-    const r = rec.methods[m]
+    const r = rec.methods?.[m] ?? { expected: 0, declared: 0, difference: 0 }
     return `
       <div style="margin-bottom:3px">
         <div style="font-size:11px;font-weight:600">${ARQUEO_METHOD_LABEL[m]}</div>

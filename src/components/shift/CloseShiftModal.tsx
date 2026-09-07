@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { X, DollarSign, TrendingUp, TrendingDown, Minus, AlertTriangle } from 'lucide-react'
+import { X, DollarSign, TrendingUp, TrendingDown, Minus, AlertTriangle, Bike } from 'lucide-react'
 import { useCashShift } from '@/hooks/useCashShift'
+import { useDeliveryCount } from '@/hooks/useDeliveryCount'
 import { useRestaurantConfig } from '@/hooks/useRestaurantConfig'
 import { calcShiftBalance } from '@/lib/shiftCalc'
 import type { ShiftReconciliation, MethodReconciliation } from '@/lib/shiftCalc'
@@ -31,6 +32,10 @@ interface CloseShiftModalProps {
 export function CloseShiftModal({ onClose }: CloseShiftModalProps) {
   const { currentShift, salesSummary, movements, vouchersTotal, closeShift, isClosingShift } = useCashShift()
   const { restaurant } = useRestaurantConfig()
+  // Deliveries sin entregar (pending/preparing/ready) de la sede. MISMO hook que
+  // el badge del sidebar: un segundo conteo escrito acá sería una copia que se
+  // desincroniza (R1).
+  const deliveriesAbiertos = useDeliveryCount()
   const [rawAmount, setRawAmount] = useState('')
   // Arqueo multi-método: declarado por método NO-efectivo (blanco = 0) + comentario.
   const [declaredOther, setDeclaredOther] = useState<Record<OtherMethod, string>>({
@@ -402,6 +407,32 @@ export function CloseShiftModal({ onClose }: CloseShiftModalProps) {
               </span>
             </div>
           </div>
+
+          {/* Deliveries sin entregar — AVISO, NO BLOQUEO.
+              El cierre no se impide: puede ser legítimo (el turno cierra y el
+              pedido lo termina el siguiente) y bloquear dejaría al cajero sin
+              salida a las 2 de la mañana. Se avisa porque un delivery abierto al
+              cerrar es un problema real —comida que salió y plata que no entró—
+              a diferencia de las mesas abiertas de larga duración, que en G-10 y
+              Salchimelo son un flujo INTENCIONAL y por eso no se avisan (ver
+              CLAUDE.md → "Comportamientos del negocio"). Acá el aviso lo pidió
+              el cliente. */}
+          {deliveriesAbiertos > 0 && (
+            <div
+              data-testid="close-shift-delivery-warning"
+              style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, padding: '10px 14px', borderRadius: 10, background: '#fffbeb', border: '1px solid #fde68a' }}
+            >
+              <Bike size={15} color="#92400e" style={{ flexShrink: 0 }} />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: '#92400e' }}>
+                  Hay {deliveriesAbiertos} delivery{deliveriesAbiertos === 1 ? '' : 's'} sin entregar
+                </div>
+                <div style={{ fontSize: 11.5, color: '#b45309', marginTop: 1 }}>
+                  Podés cerrar igual. Siguen en el tablero hasta que se entreguen.
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Vales del turno — INFORMATIVO. NO entra al cuadre (el vale no es
               dinero cobrado, es lo que se regaló). */}

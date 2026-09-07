@@ -980,12 +980,37 @@ export const deleteCourier = (courierId: string) =>
 
 // --- Delivery orders ---
 
-export const getDeliveryOrders = (restaurantId: string) => {
-  const todayStart = new Date()
-  todayStart.setHours(0, 0, 0, 0)
-  const todayISO = todayStart.toISOString()
-
-  return supabase
+/**
+ * Órdenes del tablero de Delivery.
+ *
+ * DOS CONJUNTOS, CON REGLAS DISTINTAS A PROPÓSITO:
+ *
+ *  1. TODO LO NO ENTREGADO (pending/preparing/ready), sin ventana de tiempo.
+ *     Un pedido abierto no desaparece nunca hasta que se entrega o se cancela.
+ *
+ *  2. LO ENTREGADO EN EL TURNO ABIERTO (`delivered_at >= deliveredSince`).
+ *     `deliveredSince` es el `opened_at` del turno; con `null` (sin turno
+ *     abierto) la columna "Entregados" queda vacía y solo se ven los abiertos.
+ *
+ * POR QUÉ NO ES "los del turno" A SECAS: si el filtro fuera "creados en este
+ * turno", un pedido abierto en el turno A se volvería invisible al empezar el
+ * B — el bug se mudaría de la medianoche al cambio de turno en vez de irse.
+ *
+ * QUÉ REEMPLAZA: antes esto filtraba `created_at >= hoy a las 00:00` del reloj
+ * del NAVEGADOR. Dos defectos en uno: los entregados se borraban de la pantalla
+ * a las 12 en punto —justo en un bar, que es cuando está lleno— y la frontera
+ * de día ni siquiera era la de Bogotá (R7). La ventana ahora es la del turno,
+ * que es la unidad con la que trabaja la caja.
+ *
+ * `delivered_at` lo pone un trigger con el reloj del SERVIDOR
+ * (supabase/delivery-delivered-at.sql). Es lo que hace que la comparación
+ * contra `opened_at`, también del servidor, sea válida.
+ */
+export const getDeliveryOrders = (
+  restaurantId: string,
+  deliveredSince: string | null,
+) => {
+  const q = supabase
     .from('orders')
     .select(`
       *,
@@ -995,8 +1020,12 @@ export const getDeliveryOrders = (restaurantId: string) => {
     .eq('restaurant_id', restaurantId)
     .eq('type', 'delivery')
     .neq('status', 'cancelled')
-    .or(`status.in.(pending,preparing,ready),created_at.gte.${todayISO}`)
-    .order('created_at', { ascending: false })
+
+  return (
+    deliveredSince
+      ? q.or(`status.in.(pending,preparing,ready),delivered_at.gte.${deliveredSince}`)
+      : q.in('status', ['pending', 'preparing', 'ready'])
+  ).order('created_at', { ascending: false })
 }
 
 export const assignOrderCourier = (
@@ -1285,6 +1314,40 @@ export interface RegisterDebtPaymentResult {
 
 // Registra un abono de forma atómica (valida saldo, y si es efectivo con turno
 // abierto genera el ingreso de caja). SECURITY DEFINER.
+/** Una imputación del lote, tal como la devuelve la RPC. */
+export interface BatchAllocation {
+  order_id: string
+  order_number: number | null
+  applied: number
+  saldo_restante: number
+  new_status: string                 // 'paid' | 'partial'
+}
+
+export interface RegisterDebtPaymentsBatchResult {
+  batch_id: string
+  orders: BatchAllocation[]
+  cash_movement_created: boolean
+  shift_open: boolean
+}
+
+/**
+ * Reparte UN pago entre varias ventas a fiado del MISMO cliente, FIFO por
+ * antigüedad, en UNA transacción (supabase/fiado-abono-lote.sql). SECURITY
+ * DEFINER; valida sede, permiso, sobrepago y cliente único del lado del
+ * servidor. Los ids van como conjunto: el ORDEN DEL ARREGLO NO IMPORTA, lo
+ * impone la RPC.
+ */
+export const registerDebtPaymentsBatch = (
+  orderIds: string[],
+  amount: number,
+  paymentMethod: string,
+) =>
+  supabase.rpc('register_debt_payments_batch', {
+    p_order_ids: orderIds,
+    p_amount: amount,
+    p_payment_method: paymentMethod,
+  })
+
 export const registerDebtPayment = (
   orderId: string,
   amount: number,

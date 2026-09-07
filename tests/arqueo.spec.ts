@@ -227,7 +227,14 @@ test.describe.serial('Arqueo multi-método', () => {
     await expect(row).toBeVisible({ timeout: 15_000 })
 
     await page.evaluate(() => { (window as unknown as { __arqueoPrinted: string | null }).__arqueoPrinted = null })
-    await row.getByTestId('shift-reprint').click()
+
+    // Reimprimir ya NO está en la fila: vive dentro del modal de detalle, que se
+    // abre con "Ver detalle" (siempre habilitado). El botón conserva su regla —
+    // se deshabilita sin close_reconciliation—, solo cambió de lugar.
+    await row.getByTestId('shift-detail-btn').click()
+    const modal = page.getByTestId('shift-detail-modal')
+    await expect(modal).toBeVisible()
+    await modal.getByTestId('shift-reprint').click()
 
     // El comprobante se armó (stub capturó el HTML). Debe reflejar el SNAPSHOT:
     // apertura única + cash esperado (OPEN+18.000) + 1 venta → prueba que leyó

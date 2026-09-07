@@ -268,6 +268,7 @@ export type Database = {
       debt_payments: {
         Row: {
           amount: number
+          batch_id: string | null
           cash_movement_id: string | null
           created_at: string
           created_by: string | null
@@ -278,6 +279,7 @@ export type Database = {
         }
         Insert: {
           amount: number
+          batch_id?: string | null
           cash_movement_id?: string | null
           created_at?: string
           created_by?: string | null
@@ -288,6 +290,7 @@ export type Database = {
         }
         Update: {
           amount?: number
+          batch_id?: string | null
           cash_movement_id?: string | null
           created_at?: string
           created_by?: string | null
@@ -482,6 +485,7 @@ export type Database = {
           customer_id: string | null
           customer_name: string | null
           customer_phone: string | null
+          delivered_at: string | null
           delivery_address: string | null
           discount_amount: number
           discount_kind: string
@@ -510,6 +514,7 @@ export type Database = {
           customer_id?: string | null
           customer_name?: string | null
           customer_phone?: string | null
+          delivered_at?: string | null
           delivery_address?: string | null
           discount_amount?: number
           discount_kind?: string
@@ -538,6 +543,7 @@ export type Database = {
           customer_id?: string | null
           customer_name?: string | null
           customer_phone?: string | null
+          delivered_at?: string | null
           delivery_address?: string | null
           discount_amount?: number
           discount_kind?: string
@@ -1412,6 +1418,10 @@ export type Database = {
       next_order_number: { Args: { p_restaurant_id: string }; Returns: number }
       register_debt_payment: {
         Args: { p_amount: number; p_order_id: string; p_payment_method: string }
+        Returns: Json
+      }
+      register_debt_payments_batch: {
+        Args: { p_amount: number; p_order_ids: string[]; p_payment_method: string }
         Returns: Json
       }
       register_purchase: {

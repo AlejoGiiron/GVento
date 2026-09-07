@@ -47,13 +47,18 @@ test.describe('Roles y permisos — editables (menos owner)', () => {
     }
   })
 
-  test('el catálogo muestra los 22 permisos (incl. compras/fiado/historial)', async ({ page }) => {
+  test('el catálogo muestra los 23 permisos (incl. compras/fiado/historial/anular)', async ({ page }) => {
     await openRoles(page)
     await page.getByRole('button', { name: 'Crear rol' }).click()
     await expect(page.getByTestId('role-modal')).toBeVisible()
 
     await expect(page.locator('[data-testid^="perm-"]')).toHaveCount(ALL_PERMISSION_KEYS.length)
-    expect(ALL_PERMISSION_KEYS.length).toBe(22)
+    // 22 → 23 el 2026-08-31: entró `ventas.anular`, que se enforceaba desde junio
+    // (register-sale-void.sql, SalesHistoryPage) pero no estaba en el catálogo, así
+    // que no se podía conceder desde esta misma pantalla. Este número clavado es el
+    // único tripwire del repo sobre el tamaño del catálogo: si se pone rojo, mirá QUÉ
+    // permiso cambió antes de tocar el número.
+    expect(ALL_PERMISSION_KEYS.length).toBe(23)
 
     // Los 3 que faltaban en el catálogo viejo ahora están.
     await expect(page.getByTestId('perm-compras.gestionar')).toBeVisible()

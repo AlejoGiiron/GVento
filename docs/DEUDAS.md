@@ -1,0 +1,604 @@
+# G-Vento — DEUDAS e IDEAS
+
+Dos cosas distintas que conviene no confundir:
+
+- **Ideas de producto** — evaluadas y **conscientemente pospuestas**. NO son backlog, no
+  están aprobadas y **no se empiezan a construir por encontrarlas escritas acá**.
+- **Deudas vigentes** — cosas que YA rompen algo o que van a costar caro, con su punto de
+  partida para retomarlas.
+
+Se consulta **al planificar**, no antes de cada cambio.
+
+---
+
+## Entrada pendiente para la FASE C — skill `demo-en-vivo` (anotado 2026-08-26)
+
+**NO es una idea de producto ni una deuda de código: es material que ya tenemos y que hay
+que convertir en skill cuando se haga la Fase C.** Se anota acá porque la próxima demo se
+va a armar dentro de meses y sin acordarse de nada de esto.
+
+**Por qué skill propia y no dentro de `spec-e2e`:** `spec-e2e` dispara al escribir o
+diagnosticar Playwright, y armar un seed de demo es trabajo de SQL. Cargarla ahí es
+repetir el modo de fallo de los 5 slash commands: existen, son correctos, y no corren
+porque nadie los invoca. Una demo además es **infrecuente y de alto riesgo** — el perfil
+donde peor funciona la memoria y mejor funciona un disparo automático.
+
+**La distinción que la funda:** un fixture de test necesita ser CORRECTO. Un escenario de
+demo necesita ser correcto **y CREÍBLE**. El segundo eje no lo verifica ningún `select`.
+
+Las tres reglas, todas medidas el 2026-08-26 armando Café Aroma:
+
+1. **NADA CONSTANTE.** Un valor repetido delata los datos justo donde vas a señalar.
+   Casos: la merma quedó en `−3` en las 50 filas de Ajustes (se cambió a variable por día
+   y por producto, escalada a la producción); y el Top Productos salía plano con selección
+   uniforme (se arregló con una bolsa ponderada por popularidad). Corolario: el patrón
+   tiene que ser el del negocio — pico de mañana en una cafetería, no de noche como el bar.
+
+2. **VERIFICAR LA PANTALLA, NO EL DATO.** "El dato existe" y "la pantalla lo muestra de
+   forma usable" son cosas distintas. Los dos hallazgos salieron de abrir el componente y
+   **ninguno era visible en el SQL**: `InventoryPage` → Movimientos NO filtra por producto
+   y pagina de a 25 (el guión pedía mostrar una secuencia que la UI no permite aislar), y
+   `AppLayout` → `NAV_GROUPS` deja Ventas y Mesas SIN permiso, o sea inocultables por
+   cualquier combinación de roles.
+
+3. **NO PROMETAS LO QUE LA APP NO CALCULA.** La merma se registra pero no se totaliza en
+   ningún lado (ni Inventario ni Reportes → Stock). Preguntar "¿cuánto estás botando?" y
+   mostrar solo una lista es abrir una puerta que no se puede cruzar.
+
+Sumar también el **checklist de 10 minutos antes** (impresión, turno abierto de otra
+corrida, banner de suscripción, residuo del lab, resolución real de la máquina) y el
+**guión de 13 minutos**, ambos ya redactados y probados en esta sesión.
+
+La evidencia larga va a la BITÁCORA; la skill se queda en forma corta y accionable, igual
+que las 10 reglas de clase.
+
+## Ideas de producto — NO son pendientes, NO construir
+
+Esta sección NO es backlog. Nada de acá está aprobado ni pedido: son ideas
+evaluadas y **conscientemente pospuestas**. No aparecen en "Deudas vigentes" a
+propósito — una deuda es algo que YA rompe algo; esto no rompe nada hoy.
+No empezar a construirlo por encontrarlo escrito acá.
+
+### KPI de merma/descarte en Reportes → Stock (anotado 2026-08-25)
+
+**Origen: preparando la demo de Café Aroma.** No salió de un pedido de cliente
+ni de una idea de escritorio: salió de guionar la pantalla de Inventario y
+chocarse con el hueco. Se anota con el origen porque eso es lo que le da peso
+si algún día se retoma.
+
+**El hueco, medido:** `InventoryPage` → Movimientos **registra** los ajustes
+(tipo `adjustment`, con su motivo en `notes`) pero **no los totaliza en ningún
+lado**. Ni ahí ni en el tab Stock de Reportes, que hoy tiene KPIs de unidades,
+productos y categorías, top de productos y ranking por categoría — nada de
+descarte. Filtrar por tipo "Ajustes" da la LISTA; el número no existe.
+
+**Por qué importa en una cafetería** (y no en un bar, que es para quien se
+diseñó el seed original): un negocio con panadería **hornea a demanda y descarta
+lo que sobra todos los días**. "¿Cuánto estoy botando?" es una pregunta que el
+dueño ya se hace, no una que haya que enseñarle.
+
+🔴 **La señal a esperar, y qué significa:** si en la demo el dueño pregunta por
+el TOTAL de merma, eso es demanda real observada, no una hipótesis. Ahí sí vale
+construirlo. Hasta entonces, no.
+
+**Por qué es chico:** el dato ya está en `stock_movements` (`type='adjustment'`,
+con signo y con `notes`), acotado por sede y por rango de fechas igual que el
+resto del tab. No hace falta migración ni columna nueva: es una agregación más
+sobre una tabla que ya se consulta en esa pantalla.
+
+⚠️ **Al construirlo hay que decidir una cosa que no es obvia:** un `adjustment`
+NO es siempre una merma — la misma columna recibe los ajustes manuales de
+inventario, que pueden ser POSITIVOS (un conteo que salió de más). Sumar todos
+los `adjustment` y llamarlo "descarte" sería un número equivocado con nombre de
+número correcto. O se suman solo los negativos, o se separa merma de ajuste con
+un tipo propio.
+
+**Mientras tanto, en la demo:** el framing es *"queda registrado, producto por
+producto y día por día"*, NUNCA *"te digo cuánto"*. Prometer en vivo un número
+que la app no calcula es peor que no prometerlo.
+
+### Pedidos entre negocios (decidido 2026-08-07: NO se construye ahora)
+
+**Caso:** un cliente en G-10 (coctelería, sin cocina) quiere comer; G-10 le pide
+la comida a Salchimelo. **Hoy se resuelve por WhatsApp y funciona.**
+
+**Por qué NO ahora** — el dolor hoy es CERO y la ambición es alta. Construir sin
+dolor real significa diseñar contra un caso hipotético. Y es la funcionalidad
+más riesgosa considerada hasta ahora: rompe el aislamiento entre organizaciones,
+acopla dos clientes entre sí, y **no hay forma de cobrarla todavía**.
+
+**Por qué es interesante a futuro:** es un efecto de red — cada cliente nuevo
+vale más si puede conectarse con los que ya están. Difícil de copiar.
+
+**Alternativas evaluadas, de menor a mayor acoplamiento:**
+- **A. Nada (WhatsApp)** — línea base actual.
+- **B. Producto "pedido externo"** en el negocio que pide; los sistemas nunca se
+  hablan. Cero riesgo, pero no notifica al otro lado.
+- **C. Notificación de una vía por Edge Function** — el pedido aparece en el otro
+  negocio. Cruza el mínimo (ítems, nota, origen). SIN relajar RLS: canal
+  explícito y auditado, no una política que deje ver otra organización.
+  ← **la mejor si se retoma.**
+- **D. Catálogo compartido** — más cómodo, más superficie de riesgo.
+- **E. El otro negocio como proveedor** (reusando el módulo de compras existente).
+
+🔴 **REGLA SI SE RETOMA: nunca por RLS relajada.** El aislamiento entre
+organizaciones es la promesa central del multi-tenant y costó una sesión entera
+endurecerlo (ver el bloque de seguridad RBAC). Cualquier cruce va por un canal
+explícito, estrecho y auditado.
+
+**Lo único que aplica MIENTRAS TANTO (gratis, sin construir nada):** al tocar
+delivery, órdenes o catálogo, no tomar decisiones que hagan IMPOSIBLE un pedido
+con origen externo. No construir — solo no bloquear.
+
+## Pendientes de verificar / deuda conocida
+
+### ⚠️ FLAKE ABIERTO — `pago-mixto.spec.ts:247` (MESA: cierre mixto) falló 1 de 5 veces (2026-09-07)
+
+**No se arregló: no se entiende todavía, y un flake no se reproduce a pedido.** Se anota con la
+evidencia que hay para que la próxima vez no se empiece de cero.
+
+**Qué pasó.** En la 2ª corrida completa sobre `develop` integrado, el click sobre la tarjeta del
+producto no abrió el modal de configuración:
+
+```
+Locator: getByTestId('item-config-modal')   Expected: visible   → element(s) not found
+```
+
+**Qué NO es** (descartado, no supuesto):
+
+- **No es una regresión de esta sesión.** El mismo test pasó **7/7 en las tres corridas
+  completas anteriores del mismo día**, incluida la primera con las cuatro ramas ya integradas.
+- **No es del código que se tocó.** Ni mesas, ni el picker de productos, ni `openTableAndAddItems`
+  aparecen en ningún commit de la sesión.
+- **No reproduce aislado:** `pago-mixto.spec.ts` solo → **7/7 verde**.
+
+🔴 **LA PISTA QUE VALE, y que hay que mirar primero:** el snapshot de la página al fallar dice
+**"Mapa del salón · 15 ocupadas · 161 libres"** — **176 mesas** en el laboratorio, y 15 de ellas
+ABIERTAS. Es residuo acumulado de corridas viejas (cada spec que crea una mesa deja una si la
+limpieza no llega a correr, y la limpieza no corre cuando el test anterior falla en un
+`describe.serial`). Un mapa de 176 tarjetas es mucho más lento de renderizar que uno de 10, y
+este test depende de que el picker esté montado cuando se clickea el producto.
+
+**Hipótesis a verificar (NO verificada):** el volumen del mapa alarga el render lo suficiente
+como para que el click del producto llegue antes de que el picker termine de montar. Encaja con
+que falle en la corrida larga —donde el lab ya juntó mesas de los specs previos— y no aislado.
+
+**Cómo investigarlo la próxima vez:**
+
+```sql
+-- ¿cuántas mesas tiene el laboratorio, y cuántas quedaron abiertas?
+select status, count(*) from public.tables
+ where restaurant_id = '<sede Lab Norte>' group by status;
+```
+
+1. Contar las mesas del lab con esa query. Si son cientos, **limpiar las de prueba** (nombre con
+   sufijo de timestamp) y volver a correr la suite completa: si el flake desaparece, la causa era
+   el volumen y el arreglo de fondo es que los specs borren su mesa en un `afterAll` (que corre
+   aunque el test falle), no en un test de limpieza al final del `describe.serial`.
+2. Si persiste con el lab limpio, la causa es otra y hay que mirar el trace de la corrida
+   fallida, no re-correr.
+
+**Lo que NO hay que hacer:** re-correr hasta que dé verde y darlo por resuelto. Un flake que
+pasa en el reintento sigue siendo un flake, y este toca el camino de mesa + pago mixto, que es
+plata.
+### 🔴 Registrar un movimiento y cerrar turno EN SEGUIDA puede persistir un esperado sin ese movimiento (hallado 2026-09-07)
+
+**NO se arregló en esta sesión.** Se anota porque es plata mal declarada en un snapshot que
+después nadie recalcula — el arqueo se congela al cerrar, a propósito, así que un esperado
+equivocado queda equivocado para siempre.
+
+**Cómo apareció, que importa porque no se buscaba:** montando la captura de la modal de detalle,
+el script registró un egreso de 12.000 y cerró el turno de inmediato. El resultado quedó así:
+
+| dato | valor | de dónde sale |
+|---|---|---|
+| esperado persistido | 141.000 | snapshot del cierre — **no incluye el egreso** |
+| egreso del turno | 12.000 | `cash_movements`, leído por `shift_id` |
+| esperado correcto | 129.000 | 141.000 − 12.000 |
+
+Con una espera de ~1,5 s entre el movimiento y el cierre, el mismo script da 129.000. **O sea
+que es una carrera, no un error de fórmula.**
+
+**Mecanismo (hipótesis con la evidencia que hay, NO verificada leyendo la ejecución):**
+`CloseShiftModal` calcula `movementsOut` desde `movements`, que viene de `useCashShift` →
+React Query con clave `['cash_movements', shift.id]`. `addMovementMutation.onSuccess` llama a
+`invalidateMovements()`, pero invalidar **agenda** un refetch, no lo espera. Si el cajero cierra
+el modal de movimientos y toca "Cerrar turno" antes de que ese refetch vuelva, el cálculo usa la
+lista vieja.
+
+**Por qué no lo cazó la suite:** `historiales.spec.ts` afirma `EXPECTED = OPENING − EGRESO` y
+pasa. Entre el egreso y el cierre hace varias interacciones de Playwright, cada una con su
+espera, y eso alcanza para que el refetch llegue. **La suite no reproduce la ventana**; es otra
+vez la misma forma —el caso existe, pero la ruta no lo alcanza— y acá apareció por accidente al
+scriptear una captura sin esperas.
+
+⚠️ **Lo que NO se sabe todavía, y hay que medir antes de tocar nada:** si un cajero real puede
+ganarle a ese refetch. En una máquina con red local rápida quizá nunca ocurra; con la nube y una
+conexión mala, es plausible. **La verificación no es leer el código: es reproducirlo con la red
+degradada** (throttling en devtools, o un `page.route` que demore la respuesta de
+`cash_movements`).
+
+**Para reproducirlo hoy** (va primero el comando):
+
+```
+abrir turno con apertura conocida → registrar un egreso → cerrar turno SIN esperar
+→ comparar cash_shifts.expected_amount contra (apertura − egreso)
+```
+
+**Salida de fondo, si se confirma:** que el cierre no dependa de una lista cacheada en el
+cliente. Las dos formas conocidas son (a) `await refetch()` antes de habilitar "Confirmar
+cierre", o (b) que el esperado lo calcule el servidor al cerrar, leyendo `cash_movements` por
+`shift_id` — que es lo que hace el detalle del historial y por eso ahí el número sí está bien.
+La segunda es la que elimina la clase entera, no solo esta ventana.
+
+---
+
+### 🔴 "No hay concepto de organización de prueba" es una suposición tácita esperando a fallar (anotado 2026-08-31)
+
+**NO se construye ahora.** Se anota porque es exactamente la clase que este proyecto cazó once
+veces: una condición que hoy es verdad por accidente —no hay consultas que crucen
+organizaciones— y que deja de serlo en silencio el día que alguien escriba la primera.
+
+**El hecho:** G-Vento no tiene columna `is_test`, ni vistas de cobranza, ni ninguna consulta
+de la app que cruce organizaciones. Cada una está acotada por RLS a la propia. El
+`config->>'es_laboratorio'` de LabCentro es documentación dentro de la fila que **ningún
+código lee**, y LAB —anterior— ni siquiera lo tiene.
+
+**Por qué es deuda y no una simple ausencia:** cualquier consulta futura que cruce
+organizaciones —un reporte consolidado, una métrica de negocio, una vista de cobranza— va a
+contar **LAB y LabCentro como clientes** salvo que quien la escriba se acuerde de excluirlas.
+El default es incluir. Es fail-OPEN: el número sale plausible y alto, y nadie lo audita
+porque no hay con qué compararlo.
+
+**¿Hay HOY alguna consulta que cruce organizaciones?** Sí, tres, y las tres son **manuales de
+operador**, ninguna de la app:
+
+1. `organization-subscription.sql` → duplicados por nombre (pre-flight del unique). Cuenta las 5.
+2. `organization-subscription.sql` → la lista de UUID para G-Centro con `count(sedes)`. **Ya
+   lleva un aviso manual sobre LAB**, escrito cuando LAB era el único laboratorio: **no
+   menciona LabCentro**. Es justamente una allowlist de excepciones enumerada a mano, que se
+   quedó corta en cuanto apareció la segunda instancia.
+3. `organization-subscription.sql` → `select subscription_status, count(*) group by`. **Esta es
+   la peligrosa:** hoy devuelve `active | 5`, y de esos 5 **solo 3 son clientes**. Quien tome
+   ese número como "organizaciones activas" se equivoca en un 66%.
+
+**En la app: NINGUNA.** Y hay una señal de que va a haber: el permiso `reportes.consolidado`
+("ver reportes consolidados multi-sede") existe en el catálogo desde la migración
+multi-tenant, pero **no gatea nada** — es uno de los 6 de *"concedible pero inerte"*. O sea
+que el permiso ya anticipa una funcionalidad que todavía no existe, y cuando se construya va
+a caer justo en esta trampa.
+
+**Las salidas, cuando se retome:**
+- Lo barato y suficiente: `organizations.es_laboratorio boolean not null default false`, poblada
+  desde el `config` que ya tiene LabCentro, y **una vista `organizaciones_facturables`** que la
+  excluya. Que la consulta correcta sea la más corta de escribir; si hay que acordarse de
+  agregar un `where`, alguien no se va a acordar.
+- Lo que NO alcanza: seguir enumerando los nombres de laboratorio en un comentario. Ya falló
+  una vez —el aviso sobre LAB no cubrió a LabCentro— y es la misma deny-list de R2.
+
+**Señal para retomarlo:** la primera consulta de la app que cruce organizaciones, o el día que
+se implemente `reportes.consolidado`. Lo que llegue antes.
+
+
+### `.gitattributes` con `* text=auto eol=lf` (anotado 2026-08-31)
+
+**Commit propio, no de polizón.** Se anota con su razón porque el síntoma ya apareció una vez
+y va a volver.
+
+**El problema:** el repo tiene `core.autocrlf=true` y **ningún `.gitattributes`**, así que
+git materializa los archivos con CRLF en Windows mientras las herramientas los escriben con
+LF. **Cualquier artefacto generado que se compare byte a byte contra su fuente va a fallar
+espurio en un checkout limpio.** Ya pasó con `supabase/seed-system-roles.sql`: el
+`gen:rbac:check` daba verde en la rama donde se había generado y rojo en develop tras el
+fast-forward, con el mismo árbol.
+
+**Por qué importa más de lo que parece:** un check que falla sin motivo se desactiva a la
+semana. El mecanismo que existe para que el catálogo de permisos no vuelva a divergir se
+habría apagado solo, y el defecto que costó tres sesiones habría vuelto sin que nadie lo note.
+
+**El parche que ya está puesto** es local a ese generador: normaliza CRLF→LF antes de
+comparar. Resuelve el caso, **no la clase** — el próximo artefacto generado empieza de cero.
+
+**La salida de fondo:** `* text=auto eol=lf` en `.gitattributes` (o al menos
+`*.sql text eol=lf` + `*.mjs text eol=lf`). Cierra el problema para todos los archivos de una
+vez. **Por qué no se hizo junto con el fix:** renormaliza los finales de línea de TODO el
+repo, así que el diff son miles de líneas sobre decenas de archivos y taparía cualquier
+cambio real que viajara en el mismo commit. Va solo, con `git add --renormalize .` y nada
+más adentro.
+
+**Señal para retomarlo:** el próximo generador o snapshot que se compare byte a byte. O
+simplemente una tarde tranquila — es barato y no tiene riesgo funcional.
+
+### ✅ Barrido de AFIRMACIONES DE PROTECCIÓN — hecho el 2026-08-31, resultado abajo
+
+Disparado por el caso #13. Se grepearon `CLAUDE.md` y `docs/DEUDAS.md` por
+`impide|impiden|evita|garantiza|protege|aisla|separado|nunca puede|imposible|bloquea`, y se
+verificó cada coincidencia contra el código. Se anota el RESULTADO para que nadie lo repita:
+
+| afirmación | veredicto |
+|---|---|
+| DEUDAS · "LAB en Supabase separado de producción" | ❌ **falsa** → corregida |
+| DEUDAS · "`VITE_GVENTO_*` apunta al Supabase del lab" | ❌ **falsa** → corregida |
+| DEUDAS · "los health checks impiden correr contra producción" | ⚠️ **parcial** → precisada |
+| DEUDAS · "esto evita correr tests contra datos reales" | ⚠️ **parcial** → precisada |
+| CLAUDE.md · "un hook no puede garantizar su propia existencia" | ✅ cierta (y es una *limitación* declarada, no una protección) |
+| CLAUDE.md · "`ventas.anular` falla cerrado" | ✅ cierta |
+| DEUDAS · "nunca por RLS relajada" (pedidos entre negocios) | ✅ es una REGLA futura, no una afirmación de estado |
+| `playwright.config.ts` · "`reuseExistingServer:false` + `strictPort` ⇒ nunca se conecta a otra app" | ✅ cierta — configurado así, y el health check #1 lo respalda |
+| `tests/README.md` · "vive en el **mismo** Supabase que la app" | ✅ cierta |
+| `.env.test.example` · "la BD es UNA sola" | ✅ cierta |
+| CLAUDE.md · unique `(producto_id, organizacion_externa_id)` de G-Centro | ⏳ **no verificable desde este repo** (otro repo, otra BD) → marcada como dicho de terceros |
+
+**Regla que deja el barrido, y es el criterio para escribir la próxima:** una afirmación de
+protección tiene que nombrar **el mecanismo** y **su límite**. "Está aislado" no es
+verificable; "aislado por RLS + credenciales de LAB, y el check mira la organización, no la
+base" sí. Lo que no es verificable envejece hacia la mentira, y una garantía falsa **apaga la
+vigilancia** en vez de solo desviarla.
+
+⏳ **Lo que este barrido NO cubrió:** los encabezados de `supabase/*.sql` (entrada de abajo)
+y los docblocks de `src/`. Mismo modo de fallo, otro alcance.
+
+### Auditar los 40+ encabezados restantes de `supabase/` (anotado 2026-08-31)
+
+**Queda para la siguiente pasada, con el hallazgo YA caracterizado** — se anota para no
+volver a pagar el diagnóstico.
+
+**Lo que ya está hecho:** se barrieron los 48 `.sql` buscando *declaraciones de estado de
+aplicación* y se corrigieron las 3 que había (`owner-wildcard-permission`,
+`compras-proveedores`, `fiado-clientes`). Esa subclase está cerrada. Reconfirmar con:
+
+```bash
+grep -rniE "no aplicada|ya aplicada|sin aplicar|pendiente de aplicar" supabase/*.sql
+```
+
+**Lo que NO se auditó, y es el trabajo pendiente:** el resto del CONTENIDO de esos
+encabezados. Cada `.sql` tiene entre 5 y 60 líneas de comentario describiendo qué hace, qué
+requiere y qué decidió — y **ninguna de esas afirmaciones se verificó contra el código
+actual**. Son ~40 archivos. Los tres tipos de afirmación, en orden de riesgo:
+
+1. **Referencias `archivo:línea`** — por la convención del proyecto solo son válidas si
+   apuntan a migraciones aplicadas (que no se editan). Las que apuntan a código vivo ya
+   están podridas: `onboard-org-paso1.sql` citaba `register-sale-void.sql:78` y
+   `SalesHistoryPage.tsx:109`.
+2. **Precondiciones entre migraciones** (*"requiere aplicada antes: X"*) — verificables
+   contra el repo, sin BD.
+3. **Descripciones de comportamiento** (*"no crea cash_movement"*, *"el retorno pierde
+   shift_open"*) — las más caras de verificar y las que más dirigen a quien lee.
+
+**Ya hay un caso confirmado de tipo 3 en el repo:** el comentario-catálogo de
+`multi-tenant-rbac.sql` lista **19 permisos** cuando el catálogo vivo tiene 23. No se corrige
+porque la migración está aplicada y es inmutable (R5) — es registro histórico. Pero alguien
+que la lea buscando "el catálogo" se lleva una lista incompleta, y ese es precisamente el
+modo de fallo de *"una nota que dirige mal cuesta más que una ausente"*.
+
+**Por qué no se hizo ahora:** son ~40 archivos y el criterio de verificación cambia por
+archivo. Es una pasada propia, no un arrastre de otra tarea.
+
+
+### 🔴 "Concedible pero inerte" — 6 permisos que la UI ofrece y que no gatean nada (hallado 2026-08-31)
+
+**Decisión: NO se arregla ahora.** Se anota porque *concedible pero inerte* es una **clase**
+de defecto que va a volver cada vez que se agregue un permiso, y porque su modo de fallo es
+el opuesto —y peor— que el de `ventas.anular`.
+
+**Los 6, medidos:** `pos.vender`, `caja.abrir`, `mesas.cobrar`, `productos.ver`,
+`reportes.stock`, `reportes.consolidado`. Están en `PERMISSION_GROUPS` —o sea, la matriz de
+Roles les dibuja su checkbox— y **no aparecen en un solo `can()` ni `has_permission()` del
+repo**: solo en seeds y en comentarios de catálogo. Para reconfirmar la lista:
+
+```bash
+for k in pos.vender caja.abrir mesas.cobrar productos.ver reportes.stock reportes.consolidado; do
+  echo "$k -> $(grep -rl "'$k'" src/ | grep -v permissions.ts | wc -l) usos reales"
+done
+```
+
+**Por qué es peor que `ventas.anular`.** Ese falla **cerrado**: el permiso se enforcea y no se
+puede conceder, así que alguien se queda sin poder hacer algo y **se queja** — el defecto se
+reporta solo. Este falla **abierto y en silencio**: un admin destilda "Cobrar mesa" del rol
+cajero, la UI se lo acepta, **y el cajero sigue cobrando**. No hay error, no hay test rojo, y
+el único que podría notarlo es justamente el que se quedó creyendo que ya lo había resuelto.
+La pantalla de Roles miente sobre lo que hace.
+
+**Las dos salidas, y por qué ninguna es gratis:**
+
+- **Escribirles el `can()` / `has_permission()` que falta.** Correcto en el papel, pero
+  `mesas.cobrar` y `caja.abrir` empezarían a gatear **en vivo, sobre clientes actuales**, con
+  roles que hoy no los tienen sembrados de forma consistente (ver la divergencia 16/20/18/23
+  del inventario de R1). Es un cambio de comportamiento disfrazado de arreglo, y el que se
+  queda afuera es un cajero en pleno turno.
+- **Sacarlos del catálogo.** Es lo barato y probablemente lo correcto —un permiso que no
+  gatea es una promesa falsa— pero cambia lo que el cliente ve en la pantalla de Roles. Va en
+  **commit propio y avisado**, nunca de arrastre con el generador de `seed_system_roles`.
+
+**La regla que deja, que es lo que hay que retener:** un permiso nuevo **no está terminado
+cuando se agrega al catálogo; está terminado cuando existe el gate que lo consume**. El
+catálogo es la promesa; el `can()` es la cosa real. Es R4 —verificar contra la cosa, no
+contra el proxy— aplicada al RBAC: que la clave figure en `PERMISSION_GROUPS` es exactamente
+el tipo de proxy que dice OK sin que nada funcione.
+
+
+- **Regenerar `database.types.ts` con `supabase gen types`** cuando se resuelva el acceso
+  de management del CLI. Hoy la entrada de `register_sale_payment` (Functions) está agregada
+  **a mano** pero VERIFICADA idéntica a lo que genera el CLI (mismo shape que
+  `register_purchase`/`register_debt_payment`, posición alfabética correcta, `Views<>`
+  preservado, tsc 0). El `supabase gen types --linked` falla con 403: la cuenta del CLI no
+  tiene privilegios de management sobre el proyecto (es permiso de cuenta, no la password).
+  Al resolverlo, correr `supabase gen types typescript --linked --schema public > src/types/database.types.ts`
+  y confirmar diff nulo.
+- **RPC de cierre de turno con recompute server-side del esperado (endurecimiento):** hoy el
+  cierre es un UPDATE cliente que confía en el esperado calculado en el navegador desde
+  `salesSummary` (paridad con F1) y lo congela en `close_reconciliation`. Endurecimiento
+  futuro: mover el cierre a una RPC SECURITY DEFINER que **recompute el esperado por método
+  desde `payments` en la ventana `[opened_at, closed_at]`** (server-authoritative), evitando
+  confiar en el cliente. Requiere acotar la ventana con cota superior (hoy `getShiftPayments`
+  no la tiene; ver el bug de ventana temporal que motivó el snapshot). Junto a la deuda de
+  pasar los gates de enum a `has_permission`.
+- **SELECT de `profiles` es por sede activa** (RLS `restaurant_id = get_my_restaurant_id()`):
+  las listas org-wide (asignar usuarios a sedes, conteo de usuarios por rol) solo ven
+  usuarios de la sede activa. Con 1 sede coincide con toda la org; al haber multi-sede
+  real hay que ampliar ese SELECT a nivel organización.
+- **Edge Function `create-user` valida enum `role === 'admin'`**: cambiar a
+  `has_permission(...)` cuando se elimine el enum `profiles.role`.
+- **Política vieja `"restaurants: admin actualiza"` (por enum `get_my_role()`)**: debe
+  quitarse al eliminar el enum `role` (queda redundante con `"restaurants: editar sede
+  con permiso"`).
+- **Verificación en navegador pendiente:**
+  - Gating RBAC con cuenta `cajero` (Andrés) vs `owner` — sidebar, rutas y botones
+    (descuento, anular, cerrar turno, configurar mesas, delivery, secciones Sedes/Roles).
+    Con `owner` se ve todo.
+  - Delivery v2: kanban de 3 columnas, scroll independiente por columna, indicador de
+    urgencia (≥30 min), botones de llamar/mapa.
+  - Venta en espera: pausar/retomar múltiples ventas, diálogo de 3 opciones al retomar
+    con carrito activo, descartar con confirmación.
+- **`pos.anular` aplicado a "Vaciar carrito"** en el POS (no hay botón "anular venta"
+  dedicado). Revisar si el target es el correcto al construir la anulación de ventas.
+- **Devolver stock al borrar ítem de mesa (inventario):** al borrar un `order_item` ya
+  agregado (ver el TODO en `handleDeleteItem`, `TablesPage.tsx` — citado por SÍMBOLO: el número
+  de línea ya se movió una vez), NO se devuelve el stock que descontó al
+  agregarse → el inventario queda subestimado. Pendiente (pasada aparte): función SQL de
+  reverso `return_stock_for_order_item(p_id)` SECURITY DEFINER que emita
+  `stock_movements('return', +qty)` por producto (simple), insumos (composite vía
+  product_components) y los insumos de extras vinculados ANTES de borrar la línea,
+  reflejando la lógica de deducción. Caso borde: receta cambiada entre venta y borrado.
+  Solo aplica a ítems no enviados a cocina (los únicos borrables hoy).
+- **Disponibilidad derivada de productos compuestos en POS — OMITIDA por ahora:** el
+  indicador de stock del POS solo aplica a productos `simple` con tracking. Los compuestos
+  no muestran disponibilidad (exigiría cargar recetas en el POS y calcular el mínimo por
+  insumo). Pendiente si se requiere.
+- **BUG DE RAÍZ pendiente (observado, no exclusivo de G-Vento):** la caja debe ser POR SEDE
+  y hay que **validar que no exista un turno abierto antes de abrir otro** (evitar dos
+  turnos simultáneos). Revisar el flujo de apertura de caja con esta regla.
+- ⚠️ **`order_items.modifiers` (jsonb) está MUERTA — no la uses "porque está ahí".**
+  Existe en el esquema (`schema.sql:153`, `not null default '[]'`) y aparece en la lista
+  de columnas de `ORDER_WITH_RELATIONS` (`supabase-helpers.ts`), pero **cero CONSUMOS**: ningún
+  componente la lee ni la setea. (Sí viaja en ese SELECT — por eso "cero lecturas" sería
+  falso; lo que no existe es código que use el valor.) Se creó
+  pensando en modificadores estructurados y **ese rol lo ocupó `extras`**, que sí tiene
+  tablas propias (`extras`, `product_extras`, `order_item_extras`), precio con snapshot y
+  descuento de inventario por insumo vinculado.
+  **La columna correcta para una observación de cocina es `order_items.notes` (text)**,
+  que está cableada de punta a punta: captura (POS y picker de Mesas), persistencia,
+  **comanda impresa** (`printer.ts`, indentada bajo su línea), recibo de venta, KDS (con
+  `⚠`), panel de mesa y tarjeta de delivery.
+  Meter texto libre en `modifiers` sería peor que en `notes`: jsonb sin forma ni
+  validación, y el filtro de PII lo colapsa a `[Filtrado:array(n)]` en Sentry (los arrays
+  bajo clave desconocida no se recorren — ver el bloque del allowlist), así que además
+  perderías el diagnóstico. Se anota porque es exactamente el tipo de columna que alguien
+  "descubre" a los seis meses y cree que hay que empezar a usar.
+- **Delivery: NO hay captura de dirección ni teléfono, y es una DECISIÓN del cliente
+  (2026-08-10), no una deuda.** Los domicilios se reciben por WhatsApp y se cargan al POS
+  solo como venta; esta pantalla es para **despachar** (mover el pedido por los 3 estados).
+  Que la tarjeta diga "Cliente sin nombre" y sin dirección es el estado ESPERADO.
+  - `delivery_address` y `customer_phone`: **cero escrituras** en toda la app (verificado).
+  - `customer_name` se escribe **solo en la venta a fiado** (`POSPage` → `handleConfirm`,
+    y `setOrderFiado` en `supabase-helpers`). Una venta de delivery de contado lo deja NULL.
+  - Los botones "Llamar" y "Mapa" **YA NO EXISTEN**: se eliminaron en `5e8d864`
+    ("inalcanzables por diseño"), porque dependían de esas dos columnas. No los busques.
+  Lo único abierto de esta pantalla es **cosmético**: el chip "N activos" de la barra
+  superior, que se solapa con "N nuevos" (`activeCount = nuevos + en camino`, así que con 0 en
+  camino los dos números coinciden por casualidad) y además repite el contador que cada columna
+  ya muestra en su badge.
+
+### Testing — laboratorio (LAB) MONTADO
+
+🔴 **LAB es una ORGANIZACIÓN más dentro de la BD compartida, y NO es un cliente que
+  pague.** Es el laboratorio. Importa para todo lo que trate a las organizaciones como
+  cuentas comerciales —empezando por el estado de suscripción que escribe G-Centro—:
+  LAB existe justamente para que G-Centro pueda probar el circuito completo sin tocar
+  clientes reales, así que **nunca debe entrar a un cobro, a una métrica de negocio ni a
+  un conteo de clientes activos.**
+  🔄 **Actualizado 2026-08-31: ahora son CINCO organizaciones, no tres.** Clientes reales:
+  **G-10, Salchimelo y Café Aroma**. Laboratorio: **LAB** y **LabCentro** — esta última creada
+  con `labcentro-org.sql` para que G-Centro pueda vincular un segundo contrato; solo tiene la
+  fila de `organizations`, sin sede ni usuarios, así que nadie puede iniciar sesión ahí.
+  La tabla con el origen de cada una está en `CLAUDE.md` → *"Las organizaciones de la BD"*.
+  Los UUID se obtienen con la query del encabezado de
+  `supabase/organization-subscription.sql` (no se hardcodean acá: se leen de la BD).
+- 🔴 **CORREGIDO EL 2026-08-31 — acá había TRES afirmaciones falsas sobre el aislamiento
+  del laboratorio, y las tres tranquilizaban.** Decía "(Supabase separado de producción)",
+  "el backend (`VITE_GVENTO_*`) apunta al Supabase del lab" y "los health checks lo
+  impiden". **Ninguna de las tres era cierta como estaba escrita.** Lo notable: el repo ya
+  contenía la verdad en tres lugares —`tests/README.md` ("vive en el **mismo** Supabase que
+  la app"), `.env.test.example` ("⚠️ La BD es UNA sola") y `create-user.spec.ts` ("la BD es
+  UNA sola; el service role de este proyecto es también el de G-10 y Salchimelo")— y el único
+  archivo que decía lo contrario era **este**, el de planificación, o sea el que se lee al
+  decidir. Ver la clase en `CLAUDE.md` → *"una nota que declara una protección inexistente"*.
+
+- **✅ Laboratorio listo.** Existe la organización **LAB** con **2 sedes**, los usuarios
+  **owner.test** (rol owner) y **cajero.test** (rol cajero) con sus profiles, y productos de
+  prueba. La suite E2E corre contra LAB de forma determinista.
+
+- 🔴 **CUÁL ES EL AISLAMIENTO REAL.** LAB vive en el **MISMO proyecto Supabase que
+  producción** — la misma base que G-10, Salchimelo, Café Aroma y LabCentro. **No hay
+  separación de base de datos.** El aislamiento es **por ORGANIZACIÓN**, y descansa en dos
+  cosas:
+  1. **RLS**, que acota cada consulta a la organización del usuario autenticado.
+  2. **Las credenciales de `.env.test`**, que son de usuarios de LAB.
+
+  Corolario que hay que tener presente: **una falla de RLS no es un bug de aislamiento del
+  lab, es una fuga entre clientes.** No hay una segunda barrera detrás.
+
+- **Credenciales en `.env.test`** (gitignored): `E2E_OWNER_EMAIL/PASSWORD`,
+  `E2E_CASHIER_EMAIL/PASSWORD`, `E2E_WAITER_*`. **`.env.test` NO define
+  `VITE_GVENTO_SUPABASE_URL`** — el dev server que levanta Playwright lee `.env`, o sea el
+  backend de PRODUCCIÓN. Verificable: `grep VITE_GVENTO .env.test` no devuelve nada.
+  Ver `.env.test.example`.
+
+- ⚠️ **`E2E_SERVICE_ROLE_KEY` BYPASSEA EL RLS**, que es la barrera principal. Con la BD
+  compartida, esa key es la de TODAS las organizaciones, no "la del lab" (ya está advertido
+  en `.env.test.example` y en `create-user.spec.ts`). Hoy la usan **dos** specs, las dos
+  acotadas por id: `create-user.spec` (borra el usuario de prueba que ella misma creó) y
+  `suscripcion-estado.spec` (un `update ... .eq('id', orgId)` de LAB para probar el CHECK).
+  Reconfirmar con `grep -rn SERVICE_ROLE tests/`. Un spec nuevo que la use sin `.eq()`
+  acotado escribe sobre datos de clientes reales sin que nada lo frene.
+- **Doble health check en `tests/global-setup.ts`** (defensa en profundidad):
+  (1) la app servida en el puerto dedicado **5180** es G-Vento (no otra app);
+  (2) **las credenciales pertenecen a la org LAB** — hace login real, consulta
+  `organizations` (RLS solo deja ver la propia) y ABORTA la suite si no es LAB.
+  ⚠️ **Qué impide y qué NO.** Impide que la suite mute los datos de **otra organización**:
+  si `.env.test` tuviera credenciales de G-10, el check aborta. **NO impide** correr contra
+  la base de datos de producción — no la mira, y de hecho SIEMPRE se corre contra ella
+  (`.env.test` no define la URL). Y no cubre lo que pase por `E2E_SERVICE_ROLE_KEY`, que
+  saltea el RLS. Es una protección real y acotada; escribirla como "impide correr contra
+  producción" es lo que la volvía una garantía falsa.
+- **`retries: 0` por defecto** (lab determinista; un fallo es un fallo limpio que se
+  investiga). Override puntual con `E2E_RETRIES=N`.
+- **Suites pendientes de correr en el lab:** `tests/extras.spec.ts`,
+  `tests/extras-pos.spec.ts` (incl. sobreventa con stock negativo),
+  `tests/ventas-historial.spec.ts`, `tests/inventario.spec.ts`. Compilan
+  (`playwright test --list`; eran 71 al 2026-06-24 y **202 al 2026-08-26** — correr el
+  comando, no leer el número). `rbac.spec.ts` ya se corre verde contra el lab.
+- **Los flujos de caja y mesas mutan estado** — los specs limpian tras de sí, pero
+  pueden acumular residuos entre corridas (p. ej. mesas ocupadas). `closeShiftIfOpen`
+  cierra la caja del lab. Ver tests/README.md.
+- 🔴 **EL LAB NO ES DETERMINISTA ENTRE CORRIDAS, y el modo de fallo es que un spec
+  tumbe a OTRO.** No alcanza con que cada spec limpie: alcanza con que UNO no limpie.
+  **Evidencia medida (2026-08-19), no teórica:** la limpieza de
+  `numeracion-fallo.spec.ts` no limpiaba nada y no fallaba —fallaba en silencio—, así
+  que cada corrida dejaba viva una categoría `E2E NumFail ...`. Con **5 acumuladas**, el
+  strip de categorías del POS empujó el carrito fuera de pantalla y **tumbó 3 tests
+  ajenos** (`pos.spec.ts:12`, `venta-espera.spec.ts:21` y `:37`), que fallaban por
+  residuo que no era de ellos. Se perdió una tarde diagnosticando el spec equivocado.
+  Consecuencias prácticas:
+  - **Ante un rojo en un spec que no tocaste, sospechá del ESTADO antes que del código.**
+    El discriminador barato: `git stash -u` y correr el mismo spec sobre el árbol limpio.
+    Si falla igual, no es tu cambio.
+  - Una limpieza **sin aserción es indistinguible de una que no corre**. Toda limpieza
+    termina verificando que lo que borró ya no está.
+  - Ojo con las confirmaciones: en esta app "Desactivar" un producto abre un **modal
+    propio con botón "Sí, desactivar"**, NO un `window.confirm` nativo. Un
+    `page.on('dialog')` esperando el nativo no dispara nunca y el paso se salta en
+    silencio — eso es exactamente lo que pasó acá. Y la app **rechaza desactivar una
+    categoría con productos activos**, así que el orden es: productos primero, categoría
+    después.
+  - Cuando el lab se ensucia igual, barrer el residuo es legítimo: son datos de prueba.
+    Verificar con `select name, is_active from categories where name like 'E2E %'`.
+- ⚠️ **HAY UN SOLO LAB, ASÍ QUE LAS CORRIDAS DE DISTINTAS RAMAS SE HEREDAN ENTRE SÍ.**
+  Correr la suite sobre `main` (p. ej. para validar un cherry-pick antes de promover) deja
+  LAB en el estado que produjo **el código de main**, y la siguiente corrida de `develop`
+  arranca desde ahí. Los specs no lo notan mientras cada uno limpie lo suyo —por eso
+  importa el punto anterior—, pero es la primera hipótesis a revisar si aparece un rojo
+  raro justo después de haber probado otra rama. **No es problema hoy; está escrito para
+  que no se diagnostique el código cuando la causa es de qué rama vino el estado.**
+  Aplica igual a `git stash` + correr: lo que quede en LAB no se revierte con el árbol.
+
