@@ -233,8 +233,25 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    allowlist igual la redacta (ese es el punto de invertir el filtro) pero **se pierde la
    verificación**.
 
+5. 🔴 **Los `data-testid` — CONTRATO ENTRE `src/` Y **TODA** LA SUITE (agregado 2026-09-07).**
+   Un `data-testid` no se siente un contrato: parece un atributo de presentación. Pero **el que
+   lo escribe está en un archivo y los que lo consumen están en N specs**, y nada los sincroniza
+   — ni `tsc`, que no mira strings, ni el spec que uno tiene abierto.
+   🔴 **Ya falló, en esta sesión:** `shift-reprint` se movió de la fila del historial al modal
+   de detalle. Se actualizó `historiales.spec.ts` —el archivo en el que se estaba trabajando— y
+   **`arqueo.spec.ts:203` se quedó esperando 30 s por un botón que ya no existía ahí**. La suite
+   entera se puso roja por un identificador movido, y el rojo apareció recién en la corrida
+   completa, no al codear.
+   **MOVER O RENOMBRAR UN TESTID ES UN CAMBIO DE CONTRATO: se enumeran los consumidores ANTES.**
+   El comando, que no caduca: `grep -rn "<el-testid>" src/ tests/`. Si aparece en más de un
+   spec, se tocan todos en la misma pasada (R3). Lo mismo al **borrarlo**: un testid que
+   desaparece de `src/` sin desaparecer de `tests/` es un timeout esperando a ocurrir.
+   *Barrido inverso, útil como chequeo:* listar los testids que los specs piden y verificar que
+   cada uno exista en `src/`.
+
 → **Evidencia:** [`docs/BITACORA.md`](docs/BITACORA.md) → *"FASE 1 — estado de suscripción"*
-(el aviso a G-Centro) · el hallazgo del onboarding está en el inventario de arriba.
+(el aviso a G-Centro) · el hallazgo del onboarding está en el inventario de arriba · el caso de
+`shift-reprint` está en el commit `fix(test): arqueo.spec buscaba shift-reprint en la fila`.
 
 ---
 
@@ -383,7 +400,13 @@ Nunca leas el resultado de una suite desde una **tubería** (`| tail` devuelve e
 Escribí el código **dentro** del archivo de salida y grepealo.
 
 **Modo de fallo:** verde falso anunciado como verdadero. Medido: la notificación dijo
-*"exit code 0"* **4 de 4 veces, con dos suites rojas**.
+*"exit code 0"* **5 de 5 veces, con TRES suites rojas** (la quinta el 2026-09-07: la corrida
+integrada sobre `develop` terminó con `PLAYWRIGHT_EXIT=1` dentro del archivo —1 test rojo y 1
+sin correr— y la notificación anunció *exit code 0*).
+🔴 **El conteo es el argumento, no la regla.** Cinco de cinco no es "puede pasar": es que la
+notificación **NUNCA** reportó el exit de la suite, porque no es lo que mide — reporta el del
+shell, que termina bien aunque Playwright falle. Tratarla como señal de resultado es leer el
+número equivocado el 100% de las veces.
 
 **SEGUNDA TRAMPA, de la misma familia: `cmd1 || cmd2` NO ES REINTENTABLE si `cmd1` ya
 escribió.** Medido el 2026-08-31: un `python script.py || py script.py` —puesto como fallback
