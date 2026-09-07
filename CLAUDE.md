@@ -258,6 +258,21 @@ conocidas en lugar de por su definición. Cuatro instancias medidas, todas la mi
 | hook `sql-checklist` | `Write|Edit` | `Bash` (heredoc, `sed -i`, `python -`) |
 | guard de seed | dos nombres de org | las demás |
 | pre-flight de `seed_system_roles` (#12) | `from roles join organizations` | **LabCentro, que no tenía roles** |
+| **búsqueda del trigger de `updated_at` (#15)** | `set_updated_at`, `moddatetime`, `update_updated_at` | **`handle_updated_at`, que es como se llama acá** |
+
+🔴 **LA CLASE NO ES "ESCRIBIR UN GUARD": ES CUALQUIER ACTO DE ENUMERAR (2026-09-07, #15).**
+Las cuatro primeras instancias son código que decide. La quinta es **buscar evidencia**, y por
+eso se pasó por alto: nadie siente que está diseñando un filtro cuando hace un `grep`. Pero un
+`grep` por los nombres que uno espera **es una deny-list de lo que uno se acordó de imaginar**,
+y falla igual de callado: devuelve cero resultados, que se lee como "no existe" en vez de como
+"no busqué bien". Acá el trigger existía y se concluyó que no, y esa conclusión falsa se
+escribió en una migración como hecho verificado.
+**La forma correcta es buscar por la CLASE, no por el nombre supuesto:** el objetivo era
+"¿algo mantiene `orders.updated_at`?", así que la búsqueda es por la TABLA
+(`grep -n "trigger.*public.orders" supabase/*.sql`) o por el catálogo
+(`select tgname from pg_trigger where tgrelid = 'public.orders'::regclass`), nunca por el
+nombre que uno cree que tendría la función. Vale para grep, para `information_schema` y para
+cualquier búsqueda cuyo resultado vacío se vaya a usar como prueba de ausencia.
 
 🔴 **"Que esta vez no hubiera daño es SUERTE, no diseño."** El #12 no rompió nada porque
 LabCentro no tenía permisos que perder. Con una organización que sí los tuviera, el
@@ -464,6 +479,21 @@ Ninguna regla resultó falsa. El estado es lo que se pudre, así que se escribe 
 - **UNA NOTA QUE DIRIGE MAL CUESTA MÁS QUE UNA AUSENTE.** Las dos peores del documento no
   eran omisiones: describían código eliminado y una relación de ramas invertida. Si no
   podés verificar una afirmación, no la escribas como hecho.
+- 🔴 **NUNCA ESCRIBAS "VERIFICADO" SIN HABER VERIFICADO — ES EL SUBTIPO PEOR (2026-09-07, #15).**
+  Hay una gradación, y conviene tenerla clara porque el costo sube en cada escalón:
+  una nota falsa **desorienta** —el que la lee se va al lugar equivocado y vuelve—; una nota
+  falsa **que se declara verificada DESACTIVA LA VERIFICACIÓN DEL QUE LA LEE.** Ya no es que
+  mande a mirar mal: es que **convence de no mirar**, y encima con la autoridad de un chequeo
+  que nunca ocurrió. El lector razona sobre ficción creyendo que razona sobre una medición.
+  **Medido:** `delivery-delivered-at.sql` afirmó *"orders.updated_at es un default now() sin
+  trigger, o sea la hora de INSERCIÓN (verificado en schema.sql)"*. Falso: `schema.sql` define
+  `trg_orders_updated_at`. El paréntesis era la parte dañina — sin él, el próximo lector habría
+  ido a mirar; con él, no tenía por qué.
+  **La regla operativa:** la palabra "verificado" solo se escribe al lado de **cómo** se
+  verificó y **qué devolvió** ("verificado el 2026-08-31: 4 orgs con comodín"). Si no podés
+  poner el comando y su salida, no pongas la palabra. Y si la afirmación es sobre lo que existe
+  o no existe en la BD, la verificación no es leer un archivo: es consultarla.
+
 - 🔴 **Y LA PEOR DE TODAS: UNA NOTA QUE DECLARA UNA PROTECCIÓN INEXISTENTE.** Es una
   subclase de la anterior y es más grave, porque **no dirige mal: TRANQUILIZA mal.** Una nota
   que apunta al lugar equivocado te hace perder una tarde; una que dice *"esto está aislado"*
