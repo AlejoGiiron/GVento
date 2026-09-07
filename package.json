@@ -14,7 +14,9 @@
     "gen:rbac": "node scripts/gen-rbac-sql.mjs",
     "gen:rbac:check": "node scripts/gen-rbac-sql.mjs --check",
     "test:unit": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "capturas:preparar": "node scripts/capturas/preparar-local.mjs",
+    "capturas": "playwright test --config=scripts/capturas/capturas.config.ts"
   },
   "dependencies": {
     "@sentry/react": "^10.69.0",
