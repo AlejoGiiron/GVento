@@ -74,7 +74,10 @@ const ORDEN = [
   'sale-void.sql',
   'register-sale-void.sql',
   'fiado-clientes.sql',
+  'fiado-abono-lote.sql',          // debt_payments.batch_id + RPC de lote — necesita fiado-clientes y cash-movements
   'delivery-couriers.sql',
+  'delivery-delivered-at.sql',      // orders.delivered_at + trigger — necesita orders (schema.sql)
+  'fix-delivered-at-comentario.sql',// solo corrige el comment de esa columna
   'compras-proveedores.sql',
   'compra-no-toca-caja.sql',
   'reports-views.sql',
