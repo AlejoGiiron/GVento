@@ -49,4 +49,4 @@ EOF
 - Nunca hacer commit directo a `develop` — solo a ramas `feature/*` o `hotfix/*`
 - Un commit por funcionalidad o fix completo — si los staged incluyen cambios mezclados, advertirlo
 - No usar `--no-verify`
-- Después de ejecutar el commit, actualizar la sección "Estado actual del proyecto" en el `CLAUDE.md` raíz reflejando la funcionalidad que se acaba de commitear
+- NO actualizar ninguna sección de "estado actual" después del commit: el estado se consulta con `git log` (ver `docs/BITACORA.md` → "Estado actual del proyecto", que tiene los comandos). Si el commit cierra una deuda, se borra su entrada en `docs/DEUDAS.md` en el mismo commit
