@@ -375,6 +375,14 @@ deno_version = 2
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
+# aplicar-estado: G-Centro la llama firmada con HMAC y SIN JWT. En PROD "Verify JWT"
+# está desactivado en el Dashboard (ver el encabezado de supabase/functions/aplicar-estado/index.ts).
+# Declararlo acá hace que el stack LOCAL se comporte igual (antes daba 401 "Missing
+# authorization header" en el gateway) y que un `supabase functions deploy` no lo
+# reactive. create-user NO va acá: exige el JWT del llamante (default).
+[functions.aplicar-estado]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54337

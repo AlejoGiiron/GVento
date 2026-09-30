@@ -40,11 +40,13 @@ Dentro del stack local, el ambiente es la **organización `LAB`** que siembra
 organización **no es `LAB`**. Complementa al guard de loopback: ese mira **a qué
 base** se apunta; este, **con qué credenciales**.
 
-### Qué queda fuera en local
+### El secreto HMAC de `aplicar-estado` (contrato con G-Centro)
 
-- **`E2E_GCENTRO_HMAC_SECRET` no se define**: la función local `aplicar-estado`
-  no tiene el secreto, así que los casos de `suscripcion-estado.spec.ts` que
-  necesitan firma válida hacen skip.
+Vive **solo** en `supabase/functions/.env` (gitignored, aleatorio por máquina;
+lo crea `pnpm e2e:preparar`). Lo leen las dos puntas: el edge runtime local (al
+crearse el contenedor) y `playwright.config.ts` (para firmar). **No es** el
+secreto de la nube. Si falta, la suite **aborta** — antes esos casos de
+`suscripcion-estado.spec.ts` hacían skip en silencio.
 
 ## ⚠️ Los tests mutan el estado del laboratorio
 

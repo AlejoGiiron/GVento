@@ -25,6 +25,24 @@ for (const line of readFileSync(LOCAL_CONFIG, 'utf-8').split('\n')) {
   if (m) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '')
 }
 
+// Secreto HMAC de aplicar-estado: SOLO LOCAL, en supabase/functions/.env
+// (gitignored, aleatorio por máquina, lo crea `pnpm e2e:preparar`). Es el MISMO
+// archivo que lee el edge runtime local, así que el test firma con lo que la
+// función verifica: una sola fuente (R1). Si falta, se ABORTA: antes esos casos
+// de suscripcion-estado.spec.ts hacían skip en silencio y el contrato con
+// G-Centro quedaba sin custodia.
+const FN_ENV = 'supabase/functions/.env'
+const hmacLocal = existsSync(FN_ENV)
+  ? readFileSync(FN_ENV, 'utf-8').match(/^GCENTRO_HMAC_SECRET=(\S+)/m)?.[1]
+  : undefined
+if (!hmacLocal) {
+  throw new Error(
+    `Falta GCENTRO_HMAC_SECRET en ${FN_ENV}. Corré \`pnpm e2e:preparar\`: lo crea ` +
+    'y recrea el edge runtime para que lo lea.',
+  )
+}
+process.env.E2E_GCENTRO_HMAC_SECRET = hmacLocal
+
 // GUARD (allowlist de hosts, fail-closed): el backend es loopback o no se corre.
 // QUÉ IMPIDE: que la suite apunte a un Supabase remoto por un local.config
 //   editado o un merge malo. Un host que nadie previó cae del lado que aborta.

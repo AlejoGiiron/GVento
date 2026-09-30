@@ -34,7 +34,8 @@
  * Los dos archivos quedan intactos en el repo. Ver el README de capturas.
  */
 import { execFileSync, spawnSync } from 'node:child_process'
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, writeFileSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve, join } from 'node:path'
 
@@ -100,40 +101,62 @@ const ORDEN = [
 //
 // Qué versión es la correcta no se puede deducir: lo decide una persona. Así
 // que se DECLARA acá (allowlist) y el script lo hace cumplir antes de aplicar:
-//   · toda función definida en >1 archivo de ORDEN tiene que figurar acá;
-//   · el archivo declarado tiene que ser el ÚLTIMO de ORDEN que la define.
-// Una función redefinida que nadie declaró ABORTA, en vez de quedar con la
+//   · todo objeto definido en >1 archivo de ORDEN tiene que figurar acá;
+//   · el archivo declarado tiene que ser el ÚLTIMO de ORDEN que lo define.
+// Un objeto redefinido que nadie declaró ABORTA, en vez de quedar con la
 // versión que el azar del orden haya elegido.
+//
+// Cubre la CLASE, no solo la instancia que falló (R3): funciones, vistas,
+// triggers y policies — todo lo que un .sql posterior puede reemplazar en
+// silencio. Es una ALARMA TEMPRANA estática (corre en cada preparación, sin BD);
+// la verificación real de que la base local es igual a producción es la deriva
+// (supabase/diag/deriva-esquema.sql + scripts/deriva-comparar.mjs).
 const GANA = {
-  add_order_items_with_extras: 'order-items-stock-recipes.sql',
-  register_purchase:           'compra-no-toca-caja.sql',
-  enforce_profile_organization:'fix-enforce-profile-organization-definer.sql',
-  get_my_organization_id:      'profiles-is-active-enforced.sql',
-  get_my_restaurant_id:        'profiles-is-active-enforced.sql',
-  get_my_role:                 'profiles-is-active-enforced.sql',
-  has_permission:              'profiles-is-active-enforced.sql',
-  handle_new_user:             'profiles-organization-invariant.sql',
+  'function add_order_items_with_extras': 'order-items-stock-recipes.sql',
+  'function register_purchase':           'compra-no-toca-caja.sql',
+  'function enforce_profile_organization':'fix-enforce-profile-organization-definer.sql',
+  'function get_my_organization_id':      'profiles-is-active-enforced.sql',
+  'function get_my_restaurant_id':        'profiles-is-active-enforced.sql',
+  'function get_my_role':                 'profiles-is-active-enforced.sql',
+  'function has_permission':              'profiles-is-active-enforced.sql',
+  'function handle_new_user':             'profiles-organization-invariant.sql',
+  'policy "profiles: editar el propio" on profiles': 'profiles-active-store-rls.sql',
 }
+
+const DEFINICIONES = [
+  ['function', /create\s+(?:or\s+replace\s+)?function\s+(?:public\.)?"?(\w+)"?\s*\(/gi, (m) => m[1]],
+  ['view',     /create\s+(?:or\s+replace\s+)?view\s+(?:public\.)?"?(\w+)"?/gi,          (m) => m[1]],
+  ['trigger',  /create\s+(?:or\s+replace\s+)?(?:constraint\s+)?trigger\s+"?(\w+)"?[\s\S]*?\son\s+(?:public\.)?"?(\w+)"?/gi, (m) => `${m[1]} on ${m[2]}`],
+  ['policy',   /create\s+policy\s+"([^"]+)"\s+on\s+(?:public\.)?"?(\w+)"?/gi,             (m) => `"${m[1]}" on ${m[2]}`],
+]
 
 function verificarQuienGana() {
   const defs = {}
   for (const f of ORDEN) {
     const sql = readFileSync(join(SUPA, f), 'utf-8').replace(/--.*$/gm, '')
-    for (const m of sql.matchAll(/create\s+(?:or\s+replace\s+)?function\s+(?:public\.)?"?(\w+)"?\s*\(/gi)) {
-      const fn = m[1].toLowerCase()
-      ;(defs[fn] ??= []).push(f)
+    for (const [tipo, re, nombre] of DEFINICIONES) {
+      for (const m of sql.matchAll(re)) {
+        const clave = `${tipo} ${nombre(m).toLowerCase()}`
+        ;(defs[clave] ??= []).push(f)
+      }
     }
   }
+  const declaradas = Object.fromEntries(Object.entries(GANA).map(([k, v]) => [k.toLowerCase(), v]))
   const errores = []
-  for (const [fn, archivos] of Object.entries(defs)) {
+  for (const [obj, archivos] of Object.entries(defs)) {
     const unicos = [...new Set(archivos)]
     if (unicos.length < 2) continue
     const ultimo = unicos.sort((a, b) => ORDEN.indexOf(a) - ORDEN.indexOf(b)).at(-1)
-    if (!GANA[fn]) {
-      errores.push(`${fn}: definida en ${unicos.join(', ')} y NO está declarada en GANA. Decidí qué versión es la correcta.`)
-    } else if (GANA[fn] !== ultimo) {
-      errores.push(`${fn}: GANA dice ${GANA[fn]}, pero con este ORDEN queda ${ultimo}. Mové ${GANA[fn]} después.`)
+    if (!declaradas[obj]) {
+      errores.push(`${obj}: definido en ${unicos.join(', ')} y NO está declarado en GANA. Decidí qué versión es la correcta.`)
+    } else if (declaradas[obj] !== ultimo) {
+      errores.push(`${obj}: GANA dice ${declaradas[obj]}, pero con este ORDEN queda ${ultimo}. Mové ${declaradas[obj]} después.`)
     }
+  }
+  // Una entrada de GANA que ya no corresponde a nada redefinido es ruido que
+  // envejece hacia la mentira: también aborta.
+  for (const k of Object.keys(declaradas)) {
+    if (!defs[k] || new Set(defs[k]).size < 2) errores.push(`GANA declara "${k}", pero ya no está definido en más de un archivo de ORDEN. Sacalo.`)
   }
   if (errores.length) {
     console.error('🔴 Orden de migraciones inconsistente:\n  ' + errores.join('\n  '))
@@ -279,6 +302,22 @@ paso('Supabase local')
 if (!existsSync(join(SUPA, 'config.toml'))) {
   throw new Error('Falta supabase/config.toml. Corré `supabase init` primero.')
 }
+
+// Secreto HMAC de aplicar-estado, SOLO LOCAL. Vive en supabase/functions/.env
+// (gitignored), que el edge runtime lee AL CREARSE el contenedor. Es aleatorio
+// por máquina: no es el secreto de G-Centro de la nube. playwright.config.ts lo
+// lee del MISMO archivo para firmar (una sola fuente, R1). Antes esos casos de
+// suscripcion-estado.spec.ts hacían skip: el contrato con G-Centro sin custodia.
+const FN_ENV = join(SUPA, 'functions', '.env')
+let secretoNuevo = false
+if (!existsSync(FN_ENV) || !/^GCENTRO_HMAC_SECRET=\S+/m.test(readFileSync(FN_ENV, 'utf-8'))) {
+  writeFileSync(FN_ENV,
+    '# SOLO LOCAL (gitignored). Lo crea/lee scripts/capturas/preparar-local.mjs.\n' +
+    '# NO es el secreto de G-Centro de la nube: es aleatorio por máquina.\n' +
+    `GCENTRO_HMAC_SECRET=local-${randomBytes(24).toString('hex')}\n`)
+  secretoNuevo = true
+  console.log('  secreto HMAC local creado en supabase/functions/.env')
+}
 try {
   execFileSync('docker', ['inspect', DB], { stdio: 'ignore' })
   console.log(`  ya está arriba (${DB})`)
@@ -288,14 +327,30 @@ try {
 }
 
 // ── 0b. Edge Functions ──────────────────────────────────────────────────────
-// Medido el 2026-09-30 (CLI 2.90): `supabase start` deja el edge runtime en
-// "Stopped services" aunque [edge_runtime] esté habilitado, y sin él Kong
-// responde 503 "name resolution failed" a /functions/v1/* — create-user.spec
-// fallaba por eso, no por la función. Se arranca el contenedor y se VERIFICA
-// que sirva; si no, se aborta en vez de dejar una suite que falla por entorno.
+// Sin edge runtime, Kong responde 503 "name resolution failed" a
+// /functions/v1/* — create-user.spec fallaba por eso, no por la función.
+// Visto el 2026-09-30: con un contenedor de edge runtime VIEJO (creado semanas
+// antes), `supabase start` lo reportaba en "Stopped services" y no lo
+// levantaba; borrado ese contenedor, stop+start lo creó bien. Y el contenedor
+// lee supabase/functions/.env solo al CREARSE: si el secreto es nuevo, hay que
+// recrearlo. Se VERIFICA que sirva y tenga el secreto; si no, se aborta.
 paso('Edge Functions')
 const EDGE = 'supabase_edge_runtime_gvento'
-try { execFileSync('docker', ['start', EDGE], { stdio: 'ignore' }) } catch { /* se verifica abajo */ }
+const secretoEnContenedor = () => {
+  try { return execFileSync('docker', ['exec', EDGE, 'printenv', 'GCENTRO_HMAC_SECRET'], { encoding: 'utf-8' }).trim() }
+  catch { return '' }
+}
+const secretoArchivo = readFileSync(FN_ENV, 'utf-8').match(/^GCENTRO_HMAC_SECRET=(\S+)/m)[1]
+if (secretoNuevo || secretoEnContenedor() !== secretoArchivo) {
+  console.log('  recreando el stack para que el edge runtime lea el secreto…')
+  try { execFileSync('docker', ['rm', '-f', EDGE], { stdio: 'ignore' }) } catch { /* no existía */ }
+  execFileSync('supabase', ['stop'], { cwd: ROOT, stdio: 'inherit' })
+  execFileSync('supabase', ['start'], { cwd: ROOT, stdio: 'inherit' })
+}
+if (secretoEnContenedor() !== secretoArchivo) {
+  console.error(`  🔴 ${EDGE} no tiene el GCENTRO_HMAC_SECRET de supabase/functions/.env.`)
+  process.exit(1)
+}
 let edgeOk = false
 for (let i = 0; i < 20 && !edgeOk; i++) {
   try {
