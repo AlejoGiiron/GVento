@@ -88,6 +88,7 @@ const ORDEN = [
   'organization-subscription.sql',
   'storage-product-images.sql',
   'security-definer-revoke.sql',
+  'reconciliar-con-prod.sql',           // ÚLTIMA: lleva la base a lo que prod tiene de verdad (deriva 0)
 ]
 
 // ── QUIÉN GANA cuando una función está definida en más de un .sql ─────────────
@@ -369,6 +370,15 @@ console.log('  ✅ sirviendo aplicar-estado y create-user')
 paso(`Esquema (${ORDEN.length} archivos, base en blanco)`)
 verificarQuienGana()   // antes de tocar la base: si el orden está mal, no se aplica nada
 psql(RESET)
+// Privilegios por defecto de supabase_admin en public: prod los tiene (los crea
+// la plataforma al hacer el proyecto) y el RESET, al recrear el esquema, los
+// pierde. Solo supabase_admin puede fijarlos para sí mismo. Sin esto, la deriva
+// (categoría default_acl) no da 0. Valores = los de prod (deriva-detalle.sql).
+psql(`
+alter default privileges for role supabase_admin in schema public grant all on tables    to postgres, anon, authenticated, service_role;
+alter default privileges for role supabase_admin in schema public grant all on functions to postgres, anon, authenticated, service_role;
+alter default privileges for role supabase_admin in schema public grant all on sequences to postgres, anon, authenticated, service_role;
+`, { user: 'supabase_admin' })
 for (const f of ORDEN) {
   try {
     aplicar(f)
