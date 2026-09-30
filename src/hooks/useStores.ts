@@ -19,7 +19,7 @@ export function useStores() {
   const { organizationId } = useAuth()
   const queryClient = useQueryClient()
 
-  const { data: stores = [], isLoading } = useQuery({
+  const { data: stores = [], isLoading: storesLoading } = useQuery({
     queryKey: ['org_stores', organizationId],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -34,7 +34,7 @@ export function useStores() {
     staleTime: 60_000,
   })
 
-  const { data: orgUsers = [] } = useQuery({
+  const { data: orgUsers = [], isLoading: usersLoading } = useQuery({
     queryKey: ['org_users', organizationId],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -49,7 +49,7 @@ export function useStores() {
     staleTime: 60_000,
   })
 
-  const { data: assignments = [] } = useQuery({
+  const { data: assignments = [], isLoading: assignmentsLoading } = useQuery({
     queryKey: ['org_user_stores', organizationId],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -123,7 +123,10 @@ export function useStores() {
     stores,
     orgUsers,
     assignments,
-    isLoading,
+    // Usuarios y asignaciones entran al flag: antes la sección decía "Sin
+    // usuarios." y pintaba todos los accesos DESMARCADOS mientras cargaban, y un
+    // click en esa ventana reasignaba lo que ya estaba asignado.
+    isLoading: storesLoading || usersLoading || assignmentsLoading,
     createStore: createStoreMut.mutateAsync,
     updateStore: updateStoreMut.mutateAsync,
     deleteStore: deleteStoreMut.mutateAsync,

@@ -90,7 +90,7 @@ export function resolveNotice(
 export function useSubscriptionStatus() {
   const { organizationId } = useAuth()
 
-  const { data, isError } = useQuery({
+  const { data, isError, isPending } = useQuery({
     queryKey: ['organization-subscription', organizationId],
     queryFn: async () => {
       const { data, error } = await getOrganizationSubscription(organizationId!)
@@ -115,6 +115,15 @@ export function useSubscriptionStatus() {
 
   return {
     notice,
+    /**
+     * Estado de la LECTURA, no del aviso. No cambia la decisión (sigue siendo
+     * fail-open: error ⇒ sin aviso); solo hace distinguible "todavía no sé" de
+     * "leí y no hay aviso". Sin esto, "no hay banner" se cumplía también
+     * mientras la query cargaba. Con la query deshabilitada (sin organización)
+     * isPending queda true: se reporta 'sin-org', que también es una respuesta.
+     */
+    consulta: (!organizationId ? 'sin-org' : isError ? 'error' : isPending ? 'cargando' : 'ok') as
+      'sin-org' | 'cargando' | 'error' | 'ok',
     /** Solo diagnóstico — NO se usa para decidir si el aviso se muestra. */
     actualizadoEn: data?.subscription_updated_at ?? null,
   }

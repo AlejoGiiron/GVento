@@ -2,24 +2,35 @@ import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 
+export type DeliveryCountEstado = 'cargando' | 'ok' | 'error'
+
 /**
- * Hook ligero para el badge del sidebar.
+ * Hook ligero para el badge del sidebar y el aviso del cierre de turno.
  * Cuenta órdenes de delivery activas (pending/preparing/ready).
  * Mantiene un canal Realtime propio para mantenerse sincronizado.
+ *
+ * 🔴 Devuelve el ESTADO además del número. Antes arrancaba en 0 y convertía el
+ * error en 0 (`setCount(c ?? 0)`): mientras cargaba —o si fallaba— el cierre de
+ * turno afirmaba "no hay domicilios pendientes" sin saberlo (fail-open), y un
+ * test que afirmaba la ausencia del aviso pasaba por la carga, no por el dato
+ * (delivery-turno.spec, medido 2026-09-30). `count` es null cuando no se sabe.
  */
-export function useDeliveryCount(): number {
+export function useDeliveryCount(): { count: number | null; estado: DeliveryCountEstado } {
   const { profile } = useAuth()
-  const [count, setCount] = useState(0)
+  const [count, setCount] = useState<number | null>(null)
+  const [estado, setEstado] = useState<DeliveryCountEstado>('cargando')
 
   const fetchCount = useCallback(async () => {
     if (!profile) return
-    const { count: c } = await supabase
+    const { count: c, error } = await supabase
       .from('orders')
       .select('*', { count: 'exact', head: true })
       .eq('restaurant_id', profile.restaurant_id)
       .eq('type', 'delivery')
       .in('status', ['pending', 'preparing', 'ready'])
+    if (error) { setEstado('error'); return }   // conserva el último conteo conocido, si hubo
     setCount(c ?? 0)
+    setEstado('ok')
   }, [profile])
 
   useEffect(() => {
@@ -48,5 +59,5 @@ export function useDeliveryCount(): number {
     }
   }, [profile, fetchCount])
 
-  return count
+  return { count, estado }
 }

@@ -419,7 +419,7 @@ export function SalesHistoryPage() {
   const [page, setPage] = useState(0)
   const [detailId, setDetailId] = useState<string | null>(null)
 
-  const { rows, count, pageCount, isLoading, isFetching } = useSalesHistory({
+  const { rows, count, pageCount, isLoading, isFetching, isPlaceholderData } = useSalesHistory({
     from, to, method: method || null, search, page,
   })
 
@@ -562,12 +562,17 @@ export function SalesHistoryPage() {
           </div>
         )}
 
+        {/* Estado de la lista, legible: aria-busy mientras carga, refresca o
+            muestra datos del filtro ANTERIOR (keepPreviousData), y data-metodo
+            con el filtro aplicado. Sin esto, "la venta X no está en la lista"
+            se podía evaluar sobre la lista vieja o durante la carga. */}
+        <div data-testid="sales-list" aria-busy={isLoading || isFetching || isPlaceholderData} data-metodo={method || 'todos'}>
         {isLoading ? (
           <div style={{ padding: 50, textAlign: 'center', color: '#94a3b8', fontSize: 13.5 }}>
             Cargando ventas...
           </div>
         ) : rows.length === 0 ? (
-          <div style={{ padding: 60, textAlign: 'center', color: '#94a3b8', fontSize: 13.5 }}>
+          <div data-testid="sales-empty" style={{ padding: 60, textAlign: 'center', color: '#94a3b8', fontSize: 13.5 }}>
             <Receipt size={32} style={{ margin: '0 auto 14px', display: 'block', opacity: 0.3 }} />
             No hay ventas para los filtros seleccionados.
           </div>
@@ -636,6 +641,7 @@ export function SalesHistoryPage() {
             })}
           </div>
         )}
+        </div>
       </div>
 
       {/* Pagination */}

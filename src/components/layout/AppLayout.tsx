@@ -105,7 +105,7 @@ export function AppLayout() {
   // Branding de la SEDE activa (restaurants): nombre + logo capturados en Config.
   const brandName = restaurant?.name ?? 'G-Vento'
   const brandLogo = restaurant?.logo_url ?? null
-  const deliveryCount = useDeliveryCount()
+  const { count: deliveryCount } = useDeliveryCount()
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const { collapsed, toggle } = useCollapsedGroups()
@@ -207,7 +207,7 @@ export function AppLayout() {
                       >
                         <Icon className="w-4 h-4 flex-shrink-0" />
                         <span className="flex-1">{label}</span>
-                        {to === '/delivery' && deliveryCount > 0 && (
+                        {to === '/delivery' && (deliveryCount ?? 0) > 0 && (
                           <span
                             className="ml-auto text-xs font-bold rounded-full px-1.5 py-0.5 min-w-[18px] text-center leading-none"
                             style={{ background: '#f59e0b', color: '#fff' }}

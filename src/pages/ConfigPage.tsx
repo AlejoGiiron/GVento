@@ -1573,12 +1573,14 @@ function RoleModal({ role, onClose }: { role: RoleRow | 'new'; onClose: () => vo
 }
 
 function SectionRoles() {
-  const { roles, roleCounts, isLoading, deleteRole, isMutating } = useRoles()
+  const { roles, roleCounts, roleCountsError, isLoading, deleteRole, isMutating } = useRoles()
   const [editRole, setEditRole] = useState<RoleRow | 'new' | null>(null)
 
   if (isLoading) return <Skeleton />
 
   const handleDelete = async (role: RoleRow) => {
+    // Fail-closed: sin conteo no se sabe si hay usuarios con este rol.
+    if (roleCountsError) { toast.error('No se pudo verificar si el rol tiene usuarios. Recargá e intentá de nuevo.'); return }
     if ((roleCounts[role.id] ?? 0) > 0) { toast.error('No puedes eliminar un rol con usuarios asignados'); return }
     if (!window.confirm(`¿Eliminar el rol "${role.name}"?`)) return
     await deleteRole(role.id)
