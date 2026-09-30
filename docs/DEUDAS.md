@@ -132,56 +132,148 @@ con origen externo. No construir — solo no bloquear.
 
 ## Pendientes de verificar / deuda conocida
 
-### ⚠️ FLAKE ABIERTO — `pago-mixto.spec.ts:247` (MESA: cierre mixto) falló 1 de 5 veces (2026-09-07)
+### 🔴 Una mesa que tuvo ventas NO se puede borrar — y TablesPage deja intentarlo (confirmado 2026-09-30)
 
-**No se arregló: no se entiende todavía, y un flake no se reproduce a pedido.** Se anota con la
-evidencia que hay para que la próxima vez no se empiece de cero.
+**Precondición de M2** (varios celulares en mesas). No se construye ahora.
 
-**Qué pasó.** En la 2ª corrida completa sobre `develop` integrado, el click sobre la tarjeta del
-producto no abrió el modal de configuración:
+**Evidencia** (`supabase/diag/borrar-mesa-simulacion.sql`, corrida por el usuario en el SQL
+Editor de prod contra mesas de LAB, con rollback forzado): la mesa CON una orden `delivered`
+falló con **23514 `chk_dine_in_has_table`**, con CONTEXT del `UPDATE … SET table_id = NULL`;
+la mesa SIN órdenes dio `SIMULACION_OK filas=1`. Rollback verificado: la orden `49a7f922…`
+conserva su `updated_at` original.
 
+**Mecanismo:** `orders.table_id` es `ON DELETE SET NULL` y `chk_dine_in_has_table` exige mesa
+en toda orden `dine_in`. Una mesa que vendió **una vez** queda imborrable para siempre.
+`TablesPage` → `handleDelete` solo bloquea con órdenes `pending/preparing/ready`: deja
+intentar el borrado de una mesa libre con historial y el cliente recibe el error crudo de
+Postgres en un toast.
+
+**Lo que NO es la salida** (decidido): cambiar la FK a `CASCADE` (borra historial de ventas)
+ni relajar el check (deja órdenes de mesa sin mesa).
+
+**Diseño propuesto — ARCHIVAR, no borrar** (va con M2):
+- Columna `tables.archived_at timestamptz null` (null = activa). Migración nueva; ningún dato
+  existente cambia.
+- "Eliminar mesa" pasa a ser una RPC `archive_table(p_table_id)` SECURITY DEFINER con
+  `for update` sobre la mesa (con varios celulares, dos pueden abrirla y archivarla a la vez):
+  exige mesa `free` y sin órdenes activas; si la mesa **nunca** tuvo órdenes la borra de
+  verdad, si tuvo la archiva, y **devuelve cuál de las dos hizo**.
+- Toda lectura de mesas **para operar** (mapa, picker, `useTables`) filtra
+  `archived_at is null`. Reportes e historial NO: la venta sigue mostrando su mesa.
+- Si hay o se agrega unicidad por nombre, tiene que ser parcial (`where archived_at is null`)
+  para poder crear "Mesa 3" de nuevo después de archivarla.
+- Desarchivar desde Configuración (`archived_at = null`), con las archivadas en lista aparte.
+- Antes de construir, barrido R3 por la TABLA (`from('tables')` en `src/`): cada lectura
+  decide si filtra. Una que se olvide muestra mesas archivadas en la operación.
+
+**Para reconfirmar el comportamiento actual** (lectura):
+`select conname, pg_get_constraintdef(oid) from pg_constraint where conrelid = 'public.orders'::regclass and pg_get_constraintdef(oid) ilike '%table_id%';`
+
+### 🔴 "Cerrar mesa sin consumo" son DOS escrituras de cliente no atómicas (anotado 2026-09-30)
+
+**Precondición de M2.** No se arregló en el Paso C.
+
+`TablesPage` → `handleCloseEmptyTable` hace `updateOrderStatus(order.id, 'cancelled')` y
+**después** `updateTableStatus(table.id, 'free')`, dos requests separados. Si el segundo no
+llega (red de celular, pestaña cerrada), la mesa queda **ocupada con su orden cancelada**.
+Medido en LAB de la nube (2026-09-21): **14 mesas `Mesa E2E …` ocupadas cuya única orden está
+`cancelled`** — exactamente esa forma. `mesas.spec` solo verificaba que el panel se cerrara.
+Con varios celulares, además, dos pueden cerrar o abrir la misma mesa a la vez.
+
+**La salida es una RPC** `close_empty_table(p_table_id)` SECURITY DEFINER que, en una
+transacción y con `for update` sobre la mesa, verifique que la orden no tenga ítems, la
+cancele y libere la mesa. No "reintentar el segundo request".
+
+### 🔴 `register_sale_payment` acepta cobros SIN turno abierto — medido; el cambio va sin aviso a clientes (2026-09-30)
+
+- **El defecto** (`tests/cobro-concurrente.spec.ts`, rama `diag/verificaciones-pre-m1`): con
+  la sede sin turno la RPC acepta el cobro (20/20) y el pago no cae en ninguna ventana de
+  turno, o sea en ningún arqueo.
+- **¿Rompe a alguien exigir turno?** `supabase/diag/cobros-fuera-de-turno.sql` en prod dio
+  **0 pagos fuera de turno en G-10, Salchimelo y Café Aroma** (60 días). La query se validó
+  contra un **positivo conocido** en Docker (R10): un cobro real con la caja cerrada la llevó
+  de 0 a 1 en LAB (monto y hora de Bogotá correctos) y volvió a 0 al limpiarlo.
+  ⇒ el cambio (1) —lock de la orden + exigir turno— **sale sin aviso a clientes**.
+- **Doble cobro:** el mecanismo es real (check-then-act sin lock bajo READ COMMITTED) pero
+  dio 0/160 duplicados por red. Lo cierra el `for update` del mismo cambio; el spec NO lo
+  caza y está marcado así.
+
+### 🔴 La base local es un PROXY de producción — 5.6 queda SUSPENDIDO hasta medir la deriva (2026-09-30)
+
+`preparar-local.mjs` estaba "verificado por ejecución contra una base en blanco" (140a0f2) y
+**construía una base distinta de producción sin un solo error**: `add_order_items_with_extras`
+quedaba en la versión VIEJA (sin descuento por receta), porque `order-extras-rpc.sql` se
+aplicaba después de `order-items-stock-recipes.sql` y plpgsql no valida al crear. Corregido el
+orden y agregado el guard `GANA` (todo objeto redefinido en más de un `.sql` —función, vista,
+trigger o policy— declara qué archivo gana; si no, aborta). El guard es una alarma estática:
+**la verificación real es la deriva contra prod.**
+
+⇒ **5.6 ("ORDEN es una lista de siembra lista para `schema_migrations`") queda SUSPENDIDO**
+hasta que la deriva dé 0. Una lista que construye otra base no es un ledger.
+
+**El comando que lo reabre:**
+```bash
+# 1) SQL Editor de PROD: supabase/diag/deriva-esquema.sql → Export → CSV → deriva-prod.csv
+# 2) acá, con Docker arriba y la base recién preparada:
+pnpm e2e:preparar && pnpm deriva:comparar deriva-prod.csv     # exit 0 = deriva 0
 ```
-Locator: getByTestId('item-config-modal')   Expected: visible   → element(s) not found
-```
+Toda diferencia es una deuda de uno de dos tipos: el `.sql` del repo no es lo que se aplicó
+en prod, o prod tiene algo aplicado a mano que el repo no tiene.
 
-**Qué NO es** (descartado, no supuesto):
+### Residuo de LAB en la NUBE — baja a limpieza opcional (2026-09-30)
 
-- **No es una regresión de esta sesión.** El mismo test pasó **7/7 en las tres corridas
-  completas anteriores del mismo día**, incluida la primera con las cuatro ramas ya integradas.
-- **No es del código que se tocó.** Ni mesas, ni el picker de productos, ni `openTableAndAddItems`
-  aparecen en ningún commit de la sesión.
-- **No reproduce aislado:** `pago-mixto.spec.ts` solo → **7/7 verde**.
+Desde el 2026-09-30 la suite corre **solo contra Docker**, así que el residuo de LAB en la nube
+(188 mesas al 2026-09-21, 14 ocupadas con orden cancelada, 20 ventas cobradas sin número)
+**dejó de crecer**. El barrido pasa de "precondición de la suite verde" a limpieza opcional.
+Si se hace: por UUID de LAB (`f4fa692d-6cf3-43fb-a17f-18b8b163c918`), contando antes y **sin
+intentar borrar mesas con ventas** (no se puede, ver arriba): archivarlas cuando exista el
+archivado. B1 sigue importando por otra razón: le pasa hoy a un cliente desde TablesPage.
 
-🔴 **LA PISTA QUE VALE, y que hay que mirar primero:** el snapshot de la página al fallar dice
-**"Mapa del salón · 15 ocupadas · 161 libres"** — **176 mesas** en el laboratorio, y 15 de ellas
-ABIERTAS. Es residuo acumulado de corridas viejas (cada spec que crea una mesa deja una si la
-limpieza no llega a correr, y la limpieza no corre cuando el test anterior falla en un
-`describe.serial`). Un mapa de 176 tarjetas es mucho más lento de renderizar que uno de 10, y
-este test depende de que el picker esté montado cuando se clickea el producto.
-
-**Hipótesis a verificar (NO verificada):** el volumen del mapa alarga el render lo suficiente
-como para que el click del producto llegue antes de que el picker termine de montar. Encaja con
-que falle en la corrida larga —donde el lab ya juntó mesas de los specs previos— y no aislado.
-
-**Cómo investigarlo la próxima vez:**
-
+Las **20 "cobradas sin número"** de LAB NO son el `DEFAULT 'paid'`: la columna de
+`numeracion-duplicados.sql` exige una fila en `payments`. Salen de `numeracion-fallo.spec.ts`,
+que por diseño deja **una** venta cobrada sin número por corrida (reproducido en Docker: de 0 a
+1, producto `E2E NumFailProd …`). Para confirmarlo en la nube (lectura):
 ```sql
--- ¿cuántas mesas tiene el laboratorio, y cuántas quedaron abiertas?
-select status, count(*) from public.tables
- where restaurant_id = '<sede Lab Norte>' group by status;
+select o.created_at, o.total,
+       (select count(*) from payments p where p.order_id = o.id) as pagos,
+       (select string_agg(pr.name, ',') from order_items oi
+          join products pr on pr.id = oi.product_id where oi.order_id = o.id) as productos
+  from orders o join restaurants r on r.id = o.restaurant_id
+ where r.organization_id = 'f4fa692d-6cf3-43fb-a17f-18b8b163c918'
+   and o.order_number is null and o.payment_status = 'paid'
+   and exists (select 1 from payments p where p.order_id = o.id)
+ order by o.created_at;
+-- esperado: ~20 filas, pagos >= 1, productos 'E2E NumFailProd …'
 ```
 
-1. Contar las mesas del lab con esa query. Si son cientos, **limpiar las de prueba** (nombre con
-   sufijo de timestamp) y volver a correr la suite completa: si el flake desaparece, la causa era
-   el volumen y el arreglo de fondo es que los specs borren su mesa en un `afterAll` (que corre
-   aunque el test falle), no en un test de limpieza al final del `describe.serial`.
-2. Si persiste con el lab limpio, la causa es otra y hay que mirar el trace de la corrida
-   fallida, no re-correr.
+### Ausencias y ceros que la UI muestra mientras carga — lo que quedó para el Paso D (2026-09-30)
 
-**Lo que NO hay que hacer:** re-correr hasta que dé verde y darlo por resuelto. Un flake que
-pasa en el reintento sigue siendo un flake, y este toca el camino de mesa + pago mixto, que es
-plata.
+El barrido R3 del Paso C (106 aserciones de ausencia, 23 sin garantía de carga) corrigió las
+23, en el test o en el producto. Quedan de la misma clase, en `useCashShift`, que reescribe el
+Paso D (`close_cash_shift`):
+- `salesSummary` / `vouchersTotal` valen `null`/`0` mientras cargan: `ShiftBanner` pinta "$0"
+  de ventas del turno y `CloseShiftModal` calcula el esperado con ventas incompletas. Specs que
+  leen esos valores apoyados solo en `networkidle`: `pago-mixto` (`readShiftSales`) y `fiado`
+  (`readKpis`, sobre los KPIs de `FiadoPage`, que tampoco consultan `isLoading`).
+- Limpiezas que deciden con `count()`, que no reintenta (si la lista no cargó, el paso se
+  saltea en silencio): `fiado.spec` (clientes), `fiado-lote.spec`, `cocina.spec`.
+
+### ✅ Flakes de `pago-mixto:247` y `vale-descuento` REPORTE — causa encontrada y arreglada en el PRODUCTO (2026-09-30)
+
+- **`pago-mixto:247`** no era el volumen de mesas: `useProductsWithExtras` devolvía un set VACÍO
+  mientras cargaba (`?? new Set()`), y un click sobre un producto con extras lo agregaba SIN
+  abrir el modal. Reproducido demorando `product_extras` 1,5 s. Arreglo fail-closed (gate de
+  carga, y modal si el set no se conoce); `tests/extras-carga.spec.ts`, auditado por mutación:
+  los casos LENTO y ERROR mueren contra el código viejo.
+- **`vale-descuento` REPORTE:** `useReports` dejaba la query de vales fuera de `isLoading` y la
+  tarjeta pintaba $0 mientras cargaba. El test ahora FUERZA la ventana (2 s de demora) y con el
+  hook viejo da `Received: 0`.
+- El residuo de mesas era real pero de otra causa: limpiezas al final de un `describe.serial` y
+  sin aserción. Ahora mesa fija por spec + `afterAll` con aserción (`tests/helpers/lab.ts`).
+
 ### 🔴 Registrar un movimiento y cerrar turno EN SEGUIDA puede persistir un esperado sin ese movimiento (hallado 2026-09-07)
+
+**✅ MEDIDO el 2026-09-21** (contra LAB en la nube, antes de pasar las pruebas a Docker; esperado leído del PATCH a `cash_shifts`): con red local y sin pausa, 3/3 correcto; con el GET de `cash_movements` demorado 2 s y sin pausa, **3/3 CARRERA** (se persistió la apertura sin el egreso); a ritmo humano con la misma demora, 3/3 correcto; y con **dos dispositivos** (B registra un egreso con el modal de cierre de A abierto) **siempre carrera**: `cash_movements` no tiene realtime ni polling, así que el modal de A nunca se entera. Con varios celulares es el caso normal, no el raro. Salida: el Paso D (`close_cash_shift`, esperado calculado en el servidor).
 
 **NO se arregló en esta sesión.** Se anota porque es plata mal declarada en un snapshot que
 después nadie recalcula — el arqueo se congela al cerrar, a propósito, así que un esperado
