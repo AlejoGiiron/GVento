@@ -268,6 +268,25 @@ vuelve a contar) — o se prueba si actualizar el CLI la iguala.
   gate es el enum `get_my_role() = 'admin'`, no `has_permission` (misma deuda que el resto).
   Salida propuesta: policy de UPDATE (y DELETE) para `restaurant-logos` con
   `has_permission('config.acceder')`, en una migración que SÍ se aplica en prod.
+
+**Actualización 2026-09-30 — `restaurant-logos`: además de no poder reemplazar, había un HUECO
+ENTRE CLIENTES.** La policy de INSERT de prod ("admin sube") no mira la carpeta. Medido en
+Docker con la base igual a prod y una segunda organización local (LAB-OTRA): un admin de OTRA
+org subió `<sede LAB>/nequi-qr.png`, y después el owner de LAB no pudo subir su QR a esa ruta.
+Arreglo en `supabase/restaurant-logos-policies.sql` (rama `fix/restaurant-logos`): un solo
+alcance para subir/reemplazar/borrar = carpeta de la sede activa + `config.acceder` (el permiso
+de la ruta `/config`). **Se aplica en prod**; antes, correr `supabase/diag/logos-plantados.sql`
+(¿alguien ya plantó archivos? ¿quién pierde el permiso de subir?).
+
+**`product-images` — respuesta sobre el límite (sin aplicar nada):** el cliente NO comprime ni
+redimensiona. `ImageUpload.tsx` → `validate` rechaza lo que no sea jpeg/png/webp y lo que pase
+de 2 MB, y `uploadProductImage` sube el archivo tal cual. Una HEIC (`image/heic`) la rechaza el
+cliente por tipo. Un límite de servidor IGUAL al del cliente no rechazaría nada que el cliente
+hoy acepte: solo cerraría el acceso directo a la API, que hoy acepta 3 MB (medido en Docker).
+El problema real está del lado del cliente: una foto de celular suele pasar de 2 MB y la app la
+rechaza en vez de achicarla. **El arreglo va primero en el cliente** (redimensionar/comprimir
+antes de subir, y convertir HEIC si el navegador la entrega), sobre todo para M1. Qué hay subido
+de verdad en prod: `supabase/diag/product-images-tamanos.sql`.
 - `product-images` en prod **no tiene límite de tamaño ni de tipo** (el repo ponía 2 MB y
   jpeg/png/webp; prod no los tiene). Cualquiera con `productos.editar` puede subir un archivo
   de cualquier tamaño y tipo a un bucket público. Decidir si se agregan.
