@@ -40,6 +40,62 @@
 --   "en su sede" (INSERT / UPDATE / DELETE); NINGUNA "con permiso".
 -- ============================================================================
 
+
+-- ============================================================================
+-- PASO 0 — PRE-FLIGHT (SOLO LECTURA). Seleccioná SOLO este bloque y ejecutalo
+-- PRIMERO: el SQL Editor muestra únicamente el resultado de la última sentencia,
+-- así que si corrés el archivo entero no lo vas a ver.
+--
+-- Qué mide, por organización:
+--   objetos           → archivos en product-images.
+--   carpeta_no_sede   → archivos cuyo primer segmento NO es el id de una sede
+--                       existente. Con la migración NADIE podrá reemplazarlos ni
+--                       borrarlos (ninguna sede activa coincide). Se agrupan por
+--                       la organización de quien los subió.
+--   foto_en_otra_sede → productos cuya image_url apunta a una carpeta que NO es
+--                       su propia sede. Subir una foto nueva sigue funcionando
+--                       (va a <sede>/<productId>), pero quitar la vieja fallaría
+--                       en silencio (deleteProductImage se traga el error) y el
+--                       archivo quedaría huérfano.
+--
+-- QUÉ ESPERAR: las dos últimas columnas en 0 para todos los clientes. La app
+-- siempre sube a <profile.restaurant_id>/<productId>.<ext> y los productos son
+-- de UNA sede (products.restaurant_id NOT NULL, RLS por sede activa), así que no
+-- hay camino que produzca ninguna de las dos cosas.
+--   · > 0 en carpeta_no_sede ⇒ sedes borradas, o subidas por fuera de la app. NO
+--     bloquea a nadie para subir; solo esos archivos quedan congelados. Revisar.
+--   · > 0 en foto_en_otra_sede ⇒ algo movió productos de sede o subió por fuera.
+--     Revisar ANTES de aplicar: esas fotos no se podrán quitar desde la app.
+-- ----------------------------------------------------------------------------
+with objetos as (
+  select o.name, o.owner, r.id as sede, r.organization_id as org_carpeta
+    from storage.objects o
+    left join public.restaurants r on r.id::text = (storage.foldername(o.name))[1]
+   where o.bucket_id = 'product-images'
+),
+fotos as (
+  select p.restaurant_id, r.organization_id,
+         split_part(split_part(p.image_url, '/product-images/', 2), '/', 1) as carpeta
+    from public.products p
+    join public.restaurants r on r.id = p.restaurant_id
+   where p.image_url like '%/product-images/%'
+)
+select org.name as organizacion,
+       (select count(*) from objetos x where x.org_carpeta = org.id)                  as objetos,
+       (select count(*) from objetos x join public.profiles pr on pr.id = x.owner
+         where x.sede is null and pr.organization_id = org.id)                        as carpeta_no_sede,
+       (select count(*) from fotos f
+         where f.organization_id = org.id and f.carpeta <> f.restaurant_id::text)     as foto_en_otra_sede
+  from public.organizations org
+ order by org.created_at;
+-- + objetos con carpeta que no es sede Y sin perfil de quien subió (no caen en
+--   ninguna organización de arriba):
+-- select count(*) from storage.objects o
+--   left join public.restaurants r on r.id::text = (storage.foldername(o.name))[1]
+--   left join public.profiles pr on pr.id = o.owner
+--  where o.bucket_id = 'product-images' and r.id is null and pr.id is null;
+-- ============================================================================
+
 begin;
 
 drop policy if exists "product-images: subir con permiso"       on storage.objects;
