@@ -95,6 +95,15 @@ test.describe.serial('Delivery — ventana por turno', () => {
     // mentir con "Sin pedidos".
     await expect(page.getByTestId('delivery-empty-delivered'))
       .toContainText('Sin turno abierto')
+
+    // Limpieza: entregarlo, igual que hace el caso del aviso. Sin esto el pedido
+    // quedaba pendiente PARA SIEMPRE, y "sin deliveries abiertos el cierre NO
+    // muestra el aviso" (al final de este mismo describe) fallaba en una base
+    // limpia — medido en Docker el 2026-09-30: "Hay 1 delivery sin entregar".
+    await page.goto('/ventas')
+    await openShiftIfClosed(page, 50000)
+    await page.goto('/delivery')
+    await marcarEntregado(page, num)
   })
 
   test('creado en un turno y entregado en OTRO: aparece en Entregados del turno que lo entregó', async ({ page }) => {
@@ -138,9 +147,11 @@ test.describe.serial('Delivery — ventana por turno', () => {
     await openShiftIfClosed(page, 50000)
 
     await page.goto('/delivery')
-    await expect(tarjeta(page, 'delivered', num)).toHaveCount(0)
+    // Primero la señal POSITIVA (el estado vacío explícito solo se pinta con los
+    // datos cargados); recién después la ausencia significa algo.
     await expect(page.getByTestId('delivery-empty-delivered'))
       .toContainText('Sin pedidos')
+    await expect(tarjeta(page, 'delivered', num)).toHaveCount(0)
   })
 
   test('el cierre de turno AVISA de los deliveries sin entregar, y no bloquea', async ({ page }) => {
@@ -181,12 +192,18 @@ test.describe.serial('Delivery — ventana por turno', () => {
     // El caso anterior dejó todo entregado; verificarlo antes de afirmar la
     // ausencia evita que este test pase por un estado sucio.
     await page.goto('/delivery')
-    await expect(page.getByTestId('delivery-column-new').getByTestId('delivery-card')).toHaveCount(0)
-    await expect(page.getByTestId('delivery-column-in_transit').getByTestId('delivery-card')).toHaveCount(0)
+    // Señal POSITIVA: el estado vacío explícito de cada columna. "0 tarjetas"
+    // también se cumplía mientras DeliveryPage mostraba "Cargando delivery..."
+    // (medido 2026-09-30: pasó en verde con un pedido pendiente en la base).
+    await expect(page.getByTestId('delivery-empty-new')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByTestId('delivery-empty-in_transit')).toBeVisible()
 
     await page.goto('/ventas')
     await page.getByRole('button', { name: 'Cerrar turno', exact: true }).click()
     await expect(page.getByText('Cerrar turno de caja')).toBeVisible()
+    // El modal CONTESTÓ "ninguno" — no es que el conteo siga cargando (antes
+    // useDeliveryCount arrancaba en 0 y esta ausencia pasaba por la carga).
+    await expect(page.getByTestId('close-shift-delivery-check')).toHaveAttribute('data-estado', 'ninguno', { timeout: 15_000 })
     await expect(page.getByTestId('close-shift-delivery-warning')).toHaveCount(0)
 
     await page.getByTestId('close-shift-declared').fill('0')

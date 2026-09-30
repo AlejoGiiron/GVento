@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { loginAsOwner } from './helpers/auth'
 import { closeShiftIfOpen, openShiftIfClosed } from './helpers/shift'
-import { waitPosReady } from './helpers/pos'
+import { waitPosReady, agregarProductoSimple } from './helpers/pos'
 
 // "$ 12.000" → 12000
 function parseCOP(text: string): number {
@@ -14,7 +14,7 @@ test.describe('POS — venta y carrito', () => {
     await waitPosReady(page)
     await expect(page.getByText('Carrito vacío')).toBeVisible()
 
-    await page.getByTestId('product-card').first().click()
+    await agregarProductoSimple(page)
 
     await expect(page.getByText('Carrito vacío')).toHaveCount(0)
     const total = parseCOP(await page.getByTestId('cart-total').innerText())
@@ -23,7 +23,7 @@ test.describe('POS — venta y carrito', () => {
 
   test('aplicar descuento porcentual cambia el total', async ({ page }) => {
     await loginAsOwner(page)
-    await page.getByTestId('product-card').first().click()
+    await agregarProductoSimple(page)
 
     const before = parseCOP(await page.getByTestId('cart-total').innerText())
     await page.getByRole('button', { name: '10%' }).click()
@@ -39,7 +39,7 @@ test.describe('POS — venta y carrito', () => {
 
     // Carrito con ítems primero; luego garantizar estado "sin turno" justo antes
     // de cobrar (minimiza la ventana frente al estado compartido del backend).
-    await page.getByTestId('product-card').first().click()
+    await agregarProductoSimple(page)
     await closeShiftIfOpen(page)
     await expect(page.getByText('Sin turno')).toBeVisible()
 
@@ -51,7 +51,7 @@ test.describe('POS — venta y carrito', () => {
     await loginAsOwner(page)
     // Agregar el producto ANTES de tocar el turno (el banner que aparece/desaparece
     // al abrir turno reacomoda el layout y desestabiliza el click a la card).
-    await page.getByTestId('product-card').first().click()
+    await agregarProductoSimple(page)
     await openShiftIfClosed(page, 0) // cobrar requiere turno abierto
 
     await page.getByRole('button', { name: 'Cobrar' }).click()
@@ -75,7 +75,7 @@ test.describe('POS — venta y carrito', () => {
 
   test('cobro en efectivo con chip "Exacto" → vuelto 0', async ({ page }) => {
     await loginAsOwner(page)
-    await page.getByTestId('product-card').first().click()
+    await agregarProductoSimple(page)
     await openShiftIfClosed(page, 0)
 
     await page.getByRole('button', { name: 'Cobrar' }).click()
@@ -97,7 +97,7 @@ test.describe('POS — venta y carrito', () => {
 
   test('cobro en efectivo con chip de round-up → vuelto correcto', async ({ page }) => {
     await loginAsOwner(page)
-    await page.getByTestId('product-card').first().click()
+    await agregarProductoSimple(page)
     await openShiftIfClosed(page, 0)
 
     const total = parseCOP(await page.getByTestId('cart-total').innerText())

@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { loginAsOwner } from './helpers/auth'
 import { openTableAndAddItems } from './helpers/tables'
 import { openShiftIfClosed } from './helpers/shift'
+import { mesaFija, liberarMesa } from './helpers/lab'
 
 // Observaciones de cocina ("hamburguesa sin cebolla"), POR ÍTEM.
 //
@@ -15,7 +16,9 @@ import { openShiftIfClosed } from './helpers/shift'
 
 const PRODUCT = 'Lab Coctel'
 const SUFFIX = Date.now().toString().slice(-6)
-const MESA = `Mesa Obs ${SUFFIX}`
+// Mesa FIJA, reusada entre corridas (sin sufijo): no acumula residuo en LAB.
+// Ver tests/helpers/lab.ts.
+const MESA = 'E2E Fija Obs'
 const NOTA = `sin cebolla ${SUFFIX}`
 
 // Stub de impresión: captura el HTML de la comanda en vez de abrir el diálogo.
@@ -40,11 +43,8 @@ test.describe.serial('Observaciones de cocina por ítem', () => {
     await page.goto('/ventas')
     await openShiftIfClosed(page, 50000)
 
-    await page.goto('/mesas')
-    await page.getByRole('button', { name: 'Configurar' }).click()
-    await page.getByPlaceholder('Mesa 1').fill(MESA)
-    await page.getByRole('button', { name: 'Crear mesa' }).click()
-    await expect(page.getByText(MESA)).toBeVisible()
+    // Mesa dedicada: existe y está LIBRE (se crea la primera vez).
+    await mesaFija(MESA)
 
     await openTableAndAddItems(page, MESA)
     await page.getByRole('button').filter({ has: page.getByText(PRODUCT, { exact: true }) }).first().click()
@@ -60,7 +60,9 @@ test.describe.serial('Observaciones de cocina por ítem', () => {
 
     await page.getByRole('button', { name: 'Agregar a la mesa' }).click()
     await expect(page.getByRole('button', { name: 'Agregar a la mesa' })).toHaveCount(0)
-    await expect(page.getByText('Sin ítems — agrega productos')).toHaveCount(0)
+    // Señal POSITIVA de que el ítem quedó en la mesa: "Sin ítems" en 0 también
+    // se cumplía con el panel en "Cargando orden..." (barrido R3, 2026-09-30).
+    await expect(page.getByTestId('table-item').first()).toBeVisible({ timeout: 15_000 })
 
     // 1. Persistió y se ve en el panel de la mesa.
     await expect(page.getByText(`* ${NOTA}`)).toBeVisible()
@@ -82,7 +84,7 @@ test.describe.serial('Observaciones de cocina por ítem', () => {
     await expect(page.getByText(NOTA)).toBeVisible({ timeout: 15_000 })
   })
 
-  test('limpieza: cobrar la mesa y eliminarla', async ({ page }) => {
+  test('limpieza: cobrar la mesa', async ({ page }) => {
     await loginAsOwner(page)
     await page.goto('/mesas')
     await page.getByRole('button', { name: new RegExp(MESA) }).click()
@@ -93,13 +95,11 @@ test.describe.serial('Observaciones de cocina por ítem', () => {
     await page.getByRole('button', { name: /Confirmar cobro/ }).click()
     await expect(page.getByTestId('success-order-number')).toBeVisible({ timeout: 15_000 })
     await page.getByRole('button', { name: 'Listo' }).click()
+  })
 
-    await page.getByRole('button', { name: 'Configurar' }).click()
-    const del = page.locator('div')
-      .filter({ has: page.getByText(MESA, { exact: true }) })
-      .filter({ has: page.getByTitle('Eliminar mesa') })
-      .last()
-      .getByTitle('Eliminar mesa')
-    if (await del.count() > 0) await del.click()
+  // Corre AUNQUE un test previo falle: si el cobro de arriba no llegó, la mesa
+  // quedaría ocupada. Libera y verifica.
+  test.afterAll(async () => {
+    await liberarMesa(MESA)
   })
 })

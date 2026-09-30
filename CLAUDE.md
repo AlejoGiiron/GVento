@@ -645,6 +645,15 @@ Resumen rápido:
 - Botón CTA: `#10b981`, border-radius 10px, shadow `rgba(16,185,129,.35)`
 
 ## Política de testing (obligatoria)
+- 🔴 **TODA prueba corre contra el Supabase LOCAL en Docker, NUNCA contra la nube**
+  (2026-09-30). Suite, specs sueltos, `--repeat-each`, mediciones de carreras y scripts
+  con supabase-js. La nube cobra por **ingesta de logs** (el mes cerró en 2,58 GB contra
+  1 GB del plan), y que LAB esté aislada por RLS no cambia el medidor: es la misma base.
+  Preparar: `pnpm e2e:preparar`. **Mecanismo:** `playwright.config.ts` carga
+  `scripts/capturas/local.config` y **aborta si la URL no es loopback**. **No lo cubre:**
+  un script ad hoc con `createClient(.env)` — esos no pasan por la config. Si Docker no
+  está arriba, se pide levantarlo; la nube **no** es el plan B. Diagnóstico de producción
+  = SQL que corre el usuario en el SQL Editor, no scripts desde acá.
 - Todo módulo o funcionalidad nueva **DEBE** incluir su spec E2E en `tests/` antes de
   considerarse completo.
 - El prompt de cada feature nuevo termina con: "crea/actualiza el spec de Playwright que

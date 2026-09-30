@@ -66,7 +66,7 @@ export function useCashShift() {
     refetchInterval: 5_000,
   })
 
-  const { data: movements = [] } = useQuery({
+  const { data: movements = [], isLoading: isLoadingMovements } = useQuery({
     queryKey: ['cash_movements', currentShift?.id],
     queryFn: async () => {
       const { data, error } = await getCashMovements(currentShift!.id)
@@ -206,6 +206,8 @@ export function useCashShift() {
     currentShift,
     isOpen: !!currentShift,
     isLoadingShift,
+    /** `movements` vale [] mientras carga: "sin movimientos" solo es cierto con esto en false. */
+    isLoadingMovements,
     salesSummary,
     movements,
     vouchersTotal,

@@ -116,6 +116,9 @@ test.describe.serial('Compras / Proveedores', () => {
 
     // Y en los movimientos del turno NO aparece ningún egreso de la compra.
     await page.getByRole('button', { name: 'Movimientos' }).click()
+    // Señal POSITIVA: la lista de movimientos CARGÓ. Antes `movements` valía []
+    // mientras cargaba y esta ausencia pasaba por la carga (R3, 2026-09-30).
+    await expect(page.getByTestId('movements-panel')).toHaveAttribute('aria-busy', 'false', { timeout: 15_000 })
     await expect(page.getByText(`Compra a proveedor ${PROVEEDOR}`)).toHaveCount(0)
   })
 
@@ -134,6 +137,11 @@ test.describe.serial('Compras / Proveedores', () => {
 
   test('gating: el cajero NO ve Compras', async ({ page }) => {
     await loginAsCashier(page)
+    // Señal POSITIVA de "permisos cargados": un enlace CON permiso que este rol
+    // SÍ tiene (Fiado, fiado.gestionar). Mientras el rol carga, can() da false y TODO enlace con
+    // permiso está ausente — las ausencias de abajo pasaban por la carga. Ventas y
+    // Mesas no sirven de señal: no tienen permiso, se ven siempre (R3, 2026-09-30).
+    await expect(page.getByRole('link', { name: 'Fiado' })).toBeVisible({ timeout: 15_000 })
     // No está en el sidebar.
     await expect(page.getByRole('link', { name: 'Compras' })).toHaveCount(0)
     // Y por URL es redirigido a /ventas.

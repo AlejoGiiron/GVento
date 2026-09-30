@@ -1,5 +1,4 @@
 import { test, expect } from '@playwright/test'
-import { readFileSync } from 'node:fs'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { ownerCreds, cashierCreds } from './helpers/auth'
 
@@ -20,15 +19,6 @@ import { ownerCreds, cashierCreds } from './helpers/auth'
 
 test.describe.configure({ mode: 'serial' })
 
-function loadEnv(path: string) {
-  try {
-    for (const line of readFileSync(path, 'utf8').split(/\r?\n/)) {
-      const m = line.match(/^([A-Z0-9_]+)=(.*)$/)
-      if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '')
-    }
-  } catch { /* ignore */ }
-}
-loadEnv('.env'); loadEnv('.env.test')
 
 const URL = () => process.env.VITE_GVENTO_SUPABASE_URL!
 const ANON = () => process.env.VITE_GVENTO_SUPABASE_ANON_KEY!

@@ -7,8 +7,8 @@ import { readFileSync, existsSync } from 'node:fs'
 // compartido (R1): playwright.config.ts, tests/global-setup.ts y este archivo
 // tienen que hablar del mismo puerto, y el health check #1 de global-setup
 // tiene 5180 escrito adentro. Importarlo también dispara, como efecto de
-// carga del módulo, la lectura de .env.test que hace la config raíz — que es
-// de donde salen E2E_OWNER_EMAIL / E2E_OWNER_PASSWORD.
+// carga del módulo, la lectura de local.config que hace la config raíz (desde
+// el 2026-09-30 la suite E2E también corre contra este Supabase local).
 import { E2E_PORT } from '../../playwright.config'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -16,8 +16,9 @@ const ROOT = resolve(HERE, '../..')
 const BASE_URL = `http://localhost:${E2E_PORT}`
 
 // ── local.config PISA lo que haya cargado la config raíz ────────────────────
-// La config raíz ya metió .env.test en process.env (las credenciales de la
-// nube). Acá se sobreescriben, a propósito y sin condiciones: las capturas
+// La config raíz ya cargó ESTE MISMO archivo (la suite E2E también es local
+// desde el 2026-09-30). Se vuelve a cargar igual, a propósito y sin condiciones,
+// para que las capturas no dependan de lo que haga otra config: las capturas
 // corren contra el Supabase LOCAL de Docker y contra ninguna otra cosa.
 //
 // Es una asignación directa, no un "si no está definido": si esto fuera

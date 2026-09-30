@@ -1,6 +1,5 @@
 import { request, type FullConfig } from '@playwright/test'
 import { createClient } from '@supabase/supabase-js'
-import { readFileSync, existsSync } from 'node:fs'
 
 // Puerto dedicado de G-Vento (debe coincidir con E2E_PORT de playwright.config.ts).
 const BASE_URL = 'http://localhost:5180'
@@ -8,20 +7,9 @@ const BASE_URL = 'http://localhost:5180'
 // Organización del LABORATORIO. Los tests SOLO deben correr contra esta org.
 const LAB_ORG = 'LAB'
 
-/**
- * Carga variables de un archivo .env (sin dotenv) en process.env, sin pisar las
- * ya definidas. playwright.config.ts ya cargó .env.test; aquí necesitamos las
- * credenciales del backend (VITE_GVENTO_*) que viven en .env.
- */
-function loadEnvFile(file: string): void {
-  if (!existsSync(file)) return
-  for (const line of readFileSync(file, 'utf-8').split('\n')) {
-    const m = line.match(/^\s*([\w.]+)\s*=\s*(.*)\s*$/)
-    if (m && !process.env[m[1]]) {
-      process.env[m[1]] = m[2].replace(/^["']|["']$/g, '')
-    }
-  }
-}
+// El entorno (Supabase LOCAL) lo carga playwright.config.ts desde
+// scripts/capturas/local.config, y ya verificó que la URL sea loopback. Acá no
+// se lee ningún .env: esos apuntan a la nube.
 
 /**
  * Health check #1 — la app servida es G-Vento (no otra app en el puerto).
@@ -49,7 +37,7 @@ async function checkServedAppIsGvento(): Promise<void> {
 /**
  * Health check #2 (SEGURIDAD DE DATOS) — las credenciales de prueba pertenecen
  * a la organización LAB. Evita correr la suite contra datos reales (org G-10)
- * por un .env.test mal configurado: la suite muta estado (cierra caja, crea
+ * por una config de entorno mal armada: la suite muta estado (cierra caja, crea
  * datos) y NO debe tocar producción.
  *
  * Hace login real con E2E_OWNER_EMAIL contra el mismo Supabase que usa la app
@@ -57,9 +45,6 @@ async function checkServedAppIsGvento(): Promise<void> {
  * aborta si no es LAB.
  */
 async function checkCredentialsAreLab(): Promise<void> {
-  loadEnvFile('.env')
-  loadEnvFile('.env.test')
-
   const url = process.env.VITE_GVENTO_SUPABASE_URL
   const anonKey = process.env.VITE_GVENTO_SUPABASE_ANON_KEY
   const email = process.env.E2E_OWNER_EMAIL
@@ -68,14 +53,14 @@ async function checkCredentialsAreLab(): Promise<void> {
   if (!url || !anonKey) {
     throw new Error(
       '[E2E health check] Faltan VITE_GVENTO_SUPABASE_URL / ' +
-      'VITE_GVENTO_SUPABASE_ANON_KEY (revisa .env). No se puede verificar la ' +
+      'VITE_GVENTO_SUPABASE_ANON_KEY (revisa scripts/capturas/local.config). No se puede verificar la ' +
       'organización de las credenciales de prueba.',
     )
   }
   if (!email || !password) {
     throw new Error(
       '[E2E health check] Faltan E2E_OWNER_EMAIL / E2E_OWNER_PASSWORD ' +
-      '(revisa .env.test). No se puede verificar la organización de prueba.',
+      '(revisa scripts/capturas/local.config). No se puede verificar la organización de prueba.',
     )
   }
 
@@ -87,7 +72,7 @@ async function checkCredentialsAreLab(): Promise<void> {
   if (authError) {
     throw new Error(
       `[E2E health check] No se pudo iniciar sesión con E2E_OWNER_EMAIL ` +
-      `(${email}): ${authError.message}. Revisa .env.test.`,
+      `(${email}): ${authError.message}. ¿Corriste "pnpm e2e:preparar"? Revisa scripts/capturas/local.config.`,
     )
   }
 
@@ -107,7 +92,7 @@ async function checkCredentialsAreLab(): Promise<void> {
     throw new Error(
       `PELIGRO: las credenciales de prueba no son del laboratorio ` +
       `(org actual: ${orgName}). Los tests NO deben correr contra datos reales. ` +
-      `Revisa .env.test.`,
+      `¿Corriste "pnpm e2e:preparar"? Revisa scripts/capturas/local.config.`,
     )
   }
 

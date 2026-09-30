@@ -340,7 +340,7 @@ function ProductPickerModal({
 
   const { data: categories = [] } = useCategories()
   const { data: products = [] } = useProducts()
-  const productsWithExtras = useProductsWithExtras()
+  const { isLoading: extrasLoading, requiereConfig } = useProductsWithExtras()
 
   useEffect(() => {
     if (!activeCat && categories.length > 0) setActiveCat(categories[0].id)
@@ -355,7 +355,7 @@ function ProductPickerModal({
 
   // Producto sin extras → fusiona/incrementa. Con extras → abre el modal de config.
   const addProduct = (product: ProductWithCategory) => {
-    if (productsWithExtras.has(product.id)) { setConfigProduct(product); return }
+    if (requiereConfig(product.id)) { setConfigProduct(product); return }
     setSelection((prev) => {
       const idx = prev.findIndex((x) => x.product.id === product.id && x.extras.length === 0)
       if (idx >= 0) {
@@ -486,8 +486,15 @@ function ProductPickerModal({
           </div>
         </div>
 
-        {/* Product grid */}
+        {/* Product grid — no se muestra hasta conocer qué productos tienen
+            extras: antes, un click en esa ventana agregaba un producto con
+            extras SIN abrir el modal (ver useProductsWithExtras). */}
         <div style={{ flex: 1, overflow: 'auto', padding: '12px 18px' }}>
+          {extrasLoading ? (
+            <div data-testid="picker-loading" style={{ padding: 24, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>
+              Cargando productos...
+            </div>
+          ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
             {filtered.map((p) => {
               const inSel = selection.find((x) => x.product.id === p.id)
@@ -516,6 +523,7 @@ function ProductPickerModal({
               )
             })}
           </div>
+          )}
         </div>
 
         {/* Selection summary + confirm */}

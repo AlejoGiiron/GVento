@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { loginAsOwner, ownerCreds } from './helpers/auth'
+import { agregarProductoSimple } from './helpers/pos'
 
 // Bug: en una terminal compartida, el carrito y las ventas en espera del cajero
 // que sale NO deben ser heredados por el siguiente cajero que entra.
@@ -14,12 +15,12 @@ test('carrito y ventas en espera se limpian al cerrar sesión (mismo tab, sin re
   await loginAsOwner(page)
 
   // Cajero A: deja una venta EN ESPERA y además un carrito ACTIVO con ítems.
-  await page.getByTestId('product-card').first().click()
+  await agregarProductoSimple(page)
   await page.getByTitle('Poner la venta en espera').click()
   await page.getByPlaceholder(/Señor de gorra/).fill('Venta cajero A')
   await page.getByRole('button', { name: 'Guardar en espera' }).click()
 
-  await page.getByTestId('product-card').first().click() // carrito activo con ítems
+  await agregarProductoSimple(page) // carrito activo con ítems
   await expect(page.getByText('Carrito vacío')).toHaveCount(0)
   await expect(page.getByTitle('Ventas en espera')).toContainText('1')
 

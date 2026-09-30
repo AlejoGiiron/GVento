@@ -17,8 +17,19 @@ self.addEventListener('activate', (e) => {
 })
 
 self.addEventListener('fetch', (e) => {
-  // Let Supabase requests bypass the cache (always network)
-  if (e.request.url.includes('supabase')) return
+  // Solo se cachean los ASSETS de la propia app: GET y mismo origen. Todo lo
+  // demás (la API de Supabase, cualquier POST) va directo a la red, sin pasar
+  // por acá.
+  //
+  // Antes el criterio era `url.includes('supabase')`: enumeraba el hostname
+  // de la nube en vez de describir lo que el SW debe tocar (allowlist vs
+  // deny-list, R2). Contra el Supabase LOCAL (127.0.0.1:54331, sin "supabase"
+  // en la URL) el SW interceptaba la API: cacheaba respuestas, servía datos
+  // viejos si la red fallaba, y `page.route` de Playwright no veía esas
+  // requests (numeracion-fallo.spec no podía inyectar su falla). Lo mismo
+  // pasaría en producción el día que la API se sirva desde un dominio propio.
+  const url = new URL(e.request.url)
+  if (e.request.method !== 'GET' || url.origin !== self.location.origin) return
 
   // Network-first: serve fresh content, fall back to cache when offline
   e.respondWith(

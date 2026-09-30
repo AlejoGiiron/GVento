@@ -75,7 +75,7 @@ const ESTILOS: Record<EstadoConAviso, {
  * el del turno siguiente no lo ve ese día. Asumido — es un aviso del negocio.
  */
 export function SubscriptionBanner() {
-  const { notice } = useSubscriptionStatus()
+  const { notice, consulta } = useSubscriptionStatus()
   const [descarte, setDescarte] = useState<Descarte | null>(leerDescarte)
 
   const descartar = useCallback((estado: string) => {
@@ -88,16 +88,26 @@ export function SubscriptionBanner() {
     setDescarte(nuevo)
   }, [])
 
+  // Sin aviso visible, queda un marcador OCULTO que dice POR QUÉ. "No hay
+  // banner" antes era el mismo DOM cargando, sin aviso, descartado o con la
+  // lectura fallida — y un test de ausencia pasaba por la carga, no por el dato
+  // (suscripcion-banner.spec, medido 2026-09-30). La DECISIÓN no cambia.
+  const ausente = (motivo: 'cargando' | 'sin-aviso' | 'error' | 'sin-org' | 'descartado') => (
+    <span data-testid="subscription-banner-ausente" data-motivo={motivo} hidden />
+  )
+
   // Sin aviso (incluye `active`, los estados no implementados, un valor
-  // desconocido y la lectura fallida): no se renderiza nada.
-  if (!notice) return null
+  // desconocido y la lectura fallida): no se muestra nada.
+  if (!notice) {
+    return ausente(consulta === 'ok' ? 'sin-aviso' : consulta)
+  }
 
   const yaDescartado =
     notice.descartable
     && descarte?.estado === notice.estado
     && descarte?.dia === diaBogota()
 
-  if (yaDescartado) return null
+  if (yaDescartado) return ausente('descartado')
 
   const estilo = ESTILOS[notice.estado]
   const Icono = estilo.icono

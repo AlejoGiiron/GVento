@@ -80,7 +80,13 @@ export function useExpensesHistory({ from, to, scope, page }: ExpensesHistoryUIF
   return {
     rows: query.data?.rows ?? [],
     count,
-    periodTotal: totalQuery.data ?? 0,
+    /**
+     * null = todavía no se sabe (cargando o con error). Antes era `?? 0`: la
+     * cabecera mostraba "$0" como dato real mientras la query cargaba, y para
+     * siempre si fallaba.
+     */
+    periodTotal: totalQuery.data ?? null,
+    totalError: totalQuery.error,
     pageCount: Math.max(1, Math.ceil(count / EXPENSES_PAGE_SIZE)),
     isLoading: query.isLoading,
     isFetching: query.isFetching,

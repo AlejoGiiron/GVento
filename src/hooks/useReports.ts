@@ -101,15 +101,21 @@ export function useReports({ from, to }: ReportParams) {
     hourlySales:        hourlySales.data        ?? [],
     waiterPerformance:  waiterPerformance.data  ?? [],
     vouchersTotal:      vouchers.data           ?? 0,
+    // TODAS las queries que alimentan la pantalla entran al flag y al error.
+    // `vouchers` quedaba afuera: la tarjeta "Regalado en vales" se pintaba con
+    // `vouchers.data ?? 0` = $0 mientras cargaba (causa del flake de
+    // vale-descuento.spec "REPORTE"), y si fallaba, $0 para siempre sin aviso.
     isLoading:
       dailySales.isLoading        ||
       productPerformance.isLoading ||
       hourlySales.isLoading       ||
-      waiterPerformance.isLoading,
+      waiterPerformance.isLoading ||
+      vouchers.isLoading,
     error:
       dailySales.error         ??
       productPerformance.error ??
       hourlySales.error        ??
-      waiterPerformance.error,
+      waiterPerformance.error  ??
+      vouchers.error,
   }
 }

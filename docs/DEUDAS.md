@@ -132,56 +132,239 @@ con origen externo. No construir — solo no bloquear.
 
 ## Pendientes de verificar / deuda conocida
 
-### ⚠️ FLAKE ABIERTO — `pago-mixto.spec.ts:247` (MESA: cierre mixto) falló 1 de 5 veces (2026-09-07)
+### 🔴 Una mesa que tuvo ventas NO se puede borrar — y TablesPage deja intentarlo (confirmado 2026-09-30)
 
-**No se arregló: no se entiende todavía, y un flake no se reproduce a pedido.** Se anota con la
-evidencia que hay para que la próxima vez no se empiece de cero.
+**Precondición de M2** (varios celulares en mesas). No se construye ahora.
 
-**Qué pasó.** En la 2ª corrida completa sobre `develop` integrado, el click sobre la tarjeta del
-producto no abrió el modal de configuración:
+**Evidencia** (`supabase/diag/borrar-mesa-simulacion.sql`, corrida por el usuario en el SQL
+Editor de prod contra mesas de LAB, con rollback forzado): la mesa CON una orden `delivered`
+falló con **23514 `chk_dine_in_has_table`**, con CONTEXT del `UPDATE … SET table_id = NULL`;
+la mesa SIN órdenes dio `SIMULACION_OK filas=1`. Rollback verificado: la orden `49a7f922…`
+conserva su `updated_at` original.
 
+**Mecanismo:** `orders.table_id` es `ON DELETE SET NULL` y `chk_dine_in_has_table` exige mesa
+en toda orden `dine_in`. Una mesa que vendió **una vez** queda imborrable para siempre.
+`TablesPage` → `handleDelete` solo bloquea con órdenes `pending/preparing/ready`: deja
+intentar el borrado de una mesa libre con historial y el cliente recibe el error crudo de
+Postgres en un toast.
+
+**Lo que NO es la salida** (decidido): cambiar la FK a `CASCADE` (borra historial de ventas)
+ni relajar el check (deja órdenes de mesa sin mesa).
+
+**Diseño propuesto — ARCHIVAR, no borrar** (va con M2):
+- Columna `tables.archived_at timestamptz null` (null = activa). Migración nueva; ningún dato
+  existente cambia.
+- "Eliminar mesa" pasa a ser una RPC `archive_table(p_table_id)` SECURITY DEFINER con
+  `for update` sobre la mesa (con varios celulares, dos pueden abrirla y archivarla a la vez):
+  exige mesa `free` y sin órdenes activas; si la mesa **nunca** tuvo órdenes la borra de
+  verdad, si tuvo la archiva, y **devuelve cuál de las dos hizo**.
+- Toda lectura de mesas **para operar** (mapa, picker, `useTables`) filtra
+  `archived_at is null`. Reportes e historial NO: la venta sigue mostrando su mesa.
+- Si hay o se agrega unicidad por nombre, tiene que ser parcial (`where archived_at is null`)
+  para poder crear "Mesa 3" de nuevo después de archivarla.
+- Desarchivar desde Configuración (`archived_at = null`), con las archivadas en lista aparte.
+- Antes de construir, barrido R3 por la TABLA (`from('tables')` en `src/`): cada lectura
+  decide si filtra. Una que se olvide muestra mesas archivadas en la operación.
+
+**Para reconfirmar el comportamiento actual** (lectura):
+`select conname, pg_get_constraintdef(oid) from pg_constraint where conrelid = 'public.orders'::regclass and pg_get_constraintdef(oid) ilike '%table_id%';`
+
+### 🔴 "Cerrar mesa sin consumo" son DOS escrituras de cliente no atómicas (anotado 2026-09-30)
+
+**Precondición de M2.** No se arregló en el Paso C.
+
+`TablesPage` → `handleCloseEmptyTable` hace `updateOrderStatus(order.id, 'cancelled')` y
+**después** `updateTableStatus(table.id, 'free')`, dos requests separados. Si el segundo no
+llega (red de celular, pestaña cerrada), la mesa queda **ocupada con su orden cancelada**.
+Medido en LAB de la nube (2026-09-21): **14 mesas `Mesa E2E …` ocupadas cuya única orden está
+`cancelled`** — exactamente esa forma. `mesas.spec` solo verificaba que el panel se cerrara.
+Con varios celulares, además, dos pueden cerrar o abrir la misma mesa a la vez.
+
+**La salida es una RPC** `close_empty_table(p_table_id)` SECURITY DEFINER que, en una
+transacción y con `for update` sobre la mesa, verifique que la orden no tenga ítems, la
+cancele y libere la mesa. No "reintentar el segundo request".
+
+### 🔴 `register_sale_payment` acepta cobros SIN turno abierto — medido; el cambio va sin aviso a clientes (2026-09-30)
+
+- **El defecto** (`tests/cobro-concurrente.spec.ts`, rama `diag/verificaciones-pre-m1`): con
+  la sede sin turno la RPC acepta el cobro (20/20) y el pago no cae en ninguna ventana de
+  turno, o sea en ningún arqueo.
+- **¿Rompe a alguien exigir turno?** `supabase/diag/cobros-fuera-de-turno.sql` en prod dio
+  **0 pagos fuera de turno en G-10, Salchimelo y Café Aroma** (60 días). La query se validó
+  contra un **positivo conocido** en Docker (R10): un cobro real con la caja cerrada la llevó
+  de 0 a 1 en LAB (monto y hora de Bogotá correctos) y volvió a 0 al limpiarlo.
+  ⇒ el cambio (1) —lock de la orden + exigir turno— **sale sin aviso a clientes**.
+- **Doble cobro:** el mecanismo es real (check-then-act sin lock bajo READ COMMITTED) pero
+  dio 0/160 duplicados por red. Lo cierra el `for update` del mismo cambio; el spec NO lo
+  caza y está marcado así.
+
+### ✅ La base local es un PROXY de producción — deriva 0 alcanzada el 2026-09-30 (5.6 se reabre)
+
+**Medición final (2026-09-30):** export de prod con la query extendida (`docs/deriva-.csv`, no
+versionado) contra la base local preparada desde cero en `fix/flakes-lab` → **deriva 0**
+(`pnpm deriva:comparar`, exit 0), con **1 diferencia aceptada**: `issue_pg_graphql_access`,
+event trigger de la plataforma (dueño `supabase_admin`) que solo difiere en los tags
+(`CREATE FUNCTION` en prod, `CREATE EXTENSION` en el CLI 2.90); el hash de prod se recalculó
+desde su definición y coincide. Declarada en `scripts/deriva-aceptadas.json` con los dos
+valores exactos: si cualquiera cambia, vuelve a contar. Con esto **5.6 deja de estar
+suspendido**: ORDEN construye la base que tiene prod en todo lo que mide la deriva.
+Origen de `rls_auto_enable`: el export dice que el dueño de `ensure_rls` en prod es
+`postgres` (los 6 de la plataforma son `supabase_admin`) ⇒ lo creó alguien como postgres.
+
+*(Lo que sigue es el registro de cómo se llegó.)*
+
+
+`preparar-local.mjs` estaba "verificado por ejecución contra una base en blanco" (140a0f2) y
+**construía una base distinta de producción sin un solo error**: `add_order_items_with_extras`
+quedaba en la versión VIEJA (sin descuento por receta), porque `order-extras-rpc.sql` se
+aplicaba después de `order-items-stock-recipes.sql` y plpgsql no valida al crear. Corregido el
+orden y agregado el guard `GANA` (todo objeto redefinido en más de un `.sql` —función, vista,
+trigger o policy— declara qué archivo gana; si no, aborta). El guard es una alarma estática:
+**la verificación real es la deriva contra prod.**
+
+⇒ **5.6 ("ORDEN es una lista de siembra lista para `schema_migrations`") queda SUSPENDIDO**
+hasta que la deriva dé 0. Una lista que construye otra base no es un ledger.
+
+**El comando que lo reabre:**
+```bash
+# 1) SQL Editor de PROD: supabase/diag/deriva-esquema.sql → Export → CSV → deriva-prod.csv
+# 2) acá, con Docker arriba y la base recién preparada:
+pnpm e2e:preparar && pnpm deriva:comparar deriva-prod.csv     # exit 0 = deriva 0
 ```
-Locator: getByTestId('item-config-modal')   Expected: visible   → element(s) not found
-```
+Toda diferencia es una deuda de uno de dos tipos: el `.sql` del repo no es lo que se aplicó
+en prod, o prod tiene algo aplicado a mano que el repo no tiene.
 
-**Qué NO es** (descartado, no supuesto):
+**Primera medición (2026-09-30), prod vs local recién preparada — 14 diferencias, deriva ≠ 0:**
+- ✅ Misma versión mayor (17.6 los dos). ✅ `add_order_items_with_extras` en prod es la versión
+  NUEVA (usa receta y crea `stock_movements`): el hallazgo que motivó todo esto NO afectaba a prod.
+- **Prod tiene algo aplicado a mano que el repo no tiene** (deuda del repo):
+  · Storage: 5 policies — `product-images: subir/actualizar/borrar con permiso` y
+    `restaurant-logos: admin sube / lectura pública`. El bucket `restaurant-logos` lo usa la app
+    (logo y QR de Nequi en `supabase-helpers`) y **no existe en ningún `.sql`**.
+  · `rls_auto_enable()` con EXECUTE a anon/authenticated: sin rastro en el repo. Probablemente
+    la crea el Dashboard (auto-habilitar RLS en tablas nuevas) — **no verificado**; lo responde
+    `supabase/diag/deriva-detalle.sql` (definición + event triggers que la usan).
+- **El repo tiene algo que prod ya no:** las 3 policies `product-images: … autenticado` de
+  `storage-product-images.sql` — prod las reemplazó por las "con permiso".
+- **La base local es MÁS permisiva que prod** (causa: el RESET de `preparar-local` da privilegios
+  por defecto sobre funciones a anon; `security-definer-revoke.sql` solo revoca a PUBLIC): anon
+  ejecuta `get_my_role` y `get_my_restaurant_id`, y authenticated ejecuta `handle_new_user`; en
+  prod no. Dirección fail-open del proxy: un test podría pasar en local y fallar en prod.
+- **Qué NO invalida:** ningún spec sube archivos a Storage ni llama esas funciones como anon, así
+  que el verde de la suite (219/219) no depende de estas diferencias. Pero la deriva tiene que dar 0
+  antes del merge igual: es la condición, no una opinión sobre cuánto importa cada fila.
+- **Siguiente paso:** con la salida de `deriva-detalle.sql`, una migración que lleve el repo a prod
+  (policies de Storage + bucket + revokes explícitos a anon), agregada a ORDEN, y re-medir.
 
-- **No es una regresión de esta sesión.** El mismo test pasó **7/7 en las tres corridas
-  completas anteriores del mismo día**, incluida la primera con las cuatro ramas ya integradas.
-- **No es del código que se tocó.** Ni mesas, ni el picker de productos, ni `openTableAndAddItems`
-  aparecen en ningún commit de la sesión.
-- **No reproduce aislado:** `pago-mixto.spec.ts` solo → **7/7 verde**.
+**Segunda medición (2026-09-30), después de `supabase/reconciliar-con-prod.sql`** (en ORDEN, base
+preparada desde cero): **deriva 0** en las categorías originales contra el export de prod.
+La migración es no-op en prod (crear si falta / revocar / borrar nombres exactos que prod no
+tiene) y se aplicó dos veces en local: la 2ª no cambió nada.
 
-🔴 **LA PISTA QUE VALE, y que hay que mirar primero:** el snapshot de la página al fallar dice
-**"Mapa del salón · 15 ocupadas · 161 libres"** — **176 mesas** en el laboratorio, y 15 de ellas
-ABIERTAS. Es residuo acumulado de corridas viejas (cada spec que crea una mesa deja una si la
-limpieza no llega a correr, y la limpieza no corre cuando el test anterior falla en un
-`describe.serial`). Un mapa de 176 tarjetas es mucho más lento de renderizar que uno de 10, y
-este test depende de que el picker esté montado cuando se clickea el producto.
+**Categorías que la deriva NO medía y ahora sí** (R3 — lo que no se mide no aparece):
+triggers de TODAS las tablas de `auth` (el alta de usuarios vive ahí; `on_auth_user_created`
+ya estaba cubierto solo porque llama a una función de `public`), **event triggers** con su
+dueño, **buckets** de Storage (son datos, pero deciden qué acepta una subida) y los
+**privilegios por defecto** de `public`. Contra `deriva-detalle.csv`: 25 objetos, **1
+diferencia**, que no es nuestra: `issue_pg_graphql_access` (dueño `supabase_admin`, de la
+plataforma) se dispara con `CREATE FUNCTION` en prod y con `CREATE EXTENSION` en el CLI 2.90.
+Para cerrarla hace falta el export de prod con la query extendida: con sus hashes reales se
+declara en `scripts/deriva-aceptadas.json` (valores EXACTOS de los dos lados; si cambian,
+vuelve a contar) — o se prueba si actualizar el CLI la iguala.
 
-**Hipótesis a verificar (NO verificada):** el volumen del mapa alarga el render lo suficiente
-como para que el click del producto llegue antes de que el picker termine de montar. Encaja con
-que falle en la corrida larga —donde el lab ya juntó mesas de los specs previos— y no aislado.
+**Hallazgos de prod que la reconciliación COPIÓ tal cual y NO arregló** (decisión aparte):
+- 🔴 **Cambiar el logo o el QR de Nequi por segunda vez falla en prod.** `uploadRestaurantLogo`
+  y `uploadNequiQR` suben con `upsert: true` a una ruta fija (`<sede>/logo.<ext>`); reemplazar
+  un objeto exige policy de UPDATE, y `restaurant-logos` en prod solo tiene INSERT ("admin sube")
+  y SELECT. **Medido en Docker con la base igual a prod:** 1ª subida OK, 2ª →
+  `new row violates row-level security policy`. El usuario ve "Error al subir el logo", sin
+  causa. Solo funciona si cambia la extensión (y el archivo viejo queda huérfano). Además el
+  gate es el enum `get_my_role() = 'admin'`, no `has_permission` (misma deuda que el resto).
+  Salida propuesta: policy de UPDATE (y DELETE) para `restaurant-logos` con
+  `has_permission('config.acceder')`, en una migración que SÍ se aplica en prod.
 
-**Cómo investigarlo la próxima vez:**
+**Actualización 2026-09-30 — `restaurant-logos`: además de no poder reemplazar, había un HUECO
+ENTRE CLIENTES.** La policy de INSERT de prod ("admin sube") no mira la carpeta. Medido en
+Docker con la base igual a prod y una segunda organización local (LAB-OTRA): un admin de OTRA
+org subió `<sede LAB>/nequi-qr.png`, y después el owner de LAB no pudo subir su QR a esa ruta.
+Arreglo en `supabase/restaurant-logos-policies.sql` (rama `fix/restaurant-logos`): un solo
+alcance para subir/reemplazar/borrar = carpeta de la sede activa + `config.acceder` (el permiso
+de la ruta `/config`). **Se aplica en prod**; antes, correr `supabase/diag/logos-plantados.sql`
+(¿alguien ya plantó archivos? ¿quién pierde el permiso de subir?).
 
+**`product-images` — respuesta sobre el límite (sin aplicar nada):** el cliente NO comprime ni
+redimensiona. `ImageUpload.tsx` → `validate` rechaza lo que no sea jpeg/png/webp y lo que pase
+de 2 MB, y `uploadProductImage` sube el archivo tal cual. Una HEIC (`image/heic`) la rechaza el
+cliente por tipo. Un límite de servidor IGUAL al del cliente no rechazaría nada que el cliente
+hoy acepte: solo cerraría el acceso directo a la API, que hoy acepta 3 MB (medido en Docker).
+El problema real está del lado del cliente: una foto de celular suele pasar de 2 MB y la app la
+rechaza en vez de achicarla. **El arreglo va primero en el cliente** (redimensionar/comprimir
+antes de subir, y convertir HEIC si el navegador la entrega), sobre todo para M1. Qué hay subido
+de verdad en prod: `supabase/diag/product-images-tamanos.sql`.
+- `product-images` en prod **no tiene límite de tamaño ni de tipo** (el repo ponía 2 MB y
+  jpeg/png/webp; prod no los tiene). Cualquiera con `productos.editar` puede subir un archivo
+  de cualquier tamaño y tipo a un bucket público. Decidir si se agregan.
+- `rls_auto_enable()` + event trigger `ensure_rls` (toda tabla nueva de `public` nace con RLS):
+  **origen sin verificar.** Evidencia: 0 commits en el repo, no la trae un stack recién creado
+  por el CLI 2.90, y su dueño en prod es `postgres` (grantor de su ACL) — o sea que se creó como
+  postgres (SQL Editor / Dashboard), no la plataforma. La fila `event_trigger_dueno` del export
+  extendido dice el dueño del trigger. Se copió al repo porque es una protección fail-closed que
+  prod tiene: una base local sin ella aprobaría tablas que en prod nacen con RLS.
+
+### Residuo de LAB en la NUBE — baja a limpieza opcional (2026-09-30)
+
+Desde el 2026-09-30 la suite corre **solo contra Docker**, así que el residuo de LAB en la nube
+(188 mesas al 2026-09-21, 14 ocupadas con orden cancelada, 20 ventas cobradas sin número)
+**dejó de crecer**. El barrido pasa de "precondición de la suite verde" a limpieza opcional.
+Si se hace: por UUID de LAB (`f4fa692d-6cf3-43fb-a17f-18b8b163c918`), contando antes y **sin
+intentar borrar mesas con ventas** (no se puede, ver arriba): archivarlas cuando exista el
+archivado. B1 sigue importando por otra razón: le pasa hoy a un cliente desde TablesPage.
+
+Las **20 "cobradas sin número"** de LAB NO son el `DEFAULT 'paid'`: la columna de
+`numeracion-duplicados.sql` exige una fila en `payments`. Salen de `numeracion-fallo.spec.ts`,
+que por diseño deja **una** venta cobrada sin número por corrida (reproducido en Docker: de 0 a
+1, producto `E2E NumFailProd …`). Para confirmarlo en la nube (lectura):
 ```sql
--- ¿cuántas mesas tiene el laboratorio, y cuántas quedaron abiertas?
-select status, count(*) from public.tables
- where restaurant_id = '<sede Lab Norte>' group by status;
+select o.created_at, o.total,
+       (select count(*) from payments p where p.order_id = o.id) as pagos,
+       (select string_agg(pr.name, ',') from order_items oi
+          join products pr on pr.id = oi.product_id where oi.order_id = o.id) as productos
+  from orders o join restaurants r on r.id = o.restaurant_id
+ where r.organization_id = 'f4fa692d-6cf3-43fb-a17f-18b8b163c918'
+   and o.order_number is null and o.payment_status = 'paid'
+   and exists (select 1 from payments p where p.order_id = o.id)
+ order by o.created_at;
+-- esperado: ~20 filas, pagos >= 1, productos 'E2E NumFailProd …'
 ```
 
-1. Contar las mesas del lab con esa query. Si son cientos, **limpiar las de prueba** (nombre con
-   sufijo de timestamp) y volver a correr la suite completa: si el flake desaparece, la causa era
-   el volumen y el arreglo de fondo es que los specs borren su mesa en un `afterAll` (que corre
-   aunque el test falle), no en un test de limpieza al final del `describe.serial`.
-2. Si persiste con el lab limpio, la causa es otra y hay que mirar el trace de la corrida
-   fallida, no re-correr.
+### Ausencias y ceros que la UI muestra mientras carga — lo que quedó para el Paso D (2026-09-30)
 
-**Lo que NO hay que hacer:** re-correr hasta que dé verde y darlo por resuelto. Un flake que
-pasa en el reintento sigue siendo un flake, y este toca el camino de mesa + pago mixto, que es
-plata.
+El barrido R3 del Paso C (106 aserciones de ausencia, 23 sin garantía de carga) corrigió las
+23, en el test o en el producto. Quedan de la misma clase, en `useCashShift`, que reescribe el
+Paso D (`close_cash_shift`):
+- `salesSummary` / `vouchersTotal` valen `null`/`0` mientras cargan: `ShiftBanner` pinta "$0"
+  de ventas del turno y `CloseShiftModal` calcula el esperado con ventas incompletas. Specs que
+  leen esos valores apoyados solo en `networkidle`: `pago-mixto` (`readShiftSales`) y `fiado`
+  (`readKpis`, sobre los KPIs de `FiadoPage`, que tampoco consultan `isLoading`).
+- Limpiezas que deciden con `count()`, que no reintenta (si la lista no cargó, el paso se
+  saltea en silencio): `fiado.spec` (clientes), `fiado-lote.spec`, `cocina.spec`.
+
+### ✅ Flakes de `pago-mixto:247` y `vale-descuento` REPORTE — causa encontrada y arreglada en el PRODUCTO (2026-09-30)
+
+- **`pago-mixto:247`** no era el volumen de mesas: `useProductsWithExtras` devolvía un set VACÍO
+  mientras cargaba (`?? new Set()`), y un click sobre un producto con extras lo agregaba SIN
+  abrir el modal. Reproducido demorando `product_extras` 1,5 s. Arreglo fail-closed (gate de
+  carga, y modal si el set no se conoce); `tests/extras-carga.spec.ts`, auditado por mutación:
+  los casos LENTO y ERROR mueren contra el código viejo.
+- **`vale-descuento` REPORTE:** `useReports` dejaba la query de vales fuera de `isLoading` y la
+  tarjeta pintaba $0 mientras cargaba. El test ahora FUERZA la ventana (2 s de demora) y con el
+  hook viejo da `Received: 0`.
+- El residuo de mesas era real pero de otra causa: limpiezas al final de un `describe.serial` y
+  sin aserción. Ahora mesa fija por spec + `afterAll` con aserción (`tests/helpers/lab.ts`).
+
 ### 🔴 Registrar un movimiento y cerrar turno EN SEGUIDA puede persistir un esperado sin ese movimiento (hallado 2026-09-07)
+
+**✅ MEDIDO el 2026-09-21** (contra LAB en la nube, antes de pasar las pruebas a Docker; esperado leído del PATCH a `cash_shifts`): con red local y sin pausa, 3/3 correcto; con el GET de `cash_movements` demorado 2 s y sin pausa, **3/3 CARRERA** (se persistió la apertura sin el egreso); a ritmo humano con la misma demora, 3/3 correcto; y con **dos dispositivos** (B registra un egreso con el modal de cierre de A abierto) **siempre carrera**: `cash_movements` no tiene realtime ni polling, así que el modal de A nunca se entera. Con varios celulares es el caso normal, no el raro. Salida: el Paso D (`close_cash_shift`, esperado calculado en el servidor).
 
 **NO se arregló en esta sesión.** Se anota porque es plata mal declarada en un snapshot que
 después nadie recalcula — el arqueo se congela al cerrar, a propósito, así que un esperado

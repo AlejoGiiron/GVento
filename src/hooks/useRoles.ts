@@ -20,7 +20,7 @@ export function useRoles() {
   const { organizationId } = useAuth()
   const queryClient = useQueryClient()
 
-  const { data: roles = [], isLoading } = useQuery({
+  const { data: roles = [], isLoading: rolesLoading } = useQuery({
     queryKey: ['org_roles', organizationId],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -37,7 +37,7 @@ export function useRoles() {
   })
 
   // Conteo de usuarios por role_id (impide borrar roles asignados).
-  const { data: roleCounts = {} } = useQuery({
+  const { data: roleCounts = {}, isLoading: countsLoading, error: roleCountsError } = useQuery({
     queryKey: ['org_role_counts', organizationId],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -98,7 +98,12 @@ export function useRoles() {
   return {
     roles,
     roleCounts,
-    isLoading,
+    // Los conteos entran al flag: antes la pantalla mostraba "0 usuarios" y el
+    // guard de borrado (roleCounts[id] ?? 0) DEJABA borrar un rol asignado
+    // mientras el conteo cargaba.
+    isLoading: rolesLoading || countsLoading,
+    /** Si el conteo falló, NO se sabe si el rol tiene usuarios: no se borra. */
+    roleCountsError,
     createRole: createRoleMut.mutateAsync,
     updateRole: updateRoleMut.mutateAsync,
     deleteRole: deleteRoleMut.mutateAsync,

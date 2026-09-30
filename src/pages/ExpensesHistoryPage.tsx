@@ -52,7 +52,7 @@ export function ExpensesHistoryPage() {
   const [scope, setScope] = useState<HistoryScope>(elevated ? 'all' : 'mine')
   const [page, setPage] = useState(0)
 
-  const { rows, count, periodTotal, pageCount, isLoading, isFetching } =
+  const { rows, count, periodTotal, totalError, pageCount, isLoading, isFetching } =
     useExpensesHistory({ from, to, scope, page })
 
   const resetPage = () => setPage(0)
@@ -79,8 +79,14 @@ export function ExpensesHistoryPage() {
             <span style={{ fontSize: 11.5, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5 }}>
               Total del período
             </span>
-            <span data-testid="expenses-total" style={{ fontSize: 18, fontWeight: 700, color: '#dc2626', fontFamily: 'monospace', letterSpacing: -0.4 }}>
-              {formatCOP(periodTotal)}
+            {/* aria-busy distingue "cargando" de un total real: un "$0" mientras
+                carga no es un dato. Con error se dice, no se muestra 0. */}
+            <span
+              data-testid="expenses-total"
+              aria-busy={periodTotal === null && !totalError}
+              style={{ fontSize: 18, fontWeight: 700, color: '#dc2626', fontFamily: 'monospace', letterSpacing: -0.4 }}
+            >
+              {periodTotal !== null ? formatCOP(periodTotal) : totalError ? 'No disponible' : '…'}
             </span>
           </div>
         </div>
