@@ -23,7 +23,7 @@
  *   3. Se imprime el conteo por tipo de las DOS bases: un tipo que falte en un
  *      lado tiene que verse, no esconderse detrás de "0 diferencias".
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 
 const DB = 'supabase_db_gvento'
@@ -117,23 +117,51 @@ for (const [k, v] of prod) if (v.tipo === 'marcador') {
   console.log(`  ${v.nombre}: prod=${v.hash} · local=${local.get(k)?.hash ?? '(ausente)'}`)
 }
 
+// ── diferencias ACEPTADAS (allowlist con valores exactos) ───────────────────
+// Solo para diferencias que NO son nuestras y no se pueden igualar desde el
+// repo (p. ej. un event trigger de la PLATAFORMA que cambia entre la imagen del
+// CLI y la de prod). Cada entrada fija el valor EXACTO de los dos lados: si
+// cualquiera cambia, deja de estar aceptada y vuelve a contar. Una entrada que
+// ya no corresponde a ninguna diferencia también hace fallar (se pudre, R2).
+// NO es una lista de exclusión por tipo ni por dueño: es un par de valores.
+const ACEPTADAS_PATH = 'scripts/deriva-aceptadas.json'
+const aceptadas = existsSync(ACEPTADAS_PATH) ? JSON.parse(readFileSync(ACEPTADAS_PATH, 'utf-8')) : []
+const usadas = new Set()
+const esAceptada = (tipo, nombre, hp, hl) => {
+  const i = aceptadas.findIndex((a) => a.tipo === tipo && a.nombre === nombre && a.prod === hp && a.local === hl)
+  if (i >= 0) usadas.add(i)
+  return i >= 0
+}
+
 // ── diferencias ─────────────────────────────────────────────────────────────
 const dif = {}
 const anotar = (tipo, linea) => (dif[tipo] ??= []).push(linea)
+const aceptadasVistas = []
 for (const [k, p] of prod) {
   if (p.tipo === 'meta') continue
   const l = local.get(k)
+  if (l && l.hash === p.hash) continue
+  if (esAceptada(p.tipo, p.nombre, p.hash, l?.hash ?? null)) { aceptadasVistas.push(`${p.tipo} ${p.nombre}`); continue }
   if (!l) anotar(p.tipo, `  SOLO EN PROD   ${p.nombre}   [${p.hash}]`)
-  else if (l.hash !== p.hash) anotar(p.tipo, `  DISTINTO       ${p.nombre}   prod=[${p.hash}] local=[${l.hash}]`)
+  else anotar(p.tipo, `  DISTINTO       ${p.nombre}   prod=[${p.hash}] local=[${l.hash}]`)
 }
 for (const [k, l] of local) {
-  if (l.tipo === 'meta') continue
-  if (!prod.has(k)) anotar(l.tipo, `  SOLO EN LOCAL  ${l.nombre}   [${l.hash}]`)
+  if (l.tipo === 'meta' || prod.has(k)) continue
+  if (esAceptada(l.tipo, l.nombre, null, l.hash)) { aceptadasVistas.push(`${l.tipo} ${l.nombre}`); continue }
+  anotar(l.tipo, `  SOLO EN LOCAL  ${l.nombre}   [${l.hash}]`)
+}
+aceptadas.forEach((a, i) => {
+  if (!usadas.has(i)) anotar('aceptada-vencida', `  ${a.tipo} ${a.nombre}: declarada en ${ACEPTADAS_PATH} pero ya no coincide con ninguna diferencia (cambió un valor o se resolvió). Revisala o sacala.`)
+})
+if (aceptadasVistas.length) {
+  console.log(`\nDiferencias ACEPTADAS (${ACEPTADAS_PATH}, con motivo): ${aceptadasVistas.length}`)
+  for (const a of aceptadasVistas) console.log(`  ~ ${a}`)
 }
 
 const total = Object.values(dif).reduce((s, v) => s + v.length, 0)
 if (!total) {
-  console.log('\n✅ Deriva 0: la base local es igual a producción en todo lo que mide deriva-esquema.sql.')
+  console.log('\n✅ Deriva 0: la base local es igual a producción en todo lo que mide deriva-esquema.sql' +
+    (aceptadasVistas.length ? ' (salvo las aceptadas listadas arriba).' : '.'))
   process.exit(0)
 }
 console.log(`\n🔴 Deriva: ${total} diferencia(s).`)

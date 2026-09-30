@@ -99,8 +99,10 @@ filas as (
     from pg_policies
    where schemaname in ('public', 'storage')
 
-  -- ── triggers: los de tablas de public Y los que llaman funciones de public
-  --    desde otro esquema (p. ej. on_auth_user_created en auth.users) ──
+  -- ── triggers: los de tablas de public, TODOS los de tablas de auth (ahí vive
+  --    el alta de usuarios: on_auth_user_created → handle_new_user; un trigger
+  --    de auth que llamara a una función de OTRO esquema quedaba invisible), y
+  --    los que llaman funciones de public desde cualquier esquema ──
   union all
   select 'trigger', t.tgrelid::regclass::text || ' :: ' || t.tgname,
          md5(pg_get_triggerdef(t.oid, true) || ' enabled=' || t.tgenabled::text)
@@ -110,7 +112,38 @@ filas as (
     join pg_proc p on p.oid = t.tgfoid
     join pg_namespace pn on pn.oid = p.pronamespace
    where not t.tgisinternal
-     and (n.nspname = 'public' or pn.nspname = 'public')
+     and (n.nspname in ('public', 'auth') or pn.nspname = 'public')
+
+  -- ── EVENT triggers (DDL): categoría entera que antes no se medía. Prod tiene
+  --    ensure_rls → rls_auto_enable() (auto-habilita RLS en tablas nuevas de
+  --    public). El DUEÑO va en fila aparte: distingue lo que crea la plataforma
+  --    (supabase_admin) de lo que alguien creó como postgres ──
+  union all
+  select 'event_trigger', e.evtname,
+         md5(concat_ws(' | ', e.evtevent, e.evtenabled::text, e.evtfoid::regprocedure::text,
+                       coalesce(array_to_string(e.evttags, ','), '(todos)')))
+    from pg_event_trigger e
+  union all
+  select 'event_trigger_dueno', e.evtname, e.evtowner::regrole::text
+    from pg_event_trigger e
+
+  -- ── buckets de Storage: son DATOS, no esquema, pero definen qué acepta la
+  --    subida (público, tamaño máximo, tipos). Legibles, no hasheados ──
+  union all
+  select 'bucket', b.id,
+         concat_ws(' | ', 'public=' || b.public::text,
+                   'file_size_limit=' || coalesce(b.file_size_limit::text, 'null'),
+                   'allowed_mime_types=' || coalesce(array_to_string(b.allowed_mime_types, ','), 'null'))
+    from storage.buckets b
+
+  -- ── privilegios por DEFECTO en public: deciden los grants de todo objeto
+  --    nuevo (de acá venía que la base local diera EXECUTE a anon) ──
+  union all
+  select 'default_acl', d.defaclrole::regrole::text || ' / ' || d.defaclobjtype::text,
+         d.defaclacl::text
+    from pg_default_acl d
+    join pg_namespace n on n.oid = d.defaclnamespace
+   where n.nspname = 'public'
 
   -- ── constraints (check, fk, unique, pk, exclusion) ──
   union all
