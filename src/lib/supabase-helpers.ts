@@ -490,7 +490,7 @@ export const assignOrderNumber = async (
   restaurantId: string,
 ): Promise<AssignOrderNumberResult> => {
   // Una venta sin número no aparece en el Historial (ordena por número), no se
-  // puede reimprimir su ticket, y getShiftSalesCount cuenta las ventas gratis
+  // puede reimprimir su ticket, y close_cash_shift cuenta las ventas gratis
   // por `order_number not null`. Devolver null en silencio dejaba un cobro real
   // con el registro incompleto y CERO señal de que pasó.
   const { data, error } = await nextOrderNumber(restaurantId)
@@ -727,32 +727,10 @@ export const getShiftPayments = (restaurantId: string, from: string) =>
     .eq('restaurant_id', restaurantId)
     .gte('created_at', from)
 
-// Nº de VENTAS (órdenes distintas) del turno. Una venta mixta = varias filas
-// payments pero UNA orden → order_id distintos. Incluye las ventas GRATIS (vale
-// 100%, total 0, sin payment): se anclan por total=0 + order_number asignado
-// (marca de venta completada, la distingue de una mesa abierta) + created_at en
-// la ventana. Fiado (total>0, sin payment) NO cuenta (igual que antes).
-export const getShiftSalesCount = async (restaurantId: string, from: string): Promise<number> => {
-  const { data: pays, error: e1 } = await supabase
-    .from('payments')
-    .select('order_id')
-    .eq('restaurant_id', restaurantId)
-    .gte('created_at', from)
-  if (e1) throw e1
-  const ids = new Set((pays ?? []).map((p) => p.order_id as string))
-
-  const { data: free, error: e2 } = await supabase
-    .from('orders')
-    .select('id')
-    .eq('restaurant_id', restaurantId)
-    .eq('total', 0)
-    .not('order_number', 'is', null)
-    .is('cancelled_at', null)   // una venta gratis anulada NO cuenta
-    .gte('created_at', from)
-  if (e2) throw e2
-  for (const o of free ?? []) ids.add(o.id as string)
-  return ids.size
-}
+// Nº de VENTAS del turno: lo calcula el SERVIDOR al cerrar (close_cash_shift,
+// supabase/close-cash-shift.sql). Acá había una copia en TS (getShiftSalesCount)
+// que quedó sin uso al pasar el cierre al servidor; se borró para no dejar un
+// tercer lado del contrato desactualizándose en silencio (R1).
 
 // Total de VALES (ruletazo) entregados en el turno: suma discount_amount con
 // kind='vale' de las órdenes con pago en la ventana (mismo criterio que
@@ -832,25 +810,43 @@ export const getOpenShift = (restaurantId: string) =>
 export const openShift = (shift: TablesInsert<'cash_shifts'>) =>
   supabase.from('cash_shifts').insert(shift).select().single()
 
-export const closeShift = (
-  shiftId: string,
-  data: Pick<
-    TablesUpdate<'cash_shifts'>,
-    'closing_amount' | 'closed_by' | 'closed_at' | 'expected_amount' | 'difference'
-    | 'close_reconciliation' | 'close_comment'
-  >,
-) => supabase
+/** Lo declarado por quien cierra, por método. El ESPERADO no se manda: lo calcula el servidor. */
+export type DeclaradoCierre = { cash: number; card: number; transfer: number; nequi: number }
+
+export interface CierreServidor {
+  id: string
+  expected_amount: number
+  difference: number
+  movements_in: number
+  movements_out: number
+}
+
+/**
+ * Cierra el turno en el SERVIDOR (supabase/close-cash-shift.sql).
+ *
+ * 🔴 El esperado lo calcula close_cash_shift, no el navegador. Antes esto era un
+ * UPDATE directo con el esperado del modal, que podía estar viejo: con la red
+ * lenta, o con otro dispositivo registrando un egreso, se congelaba un arqueo
+ * sin ese egreso (medido 2026-09-21). authenticated ya no tiene UPDATE sobre
+ * cash_shifts: una pestaña con este código viejo recibe 42501.
+ */
+export const closeShiftServidor = (shiftId: string, declarado: DeclaradoCierre, comentario: string) =>
+  supabase.rpc('close_cash_shift', {
+    p_shift_id: shiftId,
+    p_declarado: declarado,
+    p_comentario: comentario.trim() || null,
+  })
+
+/** Fila cerrada con los mismos joins que getClosedShifts: comprobante idéntico a la reimpresión. */
+export const getClosedShiftRow = (shiftId: string) => supabase
   .from('cash_shifts')
-  .update(data)
-  .eq('id', shiftId)
-  // Mismos joins que getClosedShifts: el comprobante del cierre usa los mismos
-  // nombres (abrió/cerró) que la reimpresión → salida idéntica.
   .select(
     'id, opening_amount, opened_at, opened_by, closing_amount, expected_amount, ' +
     'difference, closed_at, closed_by, close_reconciliation, close_comment, ' +
     'abrio:profiles!cash_shifts_opened_by_fkey(full_name), ' +
     'cerro:profiles!cash_shifts_closed_by_fkey(full_name)',
   )
+  .eq('id', shiftId)
   .single()
 
 // --- Historial de turnos y de gastos (solo lectura, paginado) ---

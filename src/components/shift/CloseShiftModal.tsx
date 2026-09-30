@@ -4,7 +4,6 @@ import { useCashShift } from '@/hooks/useCashShift'
 import { useDeliveryCount } from '@/hooks/useDeliveryCount'
 import { useRestaurantConfig } from '@/hooks/useRestaurantConfig'
 import { calcShiftBalance } from '@/lib/shiftCalc'
-import type { ShiftReconciliation, MethodReconciliation } from '@/lib/shiftCalc'
 import { printCashReport, buildCashReportData } from '@/lib/printer'
 
 const formatCOP = (n: number) =>
@@ -74,24 +73,14 @@ export function CloseShiftModal({ onClose }: CloseShiftModalProps) {
     if (!canClose || isClosingShift) return
     // Snapshot del arqueo: efectivo (F1) + los 3 otros métodos + totales.
     // sales_count lo completa la mutación al cerrar.
-    const otherMethodsObj = Object.fromEntries(
-      otherRows.map((r) => [r.method, { expected: r.expected, declared: r.declared, difference: r.difference }]),
-    ) as Record<OtherMethod, MethodReconciliation>
-    const reconciliation: Omit<ShiftReconciliation, 'sales_count' | 'vouchers_total'> = {
-      methods: {
-        cash: { expected: expectedCash, declared, difference },
-        ...otherMethodsObj,
-      },
-      expected_total: expectedTotal,
-      declared_total: declaredTotal,
-      difference_total: differenceTotal,
-    }
+    // Solo viaja lo DECLARADO. El esperado de la vista previa de arriba es una
+    // guía para el cajero: el que se congela lo calcula el servidor
+    // (close_cash_shift), porque la lista de movimientos de este navegador puede
+    // estar vieja (otro dispositivo, red lenta — medido 2026-09-21).
+    const declaredBy = Object.fromEntries(otherRows.map((r) => [r.method, r.declared])) as Record<OtherMethod, number>
     try {
-      const closedRow = await closeShift({
-        closingAmount: declared,
-        expectedAmount: expectedCash,
-        difference,
-        reconciliation,
+      const { fila: closedRow, movementsIn: inServidor, movementsOut: outServidor } = await closeShift({
+        declarado: { cash: declared, ...declaredBy },
         comment,
       })
       // Auto-imprimir el comprobante tras el cierre exitoso (el modal fue el
@@ -101,8 +90,10 @@ export function CloseShiftModal({ onClose }: CloseShiftModalProps) {
         printCashReport(buildCashReportData(closedRow, {
           restaurantName: restaurant?.name,
           restaurantAddress: restaurant?.address,
-          movementsIn,
-          movementsOut,
+          // Del SERVIDOR, no de la lista del navegador: el comprobante tiene que
+          // decir lo mismo que el arqueo congelado.
+          movementsIn: inServidor,
+          movementsOut: outServidor,
         }))
       }
       onClose()

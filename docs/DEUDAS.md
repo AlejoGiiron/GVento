@@ -411,6 +411,20 @@ select tablename, policyname, cmd, roles from pg_policies
 
 ### 🔴 Registrar un movimiento y cerrar turno EN SEGUIDA puede persistir un esperado sin ese movimiento (hallado 2026-09-07)
 
+**🟡 RESUELTO EN RAMA `feat/close-cash-shift` (2026-09-30) — pendiente de aplicar en prod.**
+`supabase/close-cash-shift.sql`: cierre en el servidor (`close_cash_shift`), UPDATE revocado a
+authenticated y anon sobre `cash_shifts` (una pestaña vieja recibe 42501: toast "Error al cerrar
+el turno", el turno sigue abierto — medido), trigger que rechaza movimientos en turnos cerrados, y
+el PROTOCOLO DE LOCKS en los dos abonos y la anulación. `tests/cierre-turno-servidor.spec.ts`:
+el escenario medido + una carrera forzada por escritor + todos a la vez ×10 sin 40P01; mutantes
+verificados (escritores sin FOR SHARE → rojo; cliente viejo → congela 100.000 en vez de 89.423).
+**Falta:** el cobro (`register_sale_payment`) todavía no toma el turno → cambio (1).
+
+**Hallazgo lateral (2026-09-30, leyendo el código para D):** `register_debt_payment` (abono de UNA
+venta) lee el saldo SIN bloquear la orden: dos abonos simultáneos a la misma venta pueden pasarse
+del saldo. El lote SÍ bloquea las órdenes (su paso 3 dice exactamente esto). Misma clase (R3); con
+varios celulares cobrando fiados se vuelve probable. No se tocó en D (no es del turno).
+
 **✅ MEDIDO el 2026-09-21** (contra LAB en la nube, antes de pasar las pruebas a Docker; esperado leído del PATCH a `cash_shifts`): con red local y sin pausa, 3/3 correcto; con el GET de `cash_movements` demorado 2 s y sin pausa, **3/3 CARRERA** (se persistió la apertura sin el egreso); a ritmo humano con la misma demora, 3/3 correcto; y con **dos dispositivos** (B registra un egreso con el modal de cierre de A abierto) **siempre carrera**: `cash_movements` no tiene realtime ni polling, así que el modal de A nunca se entera. Con varios celulares es el caso normal, no el raro. Salida: el Paso D (`close_cash_shift`, esperado calculado en el servidor).
 
 **NO se arregló en esta sesión.** Se anota porque es plata mal declarada en un snapshot que
