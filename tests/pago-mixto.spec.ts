@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { loginAsOwner } from './helpers/auth'
 import { openTableAndAddItems } from './helpers/tables'
 import { openShiftIfClosed, closeShiftIfOpen } from './helpers/shift'
+import { mesaFija, liberarMesa } from './helpers/lab'
 
 // Pago mixto (dividir el cobro entre varios métodos). Corre contra el LAB.
 // - Producto compuesto seeded "Lab Coctel" (18.000) que descuenta 1 "Lab Vaso"
@@ -15,8 +16,9 @@ import { openShiftIfClosed, closeShiftIfOpen } from './helpers/shift'
 const PRODUCT = 'Lab Coctel'
 const INSUMO = 'Lab Vaso'
 
-const SUFFIX = Date.now().toString().slice(-6)
-const MESA = `Mesa Mixto ${SUFFIX}`
+// Mesa FIJA, reusada entre corridas (sin sufijo): no acumula residuo en LAB.
+// Ver tests/helpers/lab.ts.
+const MESA = 'E2E Fija Mixto'
 
 // "$ 18.000" → 18000
 const parseCOP = (text: string): number => Number(text.replace(/[^\d]/g, ''))
@@ -241,12 +243,8 @@ test.describe.serial('Pago mixto (pago dividido)', () => {
     // Stock del insumo ANTES de todo.
     const before = await readStock(page, INSUMO)
 
-    // Crear una mesa dedicada.
-    await page.goto('/mesas')
-    await page.getByRole('button', { name: 'Configurar' }).click()
-    await page.getByPlaceholder('Mesa 1').fill(MESA)
-    await page.getByRole('button', { name: 'Crear mesa' }).click()
-    await expect(page.getByText(MESA)).toBeVisible()
+    // Mesa dedicada del spec: existe y está LIBRE (se crea la primera vez).
+    await mesaFija(MESA)
 
     // Abrir la mesa y abrir el picker.
     await openTableAndAddItems(page, MESA)
@@ -258,7 +256,9 @@ test.describe.serial('Pago mixto (pago dividido)', () => {
     await page.getByRole('button', { name: 'Agregar a la mesa' }).click()
     // El picker cierra SOLO tras commitear la RPC (alta + descuento de stock).
     await expect(page.getByRole('button', { name: 'Agregar a la mesa' })).toHaveCount(0)
-    await expect(page.getByText('Sin ítems — agrega productos')).toHaveCount(0)
+    // Señal POSITIVA de que el ítem quedó en la mesa: "Sin ítems" en 0 también
+    // se cumplía con el panel en "Cargando orden..." (barrido R3, 2026-09-30).
+    await expect(page.getByTestId('table-item').first()).toBeVisible({ timeout: 15_000 })
 
     const afterAdd = await readStock(page, INSUMO)
     expect(afterAdd).toBe(before - 1)
@@ -316,21 +316,15 @@ test.describe.serial('Pago mixto (pago dividido)', () => {
     await expect(page.getByTestId('pay-method-fiado')).toHaveCount(0)
   })
 
-  test('limpieza: cerrar turno y borrar la mesa creada', async ({ page }) => {
-    page.on('dialog', (d) => d.accept())
+  test('limpieza: cerrar turno', async ({ page }) => {
     await loginAsOwner(page)
-
     await page.goto('/ventas')
     await closeShiftIfOpen(page)
+  })
 
-    // Borrado best-effort de la mesa (la orden quedó 'delivered' y la mesa libre).
-    await page.goto('/mesas')
-    await page.getByRole('button', { name: 'Configurar' }).click()
-    const del = page.locator('div')
-      .filter({ has: page.getByText(MESA, { exact: true }) })
-      .filter({ has: page.getByTitle('Eliminar mesa') })
-      .last()
-      .getByTitle('Eliminar mesa')
-    if (await del.count() > 0) await del.click()
+  // Corre AUNQUE un test previo falle (un test de limpieza al final de un
+  // describe.serial no). Libera la mesa y lo verifica.
+  test.afterAll(async () => {
+    await liberarMesa(MESA)
   })
 })

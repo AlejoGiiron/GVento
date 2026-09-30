@@ -12,3 +12,18 @@ import { type Page, expect } from '@playwright/test'
 export async function waitPosReady(page: Page): Promise<void> {
   await expect(page.getByTestId('cart-total')).toBeVisible({ timeout: 15_000 })
 }
+
+/**
+ * Agrega al carrito un producto CONOCIDO, por nombre: "Lab Cerveza" (lab-seed:
+ * simple, sin extras, sin tracking, 8.000).
+ *
+ * 🔴 Reemplaza a `getByTestId('product-card').first()`, que agregaba "lo que
+ * saliera primero" y por eso dependía del ORDEN de los datos: en Docker
+ * (2026-09-30) el primero era "AV Insumo" a precio 0, residuo de anular-venta,
+ * y pos.spec daba total 0. Un spec no puede depender de qué dejó otro.
+ */
+export const PRODUCTO_SIMPLE = 'Lab Cerveza'
+export async function agregarProductoSimple(page: Page): Promise<void> {
+  await page.getByPlaceholder('Buscar producto...').fill(PRODUCTO_SIMPLE)
+  await page.getByTestId('product-card').filter({ hasText: PRODUCTO_SIMPLE }).first().click()
+}

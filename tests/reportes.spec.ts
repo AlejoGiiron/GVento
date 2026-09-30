@@ -43,7 +43,8 @@ test.describe('Reportes', () => {
 
   test('el sidebar muestra el nombre del restaurante', async ({ page }) => {
     const brand = page.getByTestId('sidebar-brand-name')
-    await expect(brand).toBeVisible()
-    await expect(brand).not.toHaveText('')
+    // El nombre REAL de la sede. `not.toHaveText('')` pasaba siempre: mientras
+    // carga, el sidebar muestra el respaldo 'G-Vento' (restaurant?.name ?? …).
+    await expect(brand).toHaveText('Sede Lab Norte', { timeout: 15_000 })
   })
 })

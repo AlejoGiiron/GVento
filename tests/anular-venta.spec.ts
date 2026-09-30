@@ -174,6 +174,28 @@ async function openSaleDetail(page: Page, number: number) {
 
 // ── Suite ────────────────────────────────────────────────────────────────────
 test.describe.serial('Anulación de ventas', () => {
+  // Limpieza de los fixtures de ESTE spec, por los UUID que creó. Corre AUNQUE
+  // un test falle (antes no había ninguna: cada corrida dejaba 3 productos
+  // ACTIVOS — "AV Insumo" a precio 0 — y pos.spec, que agrega "la primera
+  // tarjeta", tomaba ese y daba total 0; medido en Docker el 2026-09-30).
+  // Borrado lógico (is_active=false), igual que la UI: los productos tienen
+  // ventas y movimientos de stock que los referencian.
+  test.afterAll(async () => {
+    const c = await ctx()
+    const prods = [P_SIMPLE, P_NOTRK, P_INSUMO].filter(Boolean)
+    if (prods.length) {
+      const { error } = await c.from('products').update({ is_active: false }).in('id', prods)
+      expect(error, `desactivar productos AV: ${error?.message}`).toBeNull()
+      const activos = (await c.from('products').select('id', { count: 'exact', head: true })
+        .in('id', prods).eq('is_active', true)).count
+      expect(activos, 'productos AV que quedaron activos').toBe(0)
+    }
+    if (EXTRA) {
+      const { error } = await c.from('extras').update({ is_active: false }).eq('id', EXTRA)
+      expect(error, `desactivar extra AV: ${error?.message}`).toBeNull()
+    }
+  })
+
   test('setup: fixtures + turno abierto', async () => {
     const c = await ctx()
     const cat = (await c.from('categories').select('id').eq('restaurant_id', SEDE).limit(1).single()).data!.id
@@ -298,6 +320,9 @@ test.describe.serial('Anulación de ventas', () => {
     // pantalla de anular y aun así no puede.
     await loginAsCashier(page)
     await openSaleDetail(page, number)
+    // Señal POSITIVA: el detalle CARGÓ la venta (el botón exige `sale`; con el
+    // modal abierto pero la venta cargando, su ausencia no prueba nada).
+    await expect(page.getByTestId('sale-detail-item').first()).toBeVisible({ timeout: 15_000 })
     await expect(page.getByTestId('sale-void-button')).toHaveCount(0)
     // limpieza: anular de verdad como owner (no dejar la venta viva)
     await voidRpc(await db(), id)
@@ -437,6 +462,12 @@ test.describe.serial('Anulación de ventas', () => {
     // Filtro de método = Efectivo (cash).
     await page.getByTestId('sales-method').selectOption('cash')
 
+    // Señal POSITIVA: la lista muestra datos DEL FILTRO cash, ya cargados. Con
+    // keepPreviousData la lista vieja seguía visible durante el refetch, y la
+    // ausencia de abajo se podía evaluar sobre ella (R3, 2026-09-30).
+    const lista = page.getByTestId('sales-list')
+    await expect(lista).toHaveAttribute('data-metodo', 'cash')
+    await expect(lista).toHaveAttribute('aria-busy', 'false', { timeout: 15_000 })
     // La anulada NO está en la lista paginada (perdió sus payments)...
     await expect(saleRow(page, 'sale-row', number)).toHaveCount(0)
     // ...pero SÍ en la sección "Anuladas", con su badge y clickeable al detalle.

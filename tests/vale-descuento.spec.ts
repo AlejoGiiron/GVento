@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { loginAsOwner } from './helpers/auth'
 import { openTableAndAddItems } from './helpers/tables'
 import { openShiftIfClosed, closeShiftIfOpen } from './helpers/shift'
+import { mesaFija, liberarMesa } from './helpers/lab'
 
 // Vale descuento / ruletazo. Corre en LAB. Cubre: vale en Mesa y POS (persiste
 // kind='vale' + fixed, baja el total, el pago cuadra), descuento normal ≠ vale,
@@ -14,6 +15,10 @@ const PRODUCT = 'Lab Coctel'
 const PRICE = 18000
 
 const SUFFIX = Date.now().toString().slice(-6)
+// Mesas FIJAS, reusadas entre corridas (sin sufijo): no acumulan residuo en
+// LAB. Ver tests/helpers/lab.ts.
+const MESA_VALE = 'E2E Fija Vale'
+const MESA_CLAMP = 'E2E Fija Clamp'
 const parseCOP = (t: string) => Number(t.replace(/[^\d]/g, ''))
 
 // ── Supabase directo (RLS del owner) ──────────────────────────────────
@@ -90,13 +95,10 @@ async function payNequiAndFinish(page: Page): Promise<number> {
   return n
 }
 
-// Crea una mesa dedicada, la abre y le agrega 1 PRODUCT (subtotal = PRICE).
+// Deja la mesa dedicada LIBRE (la crea la primera vez), la abre y le agrega
+// 1 PRODUCT (subtotal = PRICE).
 async function setupMesaWithItem(page: Page, mesaName: string) {
-  await page.goto('/mesas')
-  await page.getByRole('button', { name: 'Configurar' }).click()
-  await page.getByPlaceholder('Mesa 1').fill(mesaName)
-  await page.getByRole('button', { name: 'Crear mesa' }).click()
-  await expect(page.getByText(mesaName)).toBeVisible()
+  await mesaFija(mesaName)
 
   await openTableAndAddItems(page, mesaName)
   await page.getByRole('button').filter({ has: page.getByText(PRODUCT, { exact: true }) }).first().click()
@@ -104,7 +106,9 @@ async function setupMesaWithItem(page: Page, mesaName: string) {
   await page.getByTestId('item-config-confirm').click()
   await page.getByRole('button', { name: 'Agregar a la mesa' }).click()
   await expect(page.getByRole('button', { name: 'Agregar a la mesa' })).toHaveCount(0)
-  await expect(page.getByText('Sin ítems — agrega productos')).toHaveCount(0)
+  // Señal POSITIVA de que el ítem quedó en la mesa: "Sin ítems" en 0 también
+  // se cumplía con el panel en "Cargando orden..." (barrido R3, 2026-09-30).
+  await expect(page.getByTestId('table-item').first()).toBeVisible({ timeout: 15_000 })
 }
 
 async function openMesaCheckout(page: Page, mesaName: string) {
@@ -114,6 +118,12 @@ async function openMesaCheckout(page: Page, mesaName: string) {
   await expect(page.getByText(`${mesaName} · Total a cobrar`)).toBeVisible()
 }
 
+// La visibilidad de `report-vouchers` ES la señal de "cargó": KPICard pinta un
+// esqueleto SIN el testid mientras isLoading, y desde 2026-09-30 isLoading
+// incluye la query de vales. Antes no la incluía: la tarjeta se pintaba con $0
+// mientras cargaba y este helper podía leer ese 0 (causa del flake del REPORTE).
+// Arreglo en el producto (useReports), no acá: un expect.poll sobre el valor
+// habría escondido justo ese $0 falso.
 async function readVouchersKPI(page: Page): Promise<number> {
   await page.goto('/reportes')
   await expect(page.getByTestId('report-vouchers')).toBeVisible({ timeout: 15_000 })
@@ -123,7 +133,7 @@ async function readVouchersKPI(page: Page): Promise<number> {
 // ── Suite ───────────────────────────────────────────────────────────────
 test.describe.serial('Vale descuento / ruletazo', () => {
   test('MESA: vale baja el total, persiste kind=vale/fixed y el pago cuadra', async ({ page }) => {
-    const MESA = `Mesa Vale ${SUFFIX}`
+    const MESA = MESA_VALE
     await loginAsOwner(page)
     await page.goto('/ventas')
     await closeShiftIfOpen(page)
@@ -234,6 +244,15 @@ test.describe.serial('Vale descuento / ruletazo', () => {
     await page.goto('/ventas')
     await openShiftIfClosed(page, 0)
 
+    // Se FUERZA la ventana del flake: la query de vales tarda 2 s. Con el
+    // defecto (vales fuera de isLoading) la tarjeta se pintaba con $0 durante
+    // esos 2 s y readVouchersKPI leía 0 → delta falso. Sin esta demora el test
+    // solo lo detectaba cuando la red era lenta por azar (flake 2026-08-11).
+    await page.route(/\/rest\/v1\/orders\?.*discount_kind=eq\.vale/, async (r) => {
+      await new Promise((ok) => setTimeout(ok, 2000))
+      await r.continue()
+    })
+
     const before = await readVouchersKPI(page)
 
     // Un vale de 7.000 en POS.
@@ -250,7 +269,7 @@ test.describe.serial('Vale descuento / ruletazo', () => {
   })
 
   test('VENTA GRATIS: vale 100% (total 0) → clamp + se cierra sin pago, queda registrada', async ({ page }) => {
-    const MESA = `Mesa Clamp ${SUFFIX}`
+    const MESA = MESA_CLAMP
     await loginAsOwner(page)
     await page.goto('/ventas')
     await openShiftIfClosed(page, 0)
@@ -300,21 +319,15 @@ test.describe.serial('Vale descuento / ruletazo', () => {
     expect(order.discount_type).toBeNull()
   })
 
-  test('limpieza: cerrar turno y borrar las mesas creadas', async ({ page }) => {
-    page.on('dialog', (d) => d.accept())
+  test('limpieza: cerrar turno', async ({ page }) => {
     await loginAsOwner(page)
     await page.goto('/ventas')
     await closeShiftIfOpen(page)
+  })
 
-    await page.goto('/mesas')
-    await page.getByRole('button', { name: 'Configurar' }).click()
-    for (const name of [`Mesa Vale ${SUFFIX}`, `Mesa Clamp ${SUFFIX}`]) {
-      const del = page.locator('div')
-        .filter({ has: page.getByText(name, { exact: true }) })
-        .filter({ has: page.getByTitle('Eliminar mesa') })
-        .last()
-        .getByTitle('Eliminar mesa')
-      if (await del.count() > 0) await del.click()
-    }
+  // Corre AUNQUE un test previo falle. Libera las dos mesas y lo verifica.
+  test.afterAll(async () => {
+    await liberarMesa(MESA_VALE)
+    await liberarMesa(MESA_CLAMP)
   })
 })

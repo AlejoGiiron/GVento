@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { loginAsOwner } from './helpers/auth'
-import { waitPosReady } from './helpers/pos'
+import { waitPosReady, agregarProductoSimple } from './helpers/pos'
 
 // Botones desambiguados por `title`:
 //   footer "Poner la venta en espera"  → poner en espera
@@ -11,7 +11,7 @@ const LABEL_PLACEHOLDER = /Señor de gorra/
 
 async function addAndHold(page: import('@playwright/test').Page, label: string) {
   await waitPosReady(page)
-  await page.getByTestId('product-card').first().click()
+  await agregarProductoSimple(page)
   await page.getByTitle(HOLD_BTN).click()
   await page.getByPlaceholder(LABEL_PLACEHOLDER).fill(label)
   await page.getByRole('button', { name: 'Guardar en espera' }).click()
@@ -21,7 +21,7 @@ test.describe('Venta en espera', () => {
   test('poner en espera vacía el carrito y el contador marca 1', async ({ page }) => {
     await loginAsOwner(page)
     await waitPosReady(page)
-    await page.getByTestId('product-card').first().click()
+    await agregarProductoSimple(page)
     await expect(page.getByText('Carrito vacío')).toHaveCount(0)
 
     await page.getByTitle(HOLD_BTN).click()
@@ -69,7 +69,7 @@ test.describe('Venta en espera', () => {
   test('retomar con carrito activo abre el diálogo de 3 opciones', async ({ page }) => {
     await loginAsOwner(page)
     await addAndHold(page, 'En espera A')         // 1 en espera, carrito vacío
-    await page.getByTestId('product-card').first().click() // carrito activo con ítems
+    await agregarProductoSimple(page) // carrito activo con ítems
 
     await page.getByTitle(HELD_INDICATOR).click()
     await page.getByRole('button', { name: 'Retomar' }).click()

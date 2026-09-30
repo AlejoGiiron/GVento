@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { loginAsOwner } from './helpers/auth'
 import { openTableAndAddItems } from './helpers/tables'
 import { openShiftIfClosed } from './helpers/shift'
+import { mesaFija, liberarMesa } from './helpers/lab'
 
 // Recibo al cerrar mesa. El POS ya ofrecía "Imprimir" en la pantalla de éxito y
 // Mesas NO: TablesPage solo importaba printComanda (la de cocina). Ahora usa
@@ -9,8 +10,9 @@ import { openShiftIfClosed } from './helpers/shift'
 // ticket de mesa sale byte-idéntico al reimpreso desde ahí.
 
 const PRODUCT = 'Lab Coctel'
-const SUFFIX = Date.now().toString().slice(-6)
-const MESA = `Mesa Recibo ${SUFFIX}`
+// Mesa FIJA, reusada entre corridas (sin sufijo): no acumula residuo en LAB.
+// Ver tests/helpers/lab.ts.
+const MESA = 'E2E Fija Recibo'
 
 // Stub de impresión: captura el HTML del ticket en vez de abrir el diálogo
 // (headless). Mismo patrón que arqueo.spec.
@@ -35,12 +37,9 @@ test.describe.serial('Recibo al cerrar mesa', () => {
     await page.goto('/ventas')
     await openShiftIfClosed(page, 50000)
 
-    // Mesa dedicada (evita colisión con mesas seeded ocupadas).
-    await page.goto('/mesas')
-    await page.getByRole('button', { name: 'Configurar' }).click()
-    await page.getByPlaceholder('Mesa 1').fill(MESA)
-    await page.getByRole('button', { name: 'Crear mesa' }).click()
-    await expect(page.getByText(MESA)).toBeVisible()
+    // Mesa dedicada (evita colisión con mesas seeded ocupadas): existe y está
+    // LIBRE (se crea la primera vez).
+    await mesaFija(MESA)
 
     await openTableAndAddItems(page, MESA)
     await page.getByRole('button').filter({ has: page.getByText(PRODUCT, { exact: true }) }).first().click()
@@ -49,7 +48,9 @@ test.describe.serial('Recibo al cerrar mesa', () => {
     await page.getByRole('button', { name: 'Agregar a la mesa' }).click()
     // El picker cierra SOLO tras commitear el alta atómica de ítems.
     await expect(page.getByRole('button', { name: 'Agregar a la mesa' })).toHaveCount(0)
-    await expect(page.getByText('Sin ítems — agrega productos')).toHaveCount(0)
+    // Señal POSITIVA de que el ítem quedó en la mesa: "Sin ítems" en 0 también
+    // se cumplía con el panel en "Cargando orden..." (barrido R3, 2026-09-30).
+    await expect(page.getByTestId('table-item').first()).toBeVisible({ timeout: 15_000 })
 
     // Cobrar en efectivo.
     await page.getByRole('button', { name: 'Cobrar' }).click()
@@ -81,15 +82,9 @@ test.describe.serial('Recibo al cerrar mesa', () => {
     expect(html).toContain('Efectivo')
   })
 
-  test('limpieza: eliminar la mesa creada', async ({ page }) => {
-    await loginAsOwner(page)
-    await page.goto('/mesas')
-    await page.getByRole('button', { name: 'Configurar' }).click()
-    const del = page.locator('div')
-      .filter({ has: page.getByText(MESA, { exact: true }) })
-      .filter({ has: page.getByTitle('Eliminar mesa') })
-      .last()
-      .getByTitle('Eliminar mesa')
-    if (await del.count() > 0) await del.click()
+  // Corre AUNQUE el test falle (antes era un test de limpieza al final de un
+  // describe.serial, que se salteaba). Libera la mesa y lo verifica.
+  test.afterAll(async () => {
+    await liberarMesa(MESA)
   })
 })

@@ -127,10 +127,14 @@ test.describe.serial('Historiales de turnos y gastos', () => {
     await expect(row.getByTestId('expense-reason')).toHaveText(REASON)
     await expect(row.getByTestId('expense-amount')).toContainText(cop(EGRESO))
 
-    // El total del período está visible y es distinto de cero (incluye el egreso).
+    // El total del período INCLUYE el egreso. Primero la señal POSITIVA de que
+    // cargó (aria-busy=false): antes esto era `not.toHaveText(/^\$?\s*0$/)`,
+    // una ausencia que se cumple con CUALQUIER texto distinto de "$0" —incluido
+    // el "…" de carga—. Después, el valor: al menos el egreso de este spec.
     const total = page.getByTestId('expenses-total')
-    await expect(total).toBeVisible()
-    await expect(total).not.toHaveText(/^\$?\s*0$/)
+    await expect(total).toHaveAttribute('aria-busy', 'false', { timeout: 15_000 })
+    const monto = Number((await total.innerText()).replace(/[^\d]/g, ''))
+    expect(monto).toBeGreaterThanOrEqual(EGRESO)
   })
 
   test('gating positivo: el cajero ve Turnos y Gastos', async ({ page }) => {
@@ -149,10 +153,15 @@ test.describe.serial('Historiales de turnos y gastos', () => {
   })
 
   test('gating negativo: el mozo NO ve Turnos ni Gastos', async ({ page }) => {
-    test.skip(!hasWaiterCreds(), 'Requiere mozo.test: crea la cuenta, re-corre lab-seed y define E2E_WAITER_* en .env.test')
+    test.skip(!hasWaiterCreds(), 'Requiere mozo.test (lo siembra pnpm e2e:preparar; E2E_WAITER_* en scripts/capturas/local.config)')
     await loginAsWaiter(page)
     await page.goto('/ventas')
 
+    // Señal POSITIVA de "permisos cargados": un enlace CON permiso que este rol
+    // SÍ tiene (Cocina, cocina.acceder; Lab Norte usa cocina). Mientras el rol carga, can() da false y TODO enlace con
+    // permiso está ausente — las ausencias de abajo pasaban por la carga. Ventas y
+    // Mesas no sirven de señal: no tienen permiso, se ven siempre (R3, 2026-09-30).
+    await expect(page.getByRole('link', { name: 'Cocina' })).toBeVisible({ timeout: 15_000 })
     // El mozo no tiene caja.* → nav oculto.
     await expect(page.getByRole('link', { name: 'Turnos' })).toHaveCount(0)
     await expect(page.getByRole('link', { name: 'Gastos' })).toHaveCount(0)
