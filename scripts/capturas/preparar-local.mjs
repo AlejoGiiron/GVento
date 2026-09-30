@@ -91,6 +91,7 @@ const ORDEN = [
   'security-definer-revoke.sql',
   'reconciliar-con-prod.sql',           // ÚLTIMA: lleva la base a lo que prod tiene de verdad (deriva 0)
   'restaurant-logos-policies.sql',      // aplicada en prod DESPUÉS de reconciliar: sube/reemplaza/borra en la carpeta propia
+  'product-images-policies.sql',        // mismo alcance por carpeta para product-images (reemplaza las '… con permiso')
 ]
 
 // ── QUIÉN GANA cuando una función está definida en más de un .sql ─────────────

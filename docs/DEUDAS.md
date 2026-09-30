@@ -292,6 +292,19 @@ alcance para subir/reemplazar/borrar = carpeta de la sede activa + `config.acced
 de la ruta `/config`). **Se aplica en prod**; antes, correr `supabase/diag/logos-plantados.sql`
 (¿alguien ya plantó archivos? ¿quién pierde el permiso de subir?).
 
+**🔴 `product-images` tenía el MISMO hueco entre clientes, más grave (medido 2026-09-30, R3).**
+Las 3 policies de escritura de prod ("… con permiso") piden solo bucket + `productos.editar`,
+sin carpeta. En Docker con la base igual a prod, un usuario de LAB-OTRA subió a la carpeta de
+LAB, REEMPLAZÓ la foto de un producto ajeno y la BORRÓ. La foto se muestra desde
+`products.image_url`: reemplazar el archivo cambia la foto que el otro negocio ve en su POS.
+Arreglo: `supabase/product-images-policies.sql` (rama `fix/product-images-carpeta`), mismo
+alcance que logos (carpeta = sede activa + `productos.editar`). Antes de aplicarlo en prod:
+`supabase/diag/storage-escrituras-cruzadas.sql` (cubre los dos buckets; detecta plantados y
+reemplazos porque `storage.objects.owner` pasa a ser el último que escribió — medido).
+El QR de Nequi, en cambio, se lee de `config.nequi_qr_url` (guardada solo tras una subida
+propia exitosa) y solo lo muestra la vista previa de Configuración: un archivo plantado no
+podía volverse "su QR de pago".
+
 **`product-images` — respuesta sobre el límite (sin aplicar nada):** el cliente NO comprime ni
 redimensiona. `ImageUpload.tsx` → `validate` rechaza lo que no sea jpeg/png/webp y lo que pase
 de 2 MB, y `uploadProductImage` sube el archivo tal cual. Una HEIC (`image/heic`) la rechaza el
