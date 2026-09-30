@@ -1,5 +1,4 @@
 import { test, expect, type Page } from '@playwright/test'
-import { readFileSync } from 'node:fs'
 import { createClient } from '@supabase/supabase-js'
 import { loginAsOwner } from './helpers/auth'
 import { openTableAndAddItems } from './helpers/tables'
@@ -25,16 +24,6 @@ const parseCOP = (text: string): number => Number(text.replace(/[^\d]/g, ''))
 // ── Supabase directo (verificación de las filas payments) ─────────────
 // VITE_GVENTO_* (backend del lab) viven en .env; playwright.config solo carga
 // .env.test. Cargamos ambos aquí para consultar la BD con RLS del owner.
-function loadEnv(path: string) {
-  try {
-    for (const line of readFileSync(path, 'utf8').split(/\r?\n/)) {
-      const m = line.match(/^([A-Z0-9_]+)=(.*)$/)
-      if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '')
-    }
-  } catch { /* ignore */ }
-}
-loadEnv('.env')
-loadEnv('.env.test')
 
 type Pay = { method: string; amount: number }
 

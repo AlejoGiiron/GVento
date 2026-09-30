@@ -3,55 +3,56 @@
 Pruebas end-to-end de los flujos críticos: gating RBAC, POS/carrito, venta en
 espera y kanban de delivery.
 
-## Laboratorio (org LAB) — dónde corren los tests
+## Laboratorio — dónde corren los tests: Supabase LOCAL en Docker
 
-El ambiente de pruebas es la **organización `LAB`**, NO un proyecto Supabase
-separado. Vive en el **mismo** Supabase que la app, aislado de los datos reales
-(org `G-10`) por la arquitectura multi-tenant: LAB tiene sus propias sedes,
-roles, usuarios y catálogo.
+🔴 **La suite corre SOLO contra el Supabase local de Docker, nunca contra la nube**
+(decidido el 2026-09-30). La nube cobra por **ingesta de logs** —el mes cerró en
+2,58 GB contra 1 GB del plan— y cada corrida de la suite son cientos de requests
+logueados. Que LAB esté aislada por RLS no cambia eso: en la nube LAB es una
+organización dentro de la **misma** base que G-10, Salchimelo y Café Aroma, y el
+medidor es el mismo.
 
-- **Sedes:** `Sede Lab Norte` y `Sede Lab Sur`.
-- **Usuarios de prueba** (sede activa = Norte):
-  - `owner.test@gvento.com` → rol `owner` (acceso a Norte y Sur).
-  - `cajero.test@gvento.com` → rol `cajero` (acceso solo a Norte).
+**Mecanismo (qué lo impide y qué no):**
+- `playwright.config.ts` carga `scripts/capturas/local.config` (versionado, sin
+  secretos), **pisa** `process.env` con él y **aborta si la URL no es loopback**
+  (allowlist `127.0.0.1` / `localhost` / `::1`). No lee `.env` ni `.env.test`.
+  Auditado por mutación el 2026-09-30: con la URL apuntando a un host remoto, la
+  suite aborta antes de abrir una sola conexión.
+- Los specs **no** tienen cargadores propios de `.env` (se sacaron las 10 copias):
+  lo que ven es lo que puso la config.
+- **No impide** que un spec nuevo vuelva a leer `.env.test` a mano. La URL igual
+  queda local (ningún cargador pisa lo ya definido), pero una clave que falte en
+  `local.config` podría colarse. **No copies el viejo `loadEnv`.**
+
+Dentro del stack local, el ambiente es la **organización `LAB`** que siembra
+`supabase/lab-seed.sql`:
+
+- **Sedes:** `Sede Lab Norte` y `Sede Lab Sur` (+ `Sede Lab Sin Cocina`).
+- **Usuarios** (contraseña local `lab-local-2026`, ver `local.config`):
+  `owner.test` (owner), `cajero.test` (cajero), `mozo.test` (mozo, gating negativo).
 - **Datos mínimos** en Norte: categorías Lab Cocteles/Lab Insumos, productos
   Lab Cerveza/Lab Agua (simple, sin tracking), insumo Lab Vaso (con stock),
-  compuesto Lab Coctel (receta: 1 Lab Vaso) y extra Lab Doble; mesas y
-  `store_sequences` en 0.
+  compuesto Lab Coctel (receta: 1 Lab Vaso) y extra Lab Doble.
 
-La semilla está en **`supabase/lab-seed.sql`** (idempotente: se puede re-aplicar
-sin duplicar). **Ventaja de usar una org en vez de un proyecto separado:** cada
-migración nueva se aplica a la misma BD, así que **LAB siempre está al día** con
-el esquema; no hay que mantener un segundo proyecto sincronizado.
+### Health check de organización
 
-### Credenciales del laboratorio
+`tests/global-setup.ts` hace login real con `E2E_OWNER_EMAIL` y aborta si la
+organización **no es `LAB`**. Complementa al guard de loopback: ese mira **a qué
+base** se apunta; este, **con qué credenciales**.
 
-Las credenciales de `owner.test` / `cajero.test` van en `.env.test`
-(`E2E_OWNER_*` / `E2E_CASHIER_*`). Ver "Credenciales (NO hardcodear)" abajo.
+### Qué queda fuera en local
 
-### Health check de organización (seguridad de datos)
+- **`E2E_GCENTRO_HMAC_SECRET` no se define**: la función local `aplicar-estado`
+  no tiene el secreto, así que los casos de `suscripcion-estado.spec.ts` que
+  necesitan firma válida hacen skip.
 
-`tests/global-setup.ts` hace, antes de la suite, **login real con
-`E2E_OWNER_EMAIL`** y consulta su organización. Si **no es `LAB`** → **aborta**
-con un error claro:
-
-> `PELIGRO: las credenciales de prueba no son del laboratorio (org actual: X).`
-
-Esto evita correr la suite contra datos reales (org `G-10`) por un `.env.test`
-mal configurado.
-
-## ⚠️ ADVERTENCIA: estos tests modifican datos del backend
-
-Los tests corren contra el **backend real de Supabase** que use el `.env` del
-proyecto. No son inocuos:
+## ⚠️ Los tests mutan el estado del laboratorio
 
 - `closeShiftIfOpen` **cierra el turno de caja activo** (declarando 0).
-- Los specs de **venta-espera** y **pos** pueden **crear datos de prueba**.
-- **NO ejecutar nunca contra datos reales (org `G-10`)**: el health check de
-  organización lo bloquea, pero la regla sigue siendo correr **solo con
-  credenciales de la org `LAB`**.
-- Producción quedó **limpia** (los usuarios de prueba fueron eliminados de ahí);
-  toda la verificación E2E se hace en **LAB**.
+- Varios specs crean datos de prueba. Los que usan mesa usan una **mesa fija por
+  spec**, liberada en un `afterAll` con aserción (`tests/helpers/lab.ts`).
+- En local esto es barato de deshacer: `pnpm e2e:preparar` reconstruye la base
+  desde cero.
 
 ## ⚠️ Puerto dedicado — NO correr contra otra app
 
@@ -74,53 +75,28 @@ No hace falta tener un `pnpm dev` corriendo a mano: Playwright lo arranca en `51
 
 ## Requisitos
 
-- El `.env` del proyecto con `VITE_GVENTO_SUPABASE_URL` y `VITE_GVENTO_SUPABASE_ANON_KEY`
-  (los tests usan el backend real de Supabase, contra la org **LAB**). El health
-  check de `global-setup.ts` también los lee para verificar la organización.
-- Las dos cuentas de prueba de la org LAB: **owner.test** y **cajero.test**
-  (ver "Laboratorio" arriba).
+- **Docker Desktop** corriendo y el **Supabase CLI** instalado.
 - Navegadores de Playwright instalados una vez:
 
   ```bash
   npx playwright install chromium
   ```
 
-## Credenciales (NO hardcodear)
-
-Las credenciales se leen de variables de entorno, nunca van en el código:
+## Montar / sembrar el laboratorio local
 
 ```bash
-cp .env.test.example .env.test
-# editar .env.test con cuentas reales de prueba
+pnpm e2e:preparar     # levanta el stack (supabase start) si no está, aplica las
+                      # migraciones en el orden verificado, crea las 3 cuentas de
+                      # Auth y corre lab-seed.sql. Sin la vitrina de las capturas.
 ```
 
-`.env.test` está en `.gitignore`. Variables:
+Es **destructivo sobre la base local** (la reconstruye desde cero) y solo sobre
+ella: el script opera sobre el contenedor `supabase_db_gvento`. Re-correrlo es la
+forma de volver a un laboratorio limpio.
 
-| Variable               | Cuenta (org LAB)              |
-|------------------------|-------------------------------|
-| `E2E_OWNER_EMAIL`      | `owner.test@gvento.com`       |
-| `E2E_OWNER_PASSWORD`   |                               |
-| `E2E_CASHIER_EMAIL`    | `cajero.test@gvento.com`      |
-| `E2E_CASHIER_PASSWORD` |                               |
-
-## Montar / sembrar el laboratorio
-
-Las cuentas auth `owner.test@gvento.com` y `cajero.test@gvento.com` **ya existen
-en Auth**. Lo que faltaba eran sus `profiles` y el resto del ecosistema LAB, que
-crea la semilla:
-
-1. Aplica **`supabase/lab-seed.sql`** (Dashboard → SQL Editor). Es idempotente:
-   crea (o reconcilia) la org LAB, sus 2 sedes, los 4 roles de sistema, los
-   profiles de `owner.test`/`cajero.test`, sus `user_stores`, y los datos mínimos
-   de Sede Lab Norte. Al final imprime una verificación.
-2. Pon las contraseñas de ambas cuentas en `.env.test` (`E2E_OWNER_PASSWORD` /
-   `E2E_CASHIER_PASSWORD`). Si no recuerdas las contraseñas, resetéalas desde
-   Supabase Auth.
-3. Corre la suite: el health check de `global-setup.ts` confirma que las
-   credenciales son de la org `LAB` antes de empezar.
-
-> Si alguna vez necesitas cuentas de prueba nuevas, créalas en Auth (o desde la
-> app) y vuelve a ejecutar `lab-seed.sql` adaptando los UUIDs de la cabecera.
+Las credenciales **no** van en `.env.test`: viven en `scripts/capturas/local.config`
+(versionado; no son secretas, existen solo dentro del contenedor). `.env.test`
+queda sin uso para la suite.
 
 ## Correr los tests
 

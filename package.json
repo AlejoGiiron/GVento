@@ -16,6 +16,7 @@
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
     "capturas:preparar": "node scripts/capturas/preparar-local.mjs",
+    "e2e:preparar": "node scripts/capturas/preparar-local.mjs --sin-vitrina",
     "capturas": "playwright test --config=scripts/capturas/capturas.config.ts"
   },
   "dependencies": {

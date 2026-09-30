@@ -1,5 +1,4 @@
 import { test, expect, type Page } from '@playwright/test'
-import { readFileSync } from 'node:fs'
 import { createHmac } from 'node:crypto'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { loginAsOwner, ownerCreds } from './helpers/auth'
@@ -39,15 +38,6 @@ import { waitPosReady } from './helpers/pos'
 
 test.describe.configure({ mode: 'serial' })
 
-function loadEnv(path: string) {
-  try {
-    for (const line of readFileSync(path, 'utf8').split(/\r?\n/)) {
-      const m = line.match(/^([A-Z0-9_]+)=(.*)$/)
-      if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '')
-    }
-  } catch { /* ignore */ }
-}
-loadEnv('.env'); loadEnv('.env.test')
 
 const SECRETO = process.env.E2E_GCENTRO_HMAC_SECRET
 // Sin el secreto no hay forma de montar los escenarios: skip del archivo entero

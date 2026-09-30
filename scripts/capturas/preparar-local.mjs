@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 /**
- * Levanta y siembra el Supabase LOCAL de Docker para las capturas de la landing.
+ * Levanta y siembra el Supabase LOCAL de Docker. Lo usan DOS cosas:
  *
- *   pnpm capturas:preparar     # esto
- *   pnpm capturas              # genera las 5 PNG
+ *   pnpm e2e:preparar          # esto, SIN la vitrina → luego pnpm test:e2e
+ *   pnpm capturas:preparar     # esto, CON la vitrina → luego pnpm capturas
+ *
+ * La suite E2E corre SOLO contra este stack, nunca contra la nube (2026-09-30:
+ * la nube cobra por ingesta de logs). Ver playwright.config.ts.
  *
  * ── POR QUÉ EXISTE ──────────────────────────────────────────────────────────
  * Las capturas no tienen por qué tocar la base compartida donde viven G-10,
@@ -61,9 +64,9 @@ const ORDEN = [
   'inventory-recipes.sql',
   'inventory-min-stock.sql',
   'products-allow-negative-stock.sql',
-  'order-items-stock-recipes.sql',
   'product-extras.sql',
-  'order-extras-rpc.sql',
+  'order-extras-rpc.sql',               // versión VIEJA de add_order_items_with_extras…
+  'order-items-stock-recipes.sql',      // …que ésta REEMPLAZA (descuento por receta). Va DESPUÉS.
   'sent-to-kitchen.sql',
   'cocina-por-sede.sql',
   'tables-waiting-bill.sql',
@@ -85,6 +88,58 @@ const ORDEN = [
   'storage-product-images.sql',
   'security-definer-revoke.sql',
 ]
+
+// ── QUIÉN GANA cuando una función está definida en más de un .sql ─────────────
+// 🔴 El orden de ORDEN decide qué versión queda: gana la ÚLTIMA en aplicarse.
+// Y un orden equivocado NO da error — plpgsql no valida las tablas al crear la
+// función —, da un ESTADO FINAL equivocado. Medido el 2026-09-30: ORDEN tenía
+// order-extras-rpc.sql (versión vieja de add_order_items_with_extras, sin
+// descuento por receta) DESPUÉS de order-items-stock-recipes.sql, así que la
+// base local vendía sin bajar stock. 12 specs rojos, y el script decía "orden
+// verificado por ejecución": verificaba que no hubiera errores, no el resultado.
+//
+// Qué versión es la correcta no se puede deducir: lo decide una persona. Así
+// que se DECLARA acá (allowlist) y el script lo hace cumplir antes de aplicar:
+//   · toda función definida en >1 archivo de ORDEN tiene que figurar acá;
+//   · el archivo declarado tiene que ser el ÚLTIMO de ORDEN que la define.
+// Una función redefinida que nadie declaró ABORTA, en vez de quedar con la
+// versión que el azar del orden haya elegido.
+const GANA = {
+  add_order_items_with_extras: 'order-items-stock-recipes.sql',
+  register_purchase:           'compra-no-toca-caja.sql',
+  enforce_profile_organization:'fix-enforce-profile-organization-definer.sql',
+  get_my_organization_id:      'profiles-is-active-enforced.sql',
+  get_my_restaurant_id:        'profiles-is-active-enforced.sql',
+  get_my_role:                 'profiles-is-active-enforced.sql',
+  has_permission:              'profiles-is-active-enforced.sql',
+  handle_new_user:             'profiles-organization-invariant.sql',
+}
+
+function verificarQuienGana() {
+  const defs = {}
+  for (const f of ORDEN) {
+    const sql = readFileSync(join(SUPA, f), 'utf-8').replace(/--.*$/gm, '')
+    for (const m of sql.matchAll(/create\s+(?:or\s+replace\s+)?function\s+(?:public\.)?"?(\w+)"?\s*\(/gi)) {
+      const fn = m[1].toLowerCase()
+      ;(defs[fn] ??= []).push(f)
+    }
+  }
+  const errores = []
+  for (const [fn, archivos] of Object.entries(defs)) {
+    const unicos = [...new Set(archivos)]
+    if (unicos.length < 2) continue
+    const ultimo = unicos.sort((a, b) => ORDEN.indexOf(a) - ORDEN.indexOf(b)).at(-1)
+    if (!GANA[fn]) {
+      errores.push(`${fn}: definida en ${unicos.join(', ')} y NO está declarada en GANA. Decidí qué versión es la correcta.`)
+    } else if (GANA[fn] !== ultimo) {
+      errores.push(`${fn}: GANA dice ${GANA[fn]}, pero con este ORDEN queda ${ultimo}. Mové ${GANA[fn]} después.`)
+    }
+  }
+  if (errores.length) {
+    console.error('🔴 Orden de migraciones inconsistente:\n  ' + errores.join('\n  '))
+    process.exit(1)
+  }
+}
 
 const RESET = `
 drop schema if exists public cascade;
@@ -142,6 +197,12 @@ insert into auth.users (
   ('00000000-0000-0000-0000-000000000000',
    '0fc72dc6-5c73-49e4-9054-ac971c07a95c', 'authenticated', 'authenticated',
    'cajero.test@gvento.com', crypt('${PASS}', gen_salt('bf')),
+   now(), now(), now(), '{"provider":"email","providers":["email"]}', '{}', '', '', '', ''),
+  -- mozo.test: lab-seed NO hardcodea su UID, lo descubre por email (bloque f).
+  -- El UUID de acá es arbitrario pero fijo, para que re-preparar sea idempotente.
+  ('00000000-0000-0000-0000-000000000000',
+   '5a7e0c1d-2b3f-4c5d-8e9f-0a1b2c3d4e5f', 'authenticated', 'authenticated',
+   'mozo.test@gvento.com', crypt('${PASS}', gen_salt('bf')),
    now(), now(), now(), '{"provider":"email","providers":["email"]}', '{}', '', '', '', '')
 on conflict (id) do update
   set encrypted_password = excluded.encrypted_password,
@@ -157,6 +218,9 @@ insert into auth.identities (
    'email', now(), now(), now()),
   ('0fc72dc6-5c73-49e4-9054-ac971c07a95c', '0fc72dc6-5c73-49e4-9054-ac971c07a95c',
    '{"sub":"0fc72dc6-5c73-49e4-9054-ac971c07a95c","email":"cajero.test@gvento.com","email_verified":true,"phone_verified":false}',
+   'email', now(), now(), now()),
+  ('5a7e0c1d-2b3f-4c5d-8e9f-0a1b2c3d4e5f', '5a7e0c1d-2b3f-4c5d-8e9f-0a1b2c3d4e5f',
+   '{"sub":"5a7e0c1d-2b3f-4c5d-8e9f-0a1b2c3d4e5f","email":"mozo.test@gvento.com","email_verified":true,"phone_verified":false}',
    'email', now(), now(), now())
 on conflict (provider, provider_id) do nothing;
 
@@ -223,8 +287,32 @@ try {
   execFileSync('supabase', ['start'], { cwd: ROOT, stdio: 'inherit' })
 }
 
+// ── 0b. Edge Functions ──────────────────────────────────────────────────────
+// Medido el 2026-09-30 (CLI 2.90): `supabase start` deja el edge runtime en
+// "Stopped services" aunque [edge_runtime] esté habilitado, y sin él Kong
+// responde 503 "name resolution failed" a /functions/v1/* — create-user.spec
+// fallaba por eso, no por la función. Se arranca el contenedor y se VERIFICA
+// que sirva; si no, se aborta en vez de dejar una suite que falla por entorno.
+paso('Edge Functions')
+const EDGE = 'supabase_edge_runtime_gvento'
+try { execFileSync('docker', ['start', EDGE], { stdio: 'ignore' }) } catch { /* se verifica abajo */ }
+let edgeOk = false
+for (let i = 0; i < 20 && !edgeOk; i++) {
+  try {
+    const r = await fetch('http://127.0.0.1:54331/functions/v1/create-user', { method: 'OPTIONS' })
+    edgeOk = r.status === 200
+  } catch { /* todavía arrancando */ }
+  if (!edgeOk) await new Promise((ok) => setTimeout(ok, 1000))
+}
+if (!edgeOk) {
+  console.error(`  🔴 ${EDGE} no sirve /functions/v1/create-user. Revisá \`docker logs ${EDGE}\`.`)
+  process.exit(1)
+}
+console.log('  ✅ sirviendo aplicar-estado y create-user')
+
 // ── 1. Esquema desde cero ───────────────────────────────────────────────────
 paso(`Esquema (${ORDEN.length} archivos, base en blanco)`)
+verificarQuienGana()   // antes de tocar la base: si el orden está mal, no se aplica nada
 psql(RESET)
 for (const f of ORDEN) {
   try {
@@ -242,10 +330,16 @@ for (const f of ORDEN) {
 // dueño de la tabla, y postgres no lo es.
 paso('Cuentas de Auth del laboratorio')
 psql(AUTH, { user: 'supabase_admin' })
-console.log('  ✅ owner.test / cajero.test (con los UUID que espera lab-seed)')
+console.log('  ✅ owner.test / cajero.test / mozo.test (con los UUID que espera lab-seed)')
 
 // ── 3. Semillas ─────────────────────────────────────────────────────────────
-for (const seed of ['lab-seed.sql', 'landing-seed.sql']) {
+// --sin-vitrina: para la suite E2E (`pnpm e2e:preparar`). landing-seed arma el
+// escenario de las capturas (ventas, turnos, fiados de vitrina) dentro de LAB;
+// los specs miden deltas y no lo necesitan, y cada dato extra es estado que un
+// spec puede heredar sin haberlo pedido.
+const SIN_VITRINA = process.argv.includes('--sin-vitrina')
+const SEMILLAS = SIN_VITRINA ? ['lab-seed.sql'] : ['lab-seed.sql', 'landing-seed.sql']
+for (const seed of SEMILLAS) {
   paso(seed)
   const out = psql(readFileSync(join(SUPA, seed), 'utf-8'))
   for (const l of out.split('\n')) {
@@ -253,7 +347,12 @@ for (const seed of ['lab-seed.sql', 'landing-seed.sql']) {
   }
 }
 
-console.log(`
+console.log(SIN_VITRINA ? `
+✅ Listo. El laboratorio local está sembrado (sin vitrina).
+
+   Siguiente:  pnpm test:e2e
+   Studio:     http://127.0.0.1:54333
+` : `
 ✅ Listo. El laboratorio local está sembrado y el escenario de vitrina cuadra.
 
    Siguiente:  pnpm capturas
