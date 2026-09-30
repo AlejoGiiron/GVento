@@ -41,6 +41,7 @@ import { dirname, resolve, join } from 'node:path'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const SUPA = join(ROOT, 'supabase')
+const HERE_CAPTURAS = join(ROOT, 'scripts', 'capturas')
 const DB = 'supabase_db_gvento'   // project_id "gvento" en supabase/config.toml
 
 // Orden verificado por ejecución sobre una base vacía. Las dependencias que
@@ -166,6 +167,19 @@ function verificarQuienGana() {
 }
 
 const RESET = `
+-- PRIMERO, antes de borrar nada de public: si este paso falla, la base queda
+-- intacta. Los OBJETOS de Storage de la app no viven en public, sobreviven al
+-- drop y quedaban con carpetas huérfanas (<sede vieja>/logo.png) de
+-- preparaciones anteriores — residuo entre corridas (visto el 2026-09-30:
+-- supabase/diag/logos-plantados.sql los marcaba a todos). Storage prohíbe el
+-- DELETE directo (trigger storage.protect_delete) salvo con
+-- storage.allow_delete_query; se habilita SOLO en esta transacción (set local)
+-- y SOLO para los dos buckets de la app, por id. Base local descartable.
+begin;
+set local storage.allow_delete_query = 'true';
+delete from storage.objects where bucket_id in ('product-images', 'restaurant-logos');
+commit;
+
 drop schema if exists public cascade;
 create schema public;
 grant usage on schema public to postgres, anon, authenticated, service_role;
@@ -227,6 +241,11 @@ insert into auth.users (
   ('00000000-0000-0000-0000-000000000000',
    '5a7e0c1d-2b3f-4c5d-8e9f-0a1b2c3d4e5f', 'authenticated', 'authenticated',
    'mozo.test@gvento.com', crypt('${PASS}', gen_salt('bf')),
+   now(), now(), now(), '{"provider":"email","providers":["email"]}', '{}', '', '', '', ''),
+  -- otra.test: admin de OTRA organización (LAB-OTRA, scripts/capturas/otra-org-local.sql).
+  ('00000000-0000-0000-0000-000000000000',
+   '0e7a0e7a-0e7a-4e7a-8e7a-0e7a0e7a0e7a', 'authenticated', 'authenticated',
+   'otra.test@gvento.com', crypt('${PASS}', gen_salt('bf')),
    now(), now(), now(), '{"provider":"email","providers":["email"]}', '{}', '', '', '', '')
 on conflict (id) do update
   set encrypted_password = excluded.encrypted_password,
@@ -245,6 +264,9 @@ insert into auth.identities (
    'email', now(), now(), now()),
   ('5a7e0c1d-2b3f-4c5d-8e9f-0a1b2c3d4e5f', '5a7e0c1d-2b3f-4c5d-8e9f-0a1b2c3d4e5f',
    '{"sub":"5a7e0c1d-2b3f-4c5d-8e9f-0a1b2c3d4e5f","email":"mozo.test@gvento.com","email_verified":true,"phone_verified":false}',
+   'email', now(), now(), now()),
+  ('0e7a0e7a-0e7a-4e7a-8e7a-0e7a0e7a0e7a', '0e7a0e7a-0e7a-4e7a-8e7a-0e7a0e7a0e7a',
+   '{"sub":"0e7a0e7a-0e7a-4e7a-8e7a-0e7a0e7a0e7a","email":"otra.test@gvento.com","email_verified":true,"phone_verified":false}',
    'email', now(), now(), now())
 on conflict (provider, provider_id) do nothing;
 
@@ -410,6 +432,13 @@ for (const seed of SEMILLAS) {
   for (const l of out.split('\n')) {
     if (/NOTICE|✅|🔴/.test(l)) console.log(`  ${l.replace(/^NOTICE:\s*/, '')}`)
   }
+}
+
+// Segunda organización, SOLO local: sin ella no se puede probar el aislamiento
+// entre clientes (ver el encabezado del archivo). Va después de lab-seed.
+paso('otra-org-local.sql (LAB-OTRA)')
+for (const l of psql(readFileSync(join(HERE_CAPTURAS, 'otra-org-local.sql'), 'utf-8')).split('\n')) {
+  if (/NOTICE/.test(l)) console.log(`  ${l.replace(/^NOTICE:\s*/, '')}`)
 }
 
 console.log(SIN_VITRINA ? `
