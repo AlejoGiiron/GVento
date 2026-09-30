@@ -375,6 +375,40 @@ Paso D (`close_cash_shift`):
 - El residuo de mesas era real pero de otra causa: limpiezas al final de un `describe.serial` y
   sin aserción. Ahora mesa fija por spec + `afterAll` con aserción (`tests/helpers/lab.ts`).
 
+### `anon` tiene privilegios de escritura en TODAS las tablas de `public` (default de Supabase) — medido, NO barrido (2026-09-30)
+
+**No se barre ahora, a propósito:** revocar en bloque puede romper lecturas públicas (tienda,
+menú, logos por URL) que nadie inventarió. D revoca solo `UPDATE` sobre `cash_shifts`.
+
+**Lo que hay** (medido en la base local, que tiene deriva 0 con prod):
+- `anon` tiene INSERT / UPDATE / DELETE en **las 29 tablas** de `public` (privilegios por
+  defecto del esquema: `postgres / r → anon=arwdDxtm`).
+- **Qué lo contiene hoy:** RLS está activado en las 29 (0 tablas sin RLS) y **una sola** policy
+  alcanza a `anon`: `cash_movements: acceso por restaurante` (`FOR ALL`, `TO public`). Su
+  condición usa `get_my_restaurant_id()`, que `anon` ya **no puede ejecutar**
+  (`reconciliar-con-prod.sql`) ⇒ para anon falla cerrado. Pero eso es una protección
+  **accidental**: depende de que esa función siga sin grant a anon.
+- **Qué NO lo contiene:** una tabla nueva en `public` nace con esos privilegios; si alguien
+  olvida RLS (el event trigger `ensure_rls` lo habilita solo, pero es de origen dudoso y se puede
+  apagar) o escribe una policy `TO public` sin pensar en anon, queda escribible sin login.
+
+**Salida propuesta, cuando haya margen:** inventariar primero qué lee `anon` de verdad (la app
+sin sesión: login, tienda, KDS por PIN, URLs públicas de Storage), después `alter default
+privileges … revoke insert, update, delete … from anon` + revoke explícito en las 29, y la
+policy de `cash_movements` pasarla a `TO authenticated`. Con test de que la app sin sesión sigue
+funcionando.
+
+**El comando que lo mide (no caduca):**
+```sql
+select table_name, string_agg(privilege_type, ',' order by privilege_type) as privilegios
+  from information_schema.role_table_grants
+ where table_schema = 'public' and grantee = 'anon'
+ group by table_name order by 1;
+-- y las policies que alcanzan a anon:
+select tablename, policyname, cmd, roles from pg_policies
+ where schemaname = 'public' and ('anon' = any(roles) or 'public' = any(roles));
+```
+
 ### 🔴 Registrar un movimiento y cerrar turno EN SEGUIDA puede persistir un esperado sin ese movimiento (hallado 2026-09-07)
 
 **✅ MEDIDO el 2026-09-21** (contra LAB en la nube, antes de pasar las pruebas a Docker; esperado leído del PATCH a `cash_shifts`): con red local y sin pausa, 3/3 correcto; con el GET de `cash_movements` demorado 2 s y sin pausa, **3/3 CARRERA** (se persistió la apertura sin el egreso); a ritmo humano con la misma demora, 3/3 correcto; y con **dos dispositivos** (B registra un egreso con el modal de cierre de A abierto) **siempre carrera**: `cash_movements` no tiene realtime ni polling, así que el modal de A nunca se entera. Con varios celulares es el caso normal, no el raro. Salida: el Paso D (`close_cash_shift`, esperado calculado en el servidor).
