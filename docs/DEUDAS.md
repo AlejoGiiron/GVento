@@ -198,7 +198,21 @@ cancele y libere la mesa. No "reintentar el segundo request".
   dio 0/160 duplicados por red. Lo cierra el `for update` del mismo cambio; el spec NO lo
   caza y está marcado así.
 
-### 🔴 La base local es un PROXY de producción — 5.6 queda SUSPENDIDO hasta medir la deriva (2026-09-30)
+### ✅ La base local es un PROXY de producción — deriva 0 alcanzada el 2026-09-30 (5.6 se reabre)
+
+**Medición final (2026-09-30):** export de prod con la query extendida (`docs/deriva-.csv`, no
+versionado) contra la base local preparada desde cero en `fix/flakes-lab` → **deriva 0**
+(`pnpm deriva:comparar`, exit 0), con **1 diferencia aceptada**: `issue_pg_graphql_access`,
+event trigger de la plataforma (dueño `supabase_admin`) que solo difiere en los tags
+(`CREATE FUNCTION` en prod, `CREATE EXTENSION` en el CLI 2.90); el hash de prod se recalculó
+desde su definición y coincide. Declarada en `scripts/deriva-aceptadas.json` con los dos
+valores exactos: si cualquiera cambia, vuelve a contar. Con esto **5.6 deja de estar
+suspendido**: ORDEN construye la base que tiene prod en todo lo que mide la deriva.
+Origen de `rls_auto_enable`: el export dice que el dueño de `ensure_rls` en prod es
+`postgres` (los 6 de la plataforma son `supabase_admin`) ⇒ lo creó alguien como postgres.
+
+*(Lo que sigue es el registro de cómo se llegó.)*
+
 
 `preparar-local.mjs` estaba "verificado por ejecución contra una base en blanco" (140a0f2) y
 **construía una base distinta de producción sin un solo error**: `add_order_items_with_extras`
