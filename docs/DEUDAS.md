@@ -242,6 +242,42 @@ en prod, o prod tiene algo aplicado a mano que el repo no tiene.
 - **Siguiente paso:** con la salida de `deriva-detalle.sql`, una migración que lleve el repo a prod
   (policies de Storage + bucket + revokes explícitos a anon), agregada a ORDEN, y re-medir.
 
+**Segunda medición (2026-09-30), después de `supabase/reconciliar-con-prod.sql`** (en ORDEN, base
+preparada desde cero): **deriva 0** en las categorías originales contra el export de prod.
+La migración es no-op en prod (crear si falta / revocar / borrar nombres exactos que prod no
+tiene) y se aplicó dos veces en local: la 2ª no cambió nada.
+
+**Categorías que la deriva NO medía y ahora sí** (R3 — lo que no se mide no aparece):
+triggers de TODAS las tablas de `auth` (el alta de usuarios vive ahí; `on_auth_user_created`
+ya estaba cubierto solo porque llama a una función de `public`), **event triggers** con su
+dueño, **buckets** de Storage (son datos, pero deciden qué acepta una subida) y los
+**privilegios por defecto** de `public`. Contra `deriva-detalle.csv`: 25 objetos, **1
+diferencia**, que no es nuestra: `issue_pg_graphql_access` (dueño `supabase_admin`, de la
+plataforma) se dispara con `CREATE FUNCTION` en prod y con `CREATE EXTENSION` en el CLI 2.90.
+Para cerrarla hace falta el export de prod con la query extendida: con sus hashes reales se
+declara en `scripts/deriva-aceptadas.json` (valores EXACTOS de los dos lados; si cambian,
+vuelve a contar) — o se prueba si actualizar el CLI la iguala.
+
+**Hallazgos de prod que la reconciliación COPIÓ tal cual y NO arregló** (decisión aparte):
+- 🔴 **Cambiar el logo o el QR de Nequi por segunda vez falla en prod.** `uploadRestaurantLogo`
+  y `uploadNequiQR` suben con `upsert: true` a una ruta fija (`<sede>/logo.<ext>`); reemplazar
+  un objeto exige policy de UPDATE, y `restaurant-logos` en prod solo tiene INSERT ("admin sube")
+  y SELECT. **Medido en Docker con la base igual a prod:** 1ª subida OK, 2ª →
+  `new row violates row-level security policy`. El usuario ve "Error al subir el logo", sin
+  causa. Solo funciona si cambia la extensión (y el archivo viejo queda huérfano). Además el
+  gate es el enum `get_my_role() = 'admin'`, no `has_permission` (misma deuda que el resto).
+  Salida propuesta: policy de UPDATE (y DELETE) para `restaurant-logos` con
+  `has_permission('config.acceder')`, en una migración que SÍ se aplica en prod.
+- `product-images` en prod **no tiene límite de tamaño ni de tipo** (el repo ponía 2 MB y
+  jpeg/png/webp; prod no los tiene). Cualquiera con `productos.editar` puede subir un archivo
+  de cualquier tamaño y tipo a un bucket público. Decidir si se agregan.
+- `rls_auto_enable()` + event trigger `ensure_rls` (toda tabla nueva de `public` nace con RLS):
+  **origen sin verificar.** Evidencia: 0 commits en el repo, no la trae un stack recién creado
+  por el CLI 2.90, y su dueño en prod es `postgres` (grantor de su ACL) — o sea que se creó como
+  postgres (SQL Editor / Dashboard), no la plataforma. La fila `event_trigger_dueno` del export
+  extendido dice el dueño del trigger. Se copió al repo porque es una protección fail-closed que
+  prod tiene: una base local sin ella aprobaría tablas que en prod nacen con RLS.
+
 ### Residuo de LAB en la NUBE — baja a limpieza opcional (2026-09-30)
 
 Desde el 2026-09-30 la suite corre **solo contra Docker**, así que el residuo de LAB en la nube
