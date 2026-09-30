@@ -220,6 +220,28 @@ pnpm e2e:preparar && pnpm deriva:comparar deriva-prod.csv     # exit 0 = deriva 
 Toda diferencia es una deuda de uno de dos tipos: el `.sql` del repo no es lo que se aplicó
 en prod, o prod tiene algo aplicado a mano que el repo no tiene.
 
+**Primera medición (2026-09-30), prod vs local recién preparada — 14 diferencias, deriva ≠ 0:**
+- ✅ Misma versión mayor (17.6 los dos). ✅ `add_order_items_with_extras` en prod es la versión
+  NUEVA (usa receta y crea `stock_movements`): el hallazgo que motivó todo esto NO afectaba a prod.
+- **Prod tiene algo aplicado a mano que el repo no tiene** (deuda del repo):
+  · Storage: 5 policies — `product-images: subir/actualizar/borrar con permiso` y
+    `restaurant-logos: admin sube / lectura pública`. El bucket `restaurant-logos` lo usa la app
+    (logo y QR de Nequi en `supabase-helpers`) y **no existe en ningún `.sql`**.
+  · `rls_auto_enable()` con EXECUTE a anon/authenticated: sin rastro en el repo. Probablemente
+    la crea el Dashboard (auto-habilitar RLS en tablas nuevas) — **no verificado**; lo responde
+    `supabase/diag/deriva-detalle.sql` (definición + event triggers que la usan).
+- **El repo tiene algo que prod ya no:** las 3 policies `product-images: … autenticado` de
+  `storage-product-images.sql` — prod las reemplazó por las "con permiso".
+- **La base local es MÁS permisiva que prod** (causa: el RESET de `preparar-local` da privilegios
+  por defecto sobre funciones a anon; `security-definer-revoke.sql` solo revoca a PUBLIC): anon
+  ejecuta `get_my_role` y `get_my_restaurant_id`, y authenticated ejecuta `handle_new_user`; en
+  prod no. Dirección fail-open del proxy: un test podría pasar en local y fallar en prod.
+- **Qué NO invalida:** ningún spec sube archivos a Storage ni llama esas funciones como anon, así
+  que el verde de la suite (219/219) no depende de estas diferencias. Pero la deriva tiene que dar 0
+  antes del merge igual: es la condición, no una opinión sobre cuánto importa cada fila.
+- **Siguiente paso:** con la salida de `deriva-detalle.sql`, una migración que lleve el repo a prod
+  (policies de Storage + bucket + revokes explícitos a anon), agregada a ORDEN, y re-medir.
+
 ### Residuo de LAB en la NUBE — baja a limpieza opcional (2026-09-30)
 
 Desde el 2026-09-30 la suite corre **solo contra Docker**, así que el residuo de LAB en la nube
