@@ -462,30 +462,45 @@ mecanismo sería otro (contaminación de DATOS del KPI, no de layout).
 es lo que discrimina. Si reaparece: **leer los artefactos ANTES de re-correr.**
 
 ## Estado actual del proyecto
-[ACTUALIZAR AL INICIO DE CADA SESIÓN]
-Última fase completada: **FASE 1 del estado de suscripción de G-Centro** (sesión
-  2026-08-11/12, rama develop). Unit **261/261** · E2E full **182 passed + 2 skipped** *(medido 2026-08-12; al
-  2026-08-26 `npx playwright test --list` da **202 tests en 35 archivos** — reproducilo con
-  ese comando en vez de confiar en este número)* · tsc 0 · build verde ·
-  ⚠️ **eslint con 6 errores PREEXISTENTES** (ajenos, anotados con archivo y línea en
-  Deudas vigentes — la afirmación "eslint 0" que traía este bloque ya no era cierta).
 
-Después, sesión **2026-08-18**: **FASE 2 del estado de suscripción — el banner de lectura**
-  (bloque propio abajo). Solo `expiring` y `grace`, solo UI, fail-open, sin Realtime.
-  Verificado: unit **285/285** (261 previos + 24 nuevos), `suscripcion-banner.spec.ts`
-  **12/12** contra LAB y la Edge Function desplegada (exit 0 leído de archivo, no de una
-  tubería), tsc 0 y eslint limpio en los archivos tocados.
-  ⚠️ **La suite E2E full NO se volvió a correr en esta sesión** — pendiente antes de promover.
-  El conteo full sube en 12 solo si `E2E_GCENTRO_HMAC_SECRET` está en `.env.test`; sin esa
-  variable son 12 skips.
+🔴 **Esta sección NO tiene el estado: tiene los comandos que lo responden.** Hasta el
+2026-09-21 fue una foto con la etiqueta *"[ACTUALIZAR AL INICIO DE CADA SESIÓN]"*, que no se
+actualizó nunca: seguía diciendo *"última fase completada: FASE 1"* y *"182 passed"* un mes y
+varias fases después. Una etiqueta que pide mantenimiento manual es un ledger sin mecanismo
+(ver CLAUDE.md → *"El estado de aplicación de una migración NO se declara"*, misma clase). La
+foto vieja está en `git log -p -- docs/BITACORA.md` para quien la quiera como historia.
 
-Antes, sesión **2026-08-16/17**: auditoría de orden de operaciones de `aplicar-estado`
-  + el arreglo del `organization_id` malformado (commit `eb179d3`, ya desplegado). La
-  suite full NO se volvió a correr; lo verificado es `suscripcion-estado.spec.ts`
-  **8 passed + 1 skipped** contra la función desplegada, tsc 0 y eslint limpio en los
-  archivos tocados. Ese spec pasó de 6 a 9 casos, así que el conteo full sube a **185**
-  *solo si* `E2E_GCENTRO_HMAC_SECRET` está en `.env.test`; sin esa variable son los mismos
-  182 passed y 3 skips más.
+**NO DEDUZCAS EL ESTADO DE ESTE ARCHIVO — correlo:**
+
+```bash
+# qué se hizo últimamente, y en qué rama
+git log --oneline -15 develop
+git branch --show-current; git status --short
+
+# develop vs main (qué falta promover / qué tiene main de más)
+git rev-list --count main..develop
+git rev-list --count develop..main
+
+# tamaño de la suite E2E (no el resultado: la lista)
+npx playwright test --list | tail -1
+
+# resultado de la suite — el exit va DENTRO del archivo (R9), nunca de la notificación
+pnpm test:e2e > e2e.log 2>&1; echo "PLAYWRIGHT_EXIT=$?" >> e2e.log
+grep -E "PLAYWRIGHT_EXIT|passed|failed|skipped" e2e.log
+
+# unit, tipos, lint (scripts de package.json)
+pnpm test:unit; pnpm typecheck; pnpm lint
+
+# catálogo RBAC al día con su fuente
+pnpm gen:rbac:check
+```
+
+**Qué está pendiente** no vive acá: está en [`DEUDAS.md`](DEUDAS.md) y en los planes de
+`docs/`. **Qué está aplicado en la BD** tampoco: se consulta en la BD (ver la convención de los
+`.sql` en CLAUDE.md).
+
+Lo que sigue en esta sección es el **registro por fase — historia, no estado**: cada bloque
+dice qué se hizo y cómo se verificó *en su fecha*.
 
 ### FASE 1 — estado de suscripción (aplicada y desplegada)
 
@@ -804,7 +819,8 @@ E2E pasó de 160 a 177 con 17 tests nuevos, uno por ajuste:
   ejecuta**, independientemente de qué rama esté desplegada. Una migración "sin promover"
   ya rige para las tres organizaciones.
 
-**PRODUCCIÓN (main, desplegado en Vercel) incluye:**
+**Lo que había llegado a PRODUCCIÓN (main, Vercel) al 2026-08-26** — historia; para hoy,
+`git log --oneline main`:
   - **Sentry activo con el filtro de PII por allowlist** (release 344787b). Se cazó ANTES de que
     hubiera fuga consumada: Sentry tenía 1 solo issue (un test directo) y CERO PII capturada.
   - **Bloque de seguridad RBAC completo:** escalada por auto-edición de `profiles` cerrada
