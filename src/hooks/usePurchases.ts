@@ -7,6 +7,7 @@ import {
 } from '@/lib/supabase-helpers'
 import { useAuth } from '@/hooks/useAuth'
 import type { SentryArea } from '@/lib/sentry'
+import { mensajeDeError } from '@/lib/errorMessage'
 
 export type { PurchaseInvoiceListRow, PurchaseInvoiceDetailRow }
 
@@ -95,7 +96,7 @@ export function useRegisterPurchase() {
       // La compra NO toca la caja: no hay egreso automático que reflejar.
       toast.success('Compra registrada y stock actualizado.')
     },
-    onError: (err) => toast.error(err instanceof Error ? err.message : 'Error al registrar la compra'),
+    onError: (err) => toast.error(mensajeDeError(err, 'Error al registrar la compra')),
   })
 
   return { registerPurchase: mutation.mutateAsync, isRegistering: mutation.isPending }

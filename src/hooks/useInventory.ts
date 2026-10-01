@@ -3,6 +3,7 @@ import { toast } from 'react-hot-toast'
 import { adjustStock } from '@/lib/supabase-helpers'
 import { useAuth } from '@/hooks/useAuth'
 import type { SentryArea } from '@/lib/sentry'
+import { mensajeDeError } from '@/lib/errorMessage'
 
 /**
  * Mutaciones de inventario. `adjust` llama a la RPC adjust_stock (atómica:
@@ -24,7 +25,7 @@ export function useInventory() {
       queryClient.invalidateQueries({ queryKey: ['stock_movements'] })
       toast.success('Stock ajustado')
     },
-    onError: (err) => toast.error(err instanceof Error ? err.message : 'Error al ajustar stock'),
+    onError: (err) => toast.error(mensajeDeError(err, 'Error al ajustar stock')),
   })
 
   return { adjust }
