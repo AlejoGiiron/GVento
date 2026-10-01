@@ -222,8 +222,13 @@ clase estaba en 22 lugares de `src/` (Mesas mostraba "Error desconocido" al cobr
 
 ### 🔴 Tablas que solo deberían escribirse por RPC y aceptan escritura DIRECTA — inventario (medido 2026-10-01)
 
-**Decidido (2026-10-01):** se cierran **después de la semana de despliegue** (1/10–3/10), como
-cambio propio. Todavía no está construido.
+**Decidido (2026-10-01):** el endurecimiento va **después de M1**, como cambio propio. Todavía no
+está construido. **Excepción, ya hecha:** el DELETE (y el UPDATE desde un turno cerrado) de
+`cash_movements` entró en la **fase 1 de D** (commit `3339978`).
+**El inventario encontró el handler del 3.5 del plan:** `handleRemoveItem` en `TablesPage` borra
+la línea de mesa con `removeOrderItem` (DELETE directo) **sin devolver el stock** que
+`add_order_items_with_extras` descontó al agregarla. Es la misma deuda que el TODO de ese handler,
+y la salida es la de la fila de `order_items`: una RPC que devuelva el stock.
 
 **Una pestaña vieja tiene que seguir funcionando.** Por eso los caminos legítimos se midieron
 contra **`origin/main`** (`95bcf61`, lo desplegado), no contra develop. Para re-medir:
@@ -239,7 +244,7 @@ SECURITY DEFINER. Las policies y grants salen de `pg_policies` y
 | `debt_payments` | `register_debt_payment(_batch)` (I) | **ninguna** | INSERT con `fiado.gestionar` | **quitar y revocar.** Es la forma de los $48.000 de Salchimelo. Antes: pasar el fixture de `anular-venta.spec` a la RPC. |
 | `order_items` | `add_order_items_with_extras` (I, descuenta stock) | UPDATE `sent_to_kitchen` (Mesas) · DELETE de un ítem (Mesas, **sin devolver stock**: TODO conocido en `handleRemoveItem`) | INSERT · UPDATE · DELETE "staff" | **INSERT: quitar** (`addOrderItems` sin llamadores; hoy se puede dar de alta un ítem sin descontar stock). **UPDATE: solo la columna** (`grant update (sent_to_kitchen)`); hoy se puede cambiar `qty` o `unit_price` de un ítem ya descontado. **DELETE: dos fases**, primero una RPC que devuelva el stock (el TODO) y, cuando ya no haya pestañas viejas, revocar. |
 | `order_item_extras` | `add_order_items_with_extras` (I) | **ninguna** | INSERT "staff" | **quitar.** |
-| `cash_movements` | abonos (I) | INSERT (movimientos manuales, legítimo) | **ALL** por sede | **dejar INSERT, quitar UPDATE y DELETE.** 🔴 **Medido:** con el turno CERRADO, el UPDATE lo frena el trigger de D, pero **el DELETE pasa** (el cajero borró un egreso de 5.000 de un turno congelado; rollback). El trigger es `BEFORE INSERT OR UPDATE`. Rompe el invariante del arqueo. |
+| `cash_movements` | abonos (I) | INSERT (movimientos manuales, legítimo) | **ALL** por sede | 🔴 Medido: el cajero borraba un egreso de 5.000 de un turno CERRADO (el trigger era `BEFORE INSERT OR UPDATE`), y un UPDATE podía mover un movimiento fuera de un turno cerrado. **✅ Cerrado en la fase 1 de D** (`3339978`): el trigger cubre DELETE y mira el turno viejo. **Queda para después de M1:** quitar UPDATE y DELETE también en turnos abiertos (la app nunca los usa). |
 | `purchase_invoices` / `_items` | `register_purchase` | **ninguna** | INSERT con permiso / ninguna | **quitar el INSERT de `purchase_invoices`** (una factura sin ítems ni stock). |
 | `orders` | abonos y anulación (U) | INSERT (POS y Mesas) y 6 UPDATE (estado, total, descuento, número, fiado, domiciliario) | INSERT · UPDATE "staff" · DELETE admin | **no se puede cerrar todavía**: es el camino vivo del POS y de Mesas. **DELETE admin: quitar** (sin uso; cascada a `debt_payments`). El resto se achica con `register_pos_sale` (ver la entrada de abajo) y después con el cobro de mesa. |
 | `products` | stock por `add_order_items_with_extras`, `adjust_stock`, `register_purchase`, anulación | `stock_qty` = 0/null al crear o al apagar el seguimiento (modal de producto) | INSERT · UPDATE · DELETE admin | dejar. `updateProductStock` no tiene llamadores, pero el modal escribe `stock_qty` y una restricción por columna lo rompería. |
@@ -261,6 +266,57 @@ cobro: No hay un turno de caja abierto…". Queda la orden en `pending` / `paid`
 - Con UNA terminal por sede es raro. Con M1 (varios celulares) deja de serlo.
 - **Salida:** que crear la orden y cobrar sea UNA transacción. Va con la extracción de
   `useSaleCheckout`, antes de M1, y no en (1).
+
+**Diseño APROBADO (2026-10-01): `register_pos_sale(p_sale_id, p_order, p_items, p_payments)`.**
+- Hace todo en UNA transacción, en este orden: permiso → turno (`for share`) → orden con
+  `p_sale_id` (idempotente: `on conflict (id) do nothing`) → ítems por
+  `add_order_items_with_extras` → pago por `register_sale_payment` → número por
+  `next_order_number`, al final.
+- **A:** el turno es obligatorio también para fiado y venta gratis.
+- **B1:** el servidor recalcula el total y RECHAZA si no coincide:
+  `Σ ítems + Σ extras − discount_amount` (cualquier descuento, no solo el vale). **Antes de
+  construirlo:** `supabase/diag/pos-total-formula.sql` en prod, rama `diag/b1-total-pos`. Si
+  algo no cuadra, hay una regla de precio que la fórmula no conoce.
+- **C, todo lo que escribe hoy la secuencia de cobro** (develop, `handleConfirm` de
+  `CheckoutModal`), y todo queda dentro de la RPC:
+  - `orders` INSERT: tipo, estado, total, sede, autor, `discount_*` y, si es fiado,
+    `payment_status`, `customer_id` y `customer_name`;
+  - ítems, extras, stock y `stock_movements` (`add_order_items_with_extras`, con la nota de
+    cada ítem);
+  - `payments` (`register_sale_payment`);
+  - `store_sequences` y `orders.order_number` (`assignOrderNumber`; desaparece
+    `retryOrderNumber`).
+  - **Afuera, a propósito:** el alta rápida de cliente (`CustomerFormModal`). Es previa a
+    confirmar y no mueve plata.
+  - **No existen:** el "uso del vale", datos de domicilio o notas de la orden en el checkout.
+    Un vale es solo `discount_kind = 'vale'` más el monto en la orden: **no tiene identidad,
+    así que nada impide reusarlo.** Ver la entrada de abajo.
+- **D, despliegue:** la RPC es nueva, así que el SQL va **ANTES** del frontend que la llama.
+  Las RPC actuales no cambian (Mesas las sigue usando) y una pestaña vieja sigue funcionando.
+
+### Precio del POS: ¿se valida `unit_price` contra `products.price`? — NO por ahora (B2, 2026-10-01)
+
+`register_pos_sale` va a validar el TOTAL contra las líneas (B1), pero el `unit_price` de cada
+línea lo sigue mandando el cliente sin control. Antes de decidir si se compara contra
+`products.price`, hay dos preguntas abiertas:
+1. **¿El POS permite editar un precio a mano?** Si lo permite, comparar contra `products.price`
+   rechazaría ventas legítimas. *Lo que dice el código (develop, 2026-10-01):* `cartStore` no
+   tiene ninguna acción que cambie un precio (solo cantidad, nota, extras, descuento y órdenes
+   en espera); `unit_price` sale de `item.product.price`. Falta confirmar con el cliente si lo
+   necesitan.
+2. **¿Qué pasa con un carrito abierto si el dueño cambia un precio?** El carrito guarda una
+   foto del producto al agregarlo, y las órdenes EN ESPERA (`holdCurrentOrder`) la conservan
+   todo lo que duren. Con la validación, esa venta se rechazaría al cobrar; sin ella, se cobra
+   el precio viejo.
+
+### Un vale de descuento no tiene identidad: nada impide reusarlo (anotado 2026-10-01)
+
+El "vale" (ruletazo) es `orders.discount_kind = 'vale'` + `discount_amount` + `discount_reason`.
+No hay tabla ni código de vale, ni nada que lo marque usado: el cajero lo aplica a mano.
+Salió del punto C del diseño de `register_pos_sale`, que pedía marcar el vale como usado en
+la misma transacción; eso no se puede hacer porque no hay qué marcar. Si hace falta, es una
+decisión de producto (vales con código y un solo uso), no un arreglo técnico. **Se habla con el
+cliente antes.**
 
 ### 🔴 Re-aplicar una migración vieja revierte en silencio las funciones que redefinió una posterior (medido 2026-09-30)
 
