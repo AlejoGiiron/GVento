@@ -87,6 +87,11 @@
 --
 -- RE-APLICAR: idempotente (create or replace, drop trigger if exists). En una
 -- transacción: si algo falla, rollback total.
+-- SALVO DESPUÉS DE supabase/cobro-turno.sql: ese archivo redefine después
+-- register_debt_payment y register_debt_payments_batch con el turno
+-- obligatorio para el efectivo, y re-aplicar ESTE las devolvería a la versión
+-- sin turno sin dar ningún error. El GUARD del paso 0 lo impide: aborta antes
+-- de tocar nada, con un mensaje que dice por qué.
 --
 -- NO DEDUZCAS EL ESTADO DE ESTE COMENTARIO — correlo:
 --   select proname from pg_proc where proname = 'close_cash_shift';           -- 1 fila
@@ -97,6 +102,28 @@
 -- ============================================================================
 
 begin;
+
+-- ── 0. GUARD: no revertir supabase/cobro-turno.sql ─────────────────────────
+-- Marcador: el mensaje con que cobro-turno.sql rechaza el efectivo sin turno.
+-- La versión de las dos funciones en ESTE archivo no lo tiene, ni la de prod
+-- anterior a D (grep: la frase solo está en cobro-turno.sql y, en otra función,
+-- register_sale_void). Si alguna ya lo tiene, se aborta acá: el raise deja la
+-- transacción abortada y ningún paso de abajo se aplica.
+do $guard$
+declare
+  v_ya text;
+begin
+  select string_agg(proname, ', ' order by proname) into v_ya
+    from pg_proc
+   where pronamespace = 'public'::regnamespace
+     and proname in ('register_debt_payment', 'register_debt_payments_batch')
+     and prosrc ilike '%No hay un turno de caja abierto%';
+  if v_ya is not null then
+    raise exception 'close-cash-shift.sql NO se aplicó (no cambió nada). Estas funciones ya tienen la versión de supabase/cobro-turno.sql, que exige turno para recibir efectivo: %. Re-aplicar este archivo las revertiría sin error.', v_ya
+      using hint = 'No hace falta re-aplicarlo: cobro-turno.sql ya está encima. Para ver qué hay, correr las queries "NO DEDUZCAS EL ESTADO" de los dos encabezados.';
+  end if;
+end
+$guard$;
 
 -- ── 1. Movimientos: nunca en un turno cerrado ────────────────────────────────
 -- SECURITY DEFINER: toma el turno FOR SHARE aunque el usuario ya no tenga
