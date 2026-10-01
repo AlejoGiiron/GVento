@@ -220,29 +220,33 @@ clase estaba en 22 lugares de `src/` (Mesas mostraba "Error desconocido" al cobr
   dio 0/160 duplicados por red. Lo cierra el `for update` del mismo cambio; el spec NO lo
   caza y está marcado así.
 
-### 🔴 `payments` y `debt_payments` aceptan escritura DIRECTA — saltea el turno obligatorio del cambio (1) (medido 2026-09-30)
+### 🔴 Tablas que solo deberían escribirse por RPC y aceptan escritura DIRECTA — inventario (medido 2026-10-01)
 
-La UI escribe esas tablas **solo** por RPC (grep de `from('payments'|'debt_payments')` en `src/`
-y `apps/`: solo lecturas; `createPayment` en `supabase-helpers.ts` no tiene llamadores). Pero
-las policies siguen abiertas:
-- `payments: cajero/admin crea` (INSERT). **Medido en Docker:** el cajero, con la sede SIN
-  turno, insertó directo un pago en efectivo (en una transacción con rollback). O sea que el
-  "turno obligatorio" de `register_sale_payment` se saltea con un INSERT a mano.
-- `payments: admin elimina` (DELETE): un admin puede borrar un pago de un turno YA cerrado y
-  romper el invariante del arqueo congelado (D).
-- `debt_payments: crear con permiso` (INSERT con `fiado.gestionar`): baja el saldo sin
-  `cash_movement` y sin turno, que es la forma exacta de los $48.000 de Salchimelo.
-  `tests/anular-venta.spec.ts` lo usa como fixture (abono directo).
+**Decidido (2026-10-01):** se cierran **después de la semana de despliegue** (1/10–3/10), como
+cambio propio. Todavía no está construido.
 
-Es la misma clase que el `UPDATE` directo a `cash_shifts` que cierra la fase 2 de D.
-**Salida propuesta:** quitar esas 3 policies y revocar INSERT/UPDATE/DELETE de las dos tablas a
-`anon` y `authenticated`. Como el frontend no las usa, va en **una sola fase**. Antes hay que
-pasar el fixture de `anular-venta` a la RPC. **Para decidir; no está construido.**
+**Una pestaña vieja tiene que seguir funcionando.** Por eso los caminos legítimos se midieron
+contra **`origin/main`** (`95bcf61`, lo desplegado), no contra develop. Para re-medir:
+`node scripts/escrituras-directas.mjs origin/main`, que busca cada `.from('<tabla>')` seguido de
+`.insert/.update/.delete/.upsert`, más un control de que no haya `.from(<variable>)`. Lo
+escriben en la base: `pg_proc.prosrc` con `insert into|update|delete from <tabla>`. Todos son
+SECURITY DEFINER. Las policies y grants salen de `pg_policies` y
+`information_schema.role_table_grants`.
 
-Para encontrar la clase completa, buscar por las TABLAS que lee la fórmula del arqueo y no por
-los nombres de función conocidos:
-`grep -rnE "from\('(payments|cash_movements|cash_shifts|debt_payments)'\)\s*\.(insert|update|delete|upsert)" src/ apps/`
-y las policies que no son SELECT sobre esas tablas en `pg_policies`.
+| tabla | escritura legítima (base) | escritura directa que usa el frontend desplegado | policies de escritura hoy | propuesta |
+|---|---|---|---|---|
+| `payments` | `register_sale_payment` (I), `register_sale_void` (D) | **ninguna** (`createPayment` sin llamadores) | INSERT cajero/admin · DELETE admin | **quitar las 2 y revocar I/U/D.** Medido: el cajero insertó directo un pago en efectivo SIN turno (rollback). |
+| `debt_payments` | `register_debt_payment(_batch)` (I) | **ninguna** | INSERT con `fiado.gestionar` | **quitar y revocar.** Es la forma de los $48.000 de Salchimelo. Antes: pasar el fixture de `anular-venta.spec` a la RPC. |
+| `order_items` | `add_order_items_with_extras` (I, descuenta stock) | UPDATE `sent_to_kitchen` (Mesas) · DELETE de un ítem (Mesas, **sin devolver stock**: TODO conocido en `handleRemoveItem`) | INSERT · UPDATE · DELETE "staff" | **INSERT: quitar** (`addOrderItems` sin llamadores; hoy se puede dar de alta un ítem sin descontar stock). **UPDATE: solo la columna** (`grant update (sent_to_kitchen)`); hoy se puede cambiar `qty` o `unit_price` de un ítem ya descontado. **DELETE: dos fases**, primero una RPC que devuelva el stock (el TODO) y, cuando ya no haya pestañas viejas, revocar. |
+| `order_item_extras` | `add_order_items_with_extras` (I) | **ninguna** | INSERT "staff" | **quitar.** |
+| `cash_movements` | abonos (I) | INSERT (movimientos manuales, legítimo) | **ALL** por sede | **dejar INSERT, quitar UPDATE y DELETE.** 🔴 **Medido:** con el turno CERRADO, el UPDATE lo frena el trigger de D, pero **el DELETE pasa** (el cajero borró un egreso de 5.000 de un turno congelado; rollback). El trigger es `BEFORE INSERT OR UPDATE`. Rompe el invariante del arqueo. |
+| `purchase_invoices` / `_items` | `register_purchase` | **ninguna** | INSERT con permiso / ninguna | **quitar el INSERT de `purchase_invoices`** (una factura sin ítems ni stock). |
+| `orders` | abonos y anulación (U) | INSERT (POS y Mesas) y 6 UPDATE (estado, total, descuento, número, fiado, domiciliario) | INSERT · UPDATE "staff" · DELETE admin | **no se puede cerrar todavía**: es el camino vivo del POS y de Mesas. **DELETE admin: quitar** (sin uso; cascada a `debt_payments`). El resto se achica con `register_pos_sale` (ver la entrada de abajo) y después con el cobro de mesa. |
+| `products` | stock por `add_order_items_with_extras`, `adjust_stock`, `register_purchase`, anulación | `stock_qty` = 0/null al crear o al apagar el seguimiento (modal de producto) | INSERT · UPDATE · DELETE admin | dejar. `updateProductStock` no tiene llamadores, pero el modal escribe `stock_qty` y una restricción por columna lo rompería. |
+| `stock_movements`, `store_sequences`, `purchase_invoice_items` | solo RPC | — | **ninguna** ✅ | ya está bien: es el modelo a copiar. |
+| `cash_shifts` | `close_cash_shift` (U) | INSERT (abrir turno) | INSERT | UPDATE ya revocado en la fase 2 de D. |
+
+`anon` tiene grants I/U/D en todas (deuda aparte, más abajo); lo frena la RLS, no el grant.
 
 ### 🔴 POS: si el cobro falla DESPUÉS de crear la orden, queda una orden huérfana con stock descontado (medido 2026-09-30)
 
