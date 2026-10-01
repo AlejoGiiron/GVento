@@ -8,7 +8,7 @@ import { saveProductAndClose } from './helpers/product'
  *
  * Cubre el fallo que antes era MUDO: la venta se cobra, `assignOrderNumber`
  * falla y la venta queda SIN número — invisible en el Historial (ordena por
- * número), sin ticket reimprimible y sin contar en getShiftSalesCount.
+ * número), sin ticket reimprimible y sin contar en el nº de ventas del arqueo (close_cash_shift).
  *
  * El fallo se fuerza interceptando la RPC `next_order_number` con
  * `page.route`, que es la única forma limpia de provocarlo desde afuera: la

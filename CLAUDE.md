@@ -282,6 +282,15 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    *Barrido inverso, útil como chequeo:* listar los testids que los specs piden y verificar que
    cada uno exista en `src/`.
 
+6. **La fórmula del arqueo de turno — 2 lados (agregado 2026-09-30).** La vista previa del
+   modal de cierre la calcula `src/lib/shiftCalc.ts` (`availableCash` / `calcShiftBalance`) y la
+   que se CONGELA la calcula `close_cash_shift` (`supabase/close-cash-shift.sql`). Si divergen, el
+   cajero ve un número y se guarda otro. Lo vigila `tests/cierre-turno-servidor.spec.ts` (el
+   arqueo congelado = el recalculado desde la base). Tocar uno obliga a tocar el otro.
+   Y **todo camino que cambie las cifras de un turno sigue el PROTOCOLO DE LOCKS** del encabezado
+   de ese `.sql`: su primer lock o escritura es la fila del turno (`for share`; el cierre
+   `for update`). Un escritor nuevo que no lo siga reabre la carrera en silencio.
+
 → **Evidencia:** [`docs/BITACORA.md`](docs/BITACORA.md) → *"FASE 1 — estado de suscripción"*
 (el aviso a G-Centro) · el hallazgo del onboarding está en el inventario de arriba · el caso de
 `shift-reprint` está en el commit `fix(test): arqueo.spec buscaba shift-reprint en la fila`.
