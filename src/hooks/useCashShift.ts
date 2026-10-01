@@ -7,17 +7,18 @@ import { useAuth } from '@/hooks/useAuth'
 import {
   getOpenShift,
   openShift as openShiftHelper,
-  closeShift as closeShiftHelper,
+  closeShiftServidor,
+  getClosedShiftRow,
+  type DeclaradoCierre,
+  type CierreServidor,
   getShiftPayments,
-  getShiftSalesCount,
   getShiftVouchersTotal,
   getCashMovements,
   createCashMovement,
   type ClosedShiftRow,
 } from '@/lib/supabase-helpers'
 import type { SentryArea } from '@/lib/sentry'
-import type { Tables, TablesInsert, Json } from '@/types/database.types'
-import type { ShiftReconciliation } from '@/lib/shiftCalc'
+import type { Tables, TablesInsert } from '@/types/database.types'
 
 export interface ShiftSalesSummary {
   cash: number
@@ -115,37 +116,17 @@ export function useCashShift() {
 
   const closeShiftMutation = useMutation({
     meta: { area: 'caja' satisfies SentryArea },
-    mutationFn: async (params: {
-      closingAmount: number
-      expectedAmount: number
-      difference: number
-      // Snapshot del arqueo SIN sales_count/vouchers_total (los completa esta
-      // mutación al cerrar, único momento en que la ventana solo-opened_at es
-      // correcta — recomputarlos en un turno cerrado sumaría datos posteriores).
-      reconciliation: Omit<ShiftReconciliation, 'sales_count' | 'vouchers_total'>
-      comment: string
-    }) => {
-      // Congelados al cierre: nº de ventas + total de vales (informativo).
-      const salesCount = await getShiftSalesCount(restaurantId!, currentShift!.opened_at)
-      const vouchers = await getShiftVouchersTotal(restaurantId!, currentShift!.opened_at)
-      const reconciliation: ShiftReconciliation = {
-        ...params.reconciliation,
-        sales_count: salesCount,
-        vouchers_total: vouchers,
-      }
-      const { data, error } = await closeShiftHelper(currentShift!.id, {
-        closing_amount: params.closingAmount,
-        expected_amount: params.expectedAmount,
-        difference: params.difference,
-        closed_by: profile!.id,
-        closed_at: new Date().toISOString(),
-        close_reconciliation: reconciliation as unknown as Json,
-        close_comment: params.comment.trim() || null,
-      })
+    mutationFn: async (params: { declarado: DeclaradoCierre; comment: string }) => {
+      // El servidor calcula el esperado, sales_count y vouchers_total y congela
+      // el arqueo (close_cash_shift). Acá solo viaja lo DECLARADO.
+      const { data: cierre, error } = await closeShiftServidor(currentShift!.id, params.declarado, params.comment)
       if (error) throw error
-      // Fila cerrada con joins (abrió/cerró) + snapshot + closed_at real del
-      // servidor → insumo del comprobante, idéntico a la reimpresión del historial.
-      return data as unknown as ClosedShiftRow
+      const resumen = cierre as unknown as CierreServidor
+      // Fila cerrada con joins (abrió/cerró) + snapshot del servidor → insumo del
+      // comprobante, idéntico a la reimpresión del historial.
+      const { data: fila, error: e2 } = await getClosedShiftRow(resumen.id)
+      if (e2) throw e2
+      return { fila: fila as unknown as ClosedShiftRow, movementsIn: resumen.movements_in, movementsOut: resumen.movements_out }
     },
     onSuccess: () => { invalidateShift(); toast.success('Turno cerrado correctamente') },
     onError: () => toast.error('Error al cerrar el turno'),

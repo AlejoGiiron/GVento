@@ -1408,6 +1408,10 @@ export type Database = {
         Args: { p_product_id: string; p_qty: number; p_reason: string }
         Returns: undefined
       }
+      close_cash_shift: {
+        Args: { p_comentario?: string | null; p_declarado: Json; p_shift_id: string }
+        Returns: Json
+      }
       get_my_organization_id: { Args: never; Returns: string }
       get_my_restaurant_id: { Args: never; Returns: string }
       get_my_role: {

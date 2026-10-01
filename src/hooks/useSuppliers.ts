@@ -6,6 +6,7 @@ import {
 } from '@/lib/supabase-helpers'
 import { useAuth } from '@/hooks/useAuth'
 import type { TablesInsert } from '@/types/database.types'
+import { mensajeDeError } from '@/lib/errorMessage'
 
 export type { Supplier }
 
@@ -47,7 +48,7 @@ export function useSuppliers() {
       invalidate()
       toast.success(vars.id ? 'Proveedor actualizado' : 'Proveedor creado')
     },
-    onError: (err) => toast.error(err instanceof Error ? err.message : 'Error al guardar el proveedor'),
+    onError: (err) => toast.error(mensajeDeError(err, 'Error al guardar el proveedor')),
   })
 
   const deactivate = useMutation({
@@ -56,7 +57,7 @@ export function useSuppliers() {
       if (error) throw error
     },
     onSuccess: () => { invalidate(); toast.success('Proveedor desactivado') },
-    onError: (err) => toast.error(err instanceof Error ? err.message : 'Error al desactivar el proveedor'),
+    onError: (err) => toast.error(mensajeDeError(err, 'Error al desactivar el proveedor')),
   })
 
   return {

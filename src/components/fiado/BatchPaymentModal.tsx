@@ -4,6 +4,8 @@ import { useRegisterDebtPaymentsBatch } from '@/hooks/useDebts'
 import type { Debt } from '@/hooks/useDebts'
 import { splitFifo } from '@/lib/splitFifo'
 import { PAYMENT_METHODS, type PaymentMethodValue } from '@/components/purchases/paymentMethods'
+import { useEfectivoRequiereTurno } from '@/hooks/useEfectivoRequiereTurno'
+import { AvisoEfectivoRequiereTurno } from '@/components/shift/EfectivoRequiereTurno'
 
 const formatCOP = (n: number) =>
   new Intl.NumberFormat('es-CO', {
@@ -39,7 +41,9 @@ export function BatchPaymentModal({ customerName, debts, onClose, onDone }: Batc
   // El sobrepago se bloquea acá por CONVENIENCIA — para que el cajero vea el
   // motivo antes de confirmar. La garantía es la RPC, que lo rechaza igual
   // aunque este botón se habilite por un bug (mismo reparto que anular-venta).
-  const puedeConfirmar = amountNum > 0 && !split.excede && !isRegistering
+  // Efectivo sin turno abierto: no se puede recibir (la plata no entraría a ningún cierre).
+  const { bloquea: bloqueaPorTurno } = useEfectivoRequiereTurno(method)
+  const puedeConfirmar = amountNum > 0 && !split.excede && !isRegistering && !bloqueaPorTurno
 
   const handleSubmit = async () => {
     if (!puedeConfirmar) return
@@ -142,6 +146,7 @@ export function BatchPaymentModal({ customerName, debts, onClose, onDone }: Batc
                 </button>
               ))}
             </div>
+            <AvisoEfectivoRequiereTurno metodo={method} />
           </div>
 
           {/* ── PREVISUALIZACIÓN DEL REPARTO ────────────────────────────────

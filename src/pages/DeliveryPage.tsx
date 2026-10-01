@@ -16,6 +16,7 @@ import {
 } from '@/hooks/useDelivery'
 import { upsertCourier, deleteCourier } from '@/lib/supabase-helpers'
 import type { TablesInsert } from '@/types/database.types'
+import { mensajeDeError } from '@/lib/errorMessage'
 
 // ─── Helpers ──────────────────────────────────────────────────────
 
@@ -261,7 +262,7 @@ function CourierConfigModal({
       resetForm()
       onChanged()
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error desconocido'
+      const msg = mensajeDeError(err, 'Error desconocido')
       toast.error(`Error: ${msg}`)
     } finally {
       setSaving(false)
@@ -276,7 +277,7 @@ function CourierConfigModal({
       toast.success(`${c.name} desactivado`)
       onChanged()
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error desconocido'
+      const msg = mensajeDeError(err, 'Error desconocido')
       toast.error(`Error: ${msg}`)
     } finally {
       setDeletingId(null)

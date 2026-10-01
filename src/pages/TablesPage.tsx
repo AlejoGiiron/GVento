@@ -33,6 +33,7 @@ import type { Enums } from '@/types/database.types'
 import type { ProductWithCategory, CartExtra } from '@/stores/cartStore'
 import { cartItemTotal } from '@/stores/cartStore'
 import type { TableRow, ActiveOrder, OrderItemRow } from '@/hooks/useTables'
+import { mensajeDeError } from '@/lib/errorMessage'
 
 type TableStatus = TableRow['status']
 type PaymentMethodUI = 'efectivo' | 'tarjeta' | 'transferencia' | 'nequi' | 'fiado'
@@ -225,7 +226,7 @@ function OpenTableModal({
       toast.success(`Mesa ${table.name} abierta`)
       onOpened()
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error desconocido'
+      const msg = mensajeDeError(err, 'Error desconocido')
       toast.error(`Error al abrir mesa: ${msg}`)
     } finally {
       setSubmitting(false)
@@ -416,7 +417,7 @@ function ProductPickerModal({
       toast.success('Ítems agregados')
       onAdded()
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error desconocido'
+      const msg = mensajeDeError(err, 'Error desconocido')
       toast.error(`Error al agregar ítems: ${msg}`)
     } finally {
       setSubmitting(false)
@@ -762,7 +763,7 @@ function TableCheckoutModal({
 
       setStep('success')
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error desconocido'
+      const msg = mensajeDeError(err, 'Error desconocido')
       toast.error(`Error al cobrar: ${msg}`)
       // Cobro de mesa: mismo peso que el del POS. Además puede fallar DESPUÉS
       // del pago (al marcar delivered o liberar la mesa), y ahí la plata ya
@@ -1181,7 +1182,7 @@ function TableConfigModal({
       resetForm()
       onChanged()
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error desconocido'
+      const msg = mensajeDeError(err, 'Error desconocido')
       toast.error(`Error: ${msg}`)
     } finally {
       setSaving(false)
@@ -1205,7 +1206,7 @@ function TableConfigModal({
       toast.success(`Mesa ${t.name} eliminada`)
       onChanged()
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error desconocido'
+      const msg = mensajeDeError(err, 'Error desconocido')
       toast.error(`Error: ${msg}`)
     } finally {
       setDeletingId(null)
@@ -1377,7 +1378,7 @@ function TableSidePanel({
       onClose()
       onRefresh()
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error desconocido'
+      const msg = mensajeDeError(err, 'Error desconocido')
       toast.error(`Error al cerrar mesa: ${msg}`)
     } finally {
       setClosingTable(false)
@@ -1405,7 +1406,7 @@ function TableSidePanel({
       if (totalErr) throw totalErr
       onRefresh()
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error desconocido'
+      const msg = mensajeDeError(err, 'Error desconocido')
       toast.error(`Error: ${msg}`)
     } finally {
       setDeletingItemId(null)
@@ -1439,7 +1440,7 @@ function TableSidePanel({
       toast.success('Comanda enviada a cocina')
       onRefresh()
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error desconocido'
+      const msg = mensajeDeError(err, 'Error desconocido')
       toast.error(`Error: ${msg}`)
     } finally {
       setSendingToKitchen(false)

@@ -6,6 +6,7 @@ import {
 } from '@/lib/supabase-helpers'
 import { useAuth } from '@/hooks/useAuth'
 import type { TablesInsert } from '@/types/database.types'
+import { mensajeDeError } from '@/lib/errorMessage'
 
 export type { Customer }
 
@@ -60,7 +61,7 @@ export function useCustomerMutations() {
       invalidate()
       toast.success(vars.id ? 'Cliente actualizado' : 'Cliente creado')
     },
-    onError: (err) => toast.error(err instanceof Error ? err.message : 'Error al guardar el cliente'),
+    onError: (err) => toast.error(mensajeDeError(err, 'Error al guardar el cliente')),
   })
 
   const deactivate = useMutation({
@@ -69,7 +70,7 @@ export function useCustomerMutations() {
       if (error) throw error
     },
     onSuccess: () => { invalidate(); toast.success('Cliente desactivado') },
-    onError: (err) => toast.error(err instanceof Error ? err.message : 'Error al desactivar el cliente'),
+    onError: (err) => toast.error(mensajeDeError(err, 'Error al desactivar el cliente')),
   })
 
   return {

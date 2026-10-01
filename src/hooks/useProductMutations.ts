@@ -11,6 +11,7 @@ import {
 import { useAuth } from '@/hooks/useAuth'
 import type { Tables, TablesInsert } from '@/types/database.types'
 import type { SentryArea } from '@/lib/sentry'
+import { mensajeDeError } from '@/lib/errorMessage'
 
 export function useProductMutations() {
   const queryClient = useQueryClient()
@@ -81,7 +82,7 @@ export function useCategoryMutations() {
       return result!
     },
     onSuccess: () => { invalidate(); toast.success('Categoría guardada') },
-    onError: (err) => toast.error(err instanceof Error ? err.message : 'Error al guardar categoría'),
+    onError: (err) => toast.error(mensajeDeError(err, 'Error al guardar categoría')),
   })
 
   const toggleCategoryActive = useMutation({
@@ -104,7 +105,7 @@ export function useCategoryMutations() {
       invalidate()
       toast.success(active ? 'Categoría activada' : 'Categoría desactivada')
     },
-    onError: (err) => toast.error(err instanceof Error ? err.message : 'Error al cambiar estado'),
+    onError: (err) => toast.error(mensajeDeError(err, 'Error al cambiar estado')),
   })
 
   return { saveCategory, toggleCategoryActive }

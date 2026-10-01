@@ -56,9 +56,17 @@ async function ensureShift(): Promise<{ id: string; opened_at: string }> {
   if (ins.error) throw ins.error
   return ins.data as { id: string; opened_at: string }
 }
+// Cierra el turno abierto por la RPC del servidor (close_cash_shift). Antes era
+// un UPDATE directo que NO miraba el error: con el UPDATE revocado a
+// authenticated habría fallado en silencio dejando el turno abierto.
 async function closeShifts(): Promise<void> {
   const c = await ctx()
-  await c.from('cash_shifts').update({ closed_at: new Date().toISOString(), closed_by: OWNER_ID, closing_amount: 0 }).eq('restaurant_id', SEDE).is('closed_at', null)
+  const open = (await c.from('cash_shifts').select('id').eq('restaurant_id', SEDE).is('closed_at', null).maybeSingle()).data
+  if (!open) return
+  const { error } = await c.rpc('close_cash_shift', { p_shift_id: open.id, p_declarado: { cash: 0 } })
+  expect(error, `cerrar turno: ${error?.message}`).toBeNull()
+  const sigue = (await c.from('cash_shifts').select('id', { count: 'exact', head: true }).eq('restaurant_id', SEDE).is('closed_at', null)).count
+  expect(sigue, 'el turno quedó abierto').toBe(0)
 }
 
 async function prodByName(name: string): Promise<{ id: string; kind: string; stock_tracking: boolean }> {
