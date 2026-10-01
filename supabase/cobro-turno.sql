@@ -27,8 +27,12 @@
 -- registrar el pago"), el modal queda abierto y NO se registra nada.
 --
 -- RE-APLICAR: idempotente (create or replace). En una transacción.
--- ORDEN: SIEMPRE después de close-cash-shift.sql. Aquel redefine estas mismas 3
--- funciones; si se corre después, revierte este cambio sin dar error.
+-- ORDEN: SIEMPRE después de close-cash-shift.sql, que redefine los dos abonos.
+-- Correr aquel DESPUÉS de este aborta sin cambiar nada (guard de su paso 0;
+-- tests/guard-reaplicar.spec.ts). Los OTROS archivos que definen estas
+-- funciones (register-sale-payment.sql, fiado-clientes.sql,
+-- fiado-abono-lote.sql) NO tienen guard y, re-aplicados, las revierten sin
+-- error: ver docs/DEUDAS.md → "Re-aplicar una migración vieja revierte".
 --
 -- NO DEDUZCAS EL ESTADO DE ESTE COMENTARIO — correlo:
 --   select proname, prosrc ilike '%No hay un turno de caja abierto%' as exige_turno

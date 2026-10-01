@@ -258,6 +258,40 @@ cobro: No hay un turno de caja abierto…". Queda la orden en `pending` / `paid`
 - **Salida:** que crear la orden y cobrar sea UNA transacción. Va con la extracción de
   `useSaleCheckout`, antes de M1, y no en (1).
 
+### 🔴 Re-aplicar una migración vieja revierte en silencio las funciones que redefinió una posterior (medido 2026-09-30)
+
+Re-aplicar en prod una migración que define una función ya redefinida por otra posterior
+devuelve esa función a su versión vieja. Da `exit 0`, sin ningún aviso. Medido con
+`close-cash-shift.sql` sobre `cobro-turno.sql`: deja `exige_turno=false` en los dos abonos.
+Pasa porque no hay ledger: nada en la base sabe qué versión es la vigente.
+
+**Cerrado SOLO para `close-cash-shift.sql`:** su paso 0 aborta si los abonos ya tienen el
+marcador de cobro-turno (`tests/guard-reaplicar.spec.ts`, con mutante). Se pudo hacer porque
+ese archivo todavía no estaba aplicado en prod. **A los ya aplicados no se les agrega guard (R5).**
+
+**Inventario (2026-09-30, sobre el ORDEN de `preparar-local`):** función → archivo que gana →
+archivos que la REVIERTEN si se re-aplican.
+
+| función | gana | revierten |
+|---|---|---|
+| `get_my_restaurant_id`, `get_my_role` | `profiles-is-active-enforced.sql` | `schema.sql` |
+| `get_my_organization_id`, `has_permission` | `profiles-is-active-enforced.sql` | `multi-tenant-rbac.sql` |
+| `handle_new_user` | `profiles-organization-invariant.sql` | `schema.sql` |
+| `enforce_profile_organization` | `fix-enforce-profile-organization-definer.sql` | `profiles-organization-invariant.sql` |
+| `add_order_items_with_extras` | `order-items-stock-recipes.sql` | `order-extras-rpc.sql` |
+| `register_purchase` | `compra-no-toca-caja.sql` | `compras-proveedores.sql` |
+| `register_sale_payment` | `cobro-turno.sql` | `register-sale-payment.sql` |
+| `register_sale_void` | `close-cash-shift.sql` | `register-sale-void.sql` |
+| `register_debt_payment` | `cobro-turno.sql` | `fiado-clientes.sql` (y `close-cash-shift.sql`, con guard) |
+| `register_debt_payments_batch` | `cobro-turno.sql` | `fiado-abono-lote.sql` (y `close-cash-shift.sql`, con guard) |
+
+Las 5 primeras filas son de **seguridad**: re-aplicar `schema.sql` o `multi-tenant-rbac.sql`
+desactiva el bloqueo de usuarios inactivos (`profiles-is-active-enforced.sql`).
+Para regenerar la tabla: el guard GANA de `scripts/capturas/preparar-local.mjs` ya calcula
+quién define qué; los perdedores son los archivos de cada entrada que no son el ganador.
+**Salida de fondo:** el ledger `schema_migrations` (CLAUDE.md → *"El estado de aplicación…"*).
+Hasta entonces: **antes de re-aplicar un archivo en prod, buscarlo en esta tabla.**
+
 ### ✅ La base local es un PROXY de producción — deriva 0 alcanzada el 2026-09-30 (5.6 se reabre)
 
 **Medición final (2026-09-30):** export de prod con la query extendida (`docs/deriva-.csv`, no

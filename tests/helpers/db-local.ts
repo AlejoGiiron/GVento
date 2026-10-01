@@ -25,6 +25,13 @@ export function psql(sql: string): string {
   return r.stdout.trim()
 }
 
+/** Como `psql`, pero sin tirar: para afirmar sobre un script que DEBE fallar. */
+export function psqlResultado(sql: string): { status: number | null; stdout: string; stderr: string } {
+  const r = spawnSync('docker', ['exec', '-i', DB, 'psql', '-U', 'postgres', '-d', 'postgres', '-At', '-v', 'ON_ERROR_STOP=1'],
+    { input: sql, encoding: 'utf-8' })
+  return { status: r.status, stdout: r.stdout, stderr: r.stderr }
+}
+
 export async function cliente(creds: Creds): Promise<{ c: SupabaseClient; uid: string; sede: string }> {
   const c = createClient(process.env.VITE_GVENTO_SUPABASE_URL!, process.env.VITE_GVENTO_SUPABASE_ANON_KEY!,
     { auth: { persistSession: false } })
