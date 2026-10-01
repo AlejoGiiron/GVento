@@ -4,6 +4,8 @@ import { toast } from 'react-hot-toast'
 import { useRegisterDebtPayment, useDebtPayments } from '@/hooks/useDebts'
 import type { Debt } from '@/hooks/useDebts'
 import { PAYMENT_METHODS, paymentMethodLabel, type PaymentMethodValue } from '@/components/purchases/paymentMethods'
+import { useEfectivoRequiereTurno } from '@/hooks/useEfectivoRequiereTurno'
+import { AvisoEfectivoRequiereTurno } from '@/components/shift/EfectivoRequiereTurno'
 
 interface DebtPaymentModalProps {
   debt: Debt
@@ -33,11 +35,14 @@ export function DebtPaymentModal({ debt, onClose }: DebtPaymentModalProps) {
 
   const amountNum = parseInt(amount.replace(/\D/g, ''), 10) || 0
   const exceeds = amountNum > debt.saldo
-  const isValid = amountNum > 0 && !exceeds
+  // Efectivo sin turno abierto: no se puede recibir (la plata no entraría a ningún cierre).
+  const { bloquea: bloqueaPorTurno } = useEfectivoRequiereTurno(method)
+  const isValid = amountNum > 0 && !exceeds && !bloqueaPorTurno
 
   const handleSubmit = async () => {
     if (amountNum <= 0) { toast.error('Ingresa el monto del abono'); return }
     if (exceeds) { toast.error('El abono no puede exceder el saldo pendiente'); return }
+    if (bloqueaPorTurno) return
     await registerDebtPayment({ orderId: debt.id, amount: amountNum, paymentMethod: method })
     onClose()
   }
@@ -120,6 +125,7 @@ export function DebtPaymentModal({ debt, onClose }: DebtPaymentModalProps) {
             <div style={{ marginTop: 6, fontSize: 11, color: '#94a3b8' }}>
               El efectivo entra a la caja del turno abierto como ingreso. Otros métodos no tocan caja.
             </div>
+            <AvisoEfectivoRequiereTurno metodo={method} />
           </div>
 
           {/* Historial de abonos */}

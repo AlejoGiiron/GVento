@@ -94,6 +94,7 @@ const ORDEN = [
   'product-images-policies.sql',        // mismo alcance por carpeta para product-images (reemplaza las '… con permiso')
   'close-cash-shift.sql',               // FASE 1: cierre en el servidor + protocolo de locks (compatible con el frontend viejo)
   'close-cash-shift-revoke.sql',        // FASE 2: sin UPDATE directo sobre cash_shifts (después del deploy del frontend)
+  'cobro-turno.sql',                    // cambio (1): turno obligatorio para cobrar y para abonos en efectivo + lock de la orden
 ]
 
 // ── QUIÉN GANA cuando una función está definida en más de un .sql ─────────────
@@ -128,8 +129,10 @@ const GANA = {
   'function handle_new_user':             'profiles-organization-invariant.sql',
   'policy "profiles: editar el propio" on profiles': 'profiles-active-store-rls.sql',
   // close-cash-shift.sql les agrega el protocolo de locks del turno (FOR SHARE):
-  'function register_debt_payment':        'close-cash-shift.sql',
-  'function register_debt_payments_batch': 'close-cash-shift.sql',
+  // cobro-turno.sql (cambio 1) les suma turno obligatorio en efectivo + lock de la orden:
+  'function register_debt_payment':        'cobro-turno.sql',
+  'function register_debt_payments_batch': 'cobro-turno.sql',
+  'function register_sale_payment':        'cobro-turno.sql',
   'function register_sale_void':           'close-cash-shift.sql',
 }
 

@@ -183,7 +183,10 @@ test.describe.serial('Cierre de turno en el servidor', () => {
     expect(psql(`select count(*) from public.cash_movements where shift_id = '${turno}';`)).toBe('0')
   })
 
-  test('CARRERA abono en efectivo vs cierre: el abono ESPERA y no cae en el turno congelado', async () => {
+  // Con supabase/cobro-turno.sql el efectivo EXIGE turno: al confirmar el
+  // cierre, el abono que esperaba ya no tiene turno y se RECHAZA (antes de ese
+  // cambio se aceptaba sin ingreso de caja, la plata fuera de todo arqueo).
+  test('CARRERA abono en efectivo vs cierre: el abono ESPERA y se rechaza; no cae en el turno congelado', async () => {
     const turno = await turnoNuevo()
     const orden = await ordenFiado(8000)
     const { fin } = await cierreLento(turno)
@@ -191,14 +194,14 @@ test.describe.serial('Cierre de turno en el servidor', () => {
     const r = await cajero.rpc('register_debt_payment', { p_order_id: orden, p_amount: 3000, p_payment_method: 'cash' })
     const espero = Date.now() - t0
     await fin
-    expect(r.error, r.error?.message).toBeNull()
     expect(espero, 'el abono no esperó al cierre (no tomó el turno)').toBeGreaterThan(1000)
-    expect((r.data as { cash_movement_created: boolean }).cash_movement_created).toBe(false)
+    expect(r.error?.message ?? '', 'el abono en efectivo pasó sin turno').toMatch(/No hay un turno de caja abierto/)
+    expect(psql(`select count(*) from public.debt_payments where order_id = '${orden}';`)).toBe('0')
     const inv = invariante(turno)
     expect(inv.congelado, 'el abono cambió un arqueo ya congelado').toBe(inv.recalculado)
   })
 
-  test('CARRERA abono en LOTE vs cierre: espera y no cae en el turno congelado', async () => {
+  test('CARRERA abono en LOTE vs cierre: espera y se rechaza; no cae en el turno congelado', async () => {
     const turno = await turnoNuevo()
     const orden = await ordenFiado(6000)
     const { fin } = await cierreLento(turno)
@@ -206,8 +209,9 @@ test.describe.serial('Cierre de turno en el servidor', () => {
     const r = await cajero.rpc('register_debt_payments_batch', { p_order_ids: [orden], p_amount: 2000, p_payment_method: 'cash' })
     const espero = Date.now() - t0
     await fin
-    expect(r.error, r.error?.message).toBeNull()
     expect(espero, 'el lote no esperó al cierre').toBeGreaterThan(1000)
+    expect(r.error?.message ?? '', 'el lote en efectivo pasó sin turno').toMatch(/No hay un turno de caja abierto/)
+    expect(psql(`select count(*) from public.debt_payments where order_id = '${orden}';`)).toBe('0')
     const inv = invariante(turno)
     expect(inv.congelado, 'el lote cambió un arqueo ya congelado').toBe(inv.recalculado)
   })

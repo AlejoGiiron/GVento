@@ -186,6 +186,28 @@ cancele y libere la mesa. No "reintentar el segundo request".
 
 ### 🔴 `register_sale_payment` acepta cobros SIN turno abierto — medido; el cambio va sin aviso a clientes (2026-09-30)
 
+**🟡 RESUELTO EN RAMA `feat/cobro-turno` (2026-09-30) — pendiente de aplicar en prod, DESPUÉS de
+la fase 1 de D** (`supabase/cobro-turno.sql` parte del texto de las funciones con el protocolo).
+Cobro: turno obligatorio con cualquier método (FOR SHARE, primer lock) + orden FOR UPDATE.
+Abonos (decidido 2026-09-30): **el EFECTIVO exige turno**; los otros métodos no. Motivo, medido
+en prod con `supabase/diag/abonos-efectivo-fuera-de-turno.sql`: Salchimelo, 2 abonos en efectivo
+por $48.000 el 31/08 (00:29 Bogotá) fuera de todo arqueo; G-10 76 abonos y 0 fuera; Café Aroma 0.
+El abono simple ahora bloquea la orden (el hallazgo lateral de D). La UI de abono avisa ANTES de
+confirmar y ofrece abrir el turno ahí (`AvisoEfectivoRequiereTurno`).
+`tests/cobro-concurrente.spec.ts` (10) y `tests/abono-efectivo-turno.spec.ts` (3). El doble cobro
+ahora se fuerza con una sesión retenida (`tests/helpers/db-local.ts`), ya no por azar de red:
+el mutante sin `for update` da 2 pagos. Mutantes: v1 de cada RPC, sin-lock de cobro y de abono,
+hook de la UI en identidad y `mensajeDeError` viejo → cada uno rojo en su test, por su razón.
+
+**Lo que vio una pestaña vieja (medido en Docker con los modales anteriores):** abono en efectivo
+sin turno → toast **"Error al registrar el abono"** (en lote: "Error al registrar el pago"), el
+modal queda abierto, no se registra nada. Genérico porque el `onError` hacía
+`err instanceof Error ? … : 'genérico'` y `PostgrestError` no es `instanceof Error`: la misma
+clase estaba en 22 lugares de `src/` (Mesas mostraba "Error desconocido" al cobrar). Barrida con
+`src/lib/errorMessage.ts`. Con el código nuevo se ve el mensaje del servidor.
+
+**Antes (el registro del hallazgo):**
+
 - **El defecto** (`tests/cobro-concurrente.spec.ts`, rama `diag/verificaciones-pre-m1`): con
   la sede sin turno la RPC acepta el cobro (20/20) y el pago no cae en ninguna ventana de
   turno, o sea en ningún arqueo.
@@ -197,6 +219,44 @@ cancele y libere la mesa. No "reintentar el segundo request".
 - **Doble cobro:** el mecanismo es real (check-then-act sin lock bajo READ COMMITTED) pero
   dio 0/160 duplicados por red. Lo cierra el `for update` del mismo cambio; el spec NO lo
   caza y está marcado así.
+
+### 🔴 `payments` y `debt_payments` aceptan escritura DIRECTA — saltea el turno obligatorio del cambio (1) (medido 2026-09-30)
+
+La UI escribe esas tablas **solo** por RPC (grep de `from('payments'|'debt_payments')` en `src/`
+y `apps/`: solo lecturas; `createPayment` en `supabase-helpers.ts` no tiene llamadores). Pero
+las policies siguen abiertas:
+- `payments: cajero/admin crea` (INSERT). **Medido en Docker:** el cajero, con la sede SIN
+  turno, insertó directo un pago en efectivo (en una transacción con rollback). O sea que el
+  "turno obligatorio" de `register_sale_payment` se saltea con un INSERT a mano.
+- `payments: admin elimina` (DELETE): un admin puede borrar un pago de un turno YA cerrado y
+  romper el invariante del arqueo congelado (D).
+- `debt_payments: crear con permiso` (INSERT con `fiado.gestionar`): baja el saldo sin
+  `cash_movement` y sin turno, que es la forma exacta de los $48.000 de Salchimelo.
+  `tests/anular-venta.spec.ts` lo usa como fixture (abono directo).
+
+Es la misma clase que el `UPDATE` directo a `cash_shifts` que cierra la fase 2 de D.
+**Salida propuesta:** quitar esas 3 policies y revocar INSERT/UPDATE/DELETE de las dos tablas a
+`anon` y `authenticated`. Como el frontend no las usa, va en **una sola fase**. Antes hay que
+pasar el fixture de `anular-venta` a la RPC. **Para decidir; no está construido.**
+
+Para encontrar la clase completa, buscar por las TABLAS que lee la fórmula del arqueo y no por
+los nombres de función conocidos:
+`grep -rnE "from\('(payments|cash_movements|cash_shifts|debt_payments)'\)\s*\.(insert|update|delete|upsert)" src/ apps/`
+y las policies que no son SELECT sobre esas tablas en `pg_policies`.
+
+### 🔴 POS: si el cobro falla DESPUÉS de crear la orden, queda una orden huérfana con stock descontado (medido 2026-09-30)
+
+`POSPage` crea la orden, agrega ítems (descuenta stock) y **después** llama a
+`register_sale_payment`. Si el pago falla, la orden queda. **Medido en Docker:** checkout abierto
+con turno, otra terminal cierra el turno y el cajero confirma. Toast: "Error al procesar el
+cobro: No hay un turno de caja abierto…". Queda la orden en `pending` / `paid` / sin número /
+1 ítem / 0 pagos. La ve Cocina, porque filtra `pending`.
+- **No es nueva:** cualquier falla del pago la deja así (por ejemplo, Σ ≠ total). El cambio (1)
+  le suma un disparador: cerrar el turno en otra terminal con un checkout abierto. Antes, ese
+  mismo cobro se aceptaba fuera de todo arqueo, en silencio.
+- Con UNA terminal por sede es raro. Con M1 (varios celulares) deja de serlo.
+- **Salida:** que crear la orden y cobrar sea UNA transacción. Va con la extracción de
+  `useSaleCheckout`, antes de M1, y no en (1).
 
 ### ✅ La base local es un PROXY de producción — deriva 0 alcanzada el 2026-09-30 (5.6 se reabre)
 
@@ -301,6 +361,7 @@ Arreglo: `supabase/product-images-policies.sql` (rama `fix/product-images-carpet
 alcance que logos (carpeta = sede activa + `productos.editar`). Antes de aplicarlo en prod:
 `supabase/diag/storage-escrituras-cruzadas.sql` (cubre los dos buckets; detecta plantados y
 reemplazos porque `storage.objects.owner` pasa a ser el último que escribió — medido).
+**Corrida en prod el 2026-09-30, después de aplicar logos: 0 filas** ⇒ el hueco no se usó.
 El QR de Nequi, en cambio, se lee de `config.nequi_qr_url` (guardada solo tras una subida
 propia exitosa) y solo lo muestra la vista previa de Configuración: un archivo plantado no
 podía volverse "su QR de pago".
@@ -419,11 +480,15 @@ el PROTOCOLO DE LOCKS en los dos abonos y la anulación. `tests/cierre-turno-ser
 el escenario medido + una carrera forzada por escritor + todos a la vez ×10 sin 40P01; mutantes
 verificados (escritores sin FOR SHARE → rojo; cliente viejo → congela 100.000 en vez de 89.423).
 **Falta:** el cobro (`register_sale_payment`) todavía no toma el turno → cambio (1).
+→ Hecho en rama `feat/cobro-turno` (2026-09-30); ver la entrada de `register_sale_payment` arriba.
 
 **Hallazgo lateral (2026-09-30, leyendo el código para D):** `register_debt_payment` (abono de UNA
 venta) lee el saldo SIN bloquear la orden: dos abonos simultáneos a la misma venta pueden pasarse
 del saldo. El lote SÍ bloquea las órdenes (su paso 3 dice exactamente esto). Misma clase (R3); con
 varios celulares cobrando fiados se vuelve probable. No se tocó en D (no es del turno).
+→ Arreglado con el cambio (1) en `feat/cobro-turno`: test de dos abonos simultáneos que juntos
+se pasan del saldo (5000 + 5000 sobre 8000) → el segundo espera y se rechaza; mutante sin el
+lock → abonado 10000.
 
 **✅ MEDIDO el 2026-09-21** (contra LAB en la nube, antes de pasar las pruebas a Docker; esperado leído del PATCH a `cash_shifts`): con red local y sin pausa, 3/3 correcto; con el GET de `cash_movements` demorado 2 s y sin pausa, **3/3 CARRERA** (se persistió la apertura sin el egreso); a ritmo humano con la misma demora, 3/3 correcto; y con **dos dispositivos** (B registra un egreso con el modal de cierre de A abierto) **siempre carrera**: `cash_movements` no tiene realtime ni polling, así que el modal de A nunca se entera. Con varios celulares es el caso normal, no el raro. Salida: el Paso D (`close_cash_shift`, esperado calculado en el servidor).
 

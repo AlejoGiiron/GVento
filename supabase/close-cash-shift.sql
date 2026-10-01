@@ -87,6 +87,10 @@
 --
 -- RE-APLICAR: idempotente (create or replace, drop trigger if exists). En una
 -- transacción: si algo falla, rollback total.
+-- ⚠️ PERO las 3 RPC de abono/cobro las redefine después supabase/cobro-turno.sql.
+-- Re-aplicar ESTE archivo después de aquel las vuelve a la versión sin turno
+-- obligatorio: revierte el cambio (1) sin ningún error. Si se re-aplica este,
+-- re-aplicar cobro-turno.sql a continuación.
 --
 -- NO DEDUZCAS EL ESTADO DE ESTE COMENTARIO — correlo:
 --   select proname from pg_proc where proname = 'close_cash_shift';           -- 1 fila
