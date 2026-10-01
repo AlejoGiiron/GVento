@@ -23,7 +23,7 @@ interface MovementsModalProps {
 }
 
 export function MovementsModal({ onClose }: MovementsModalProps) {
-  const { currentShift, salesSummary, movements, addMovement, isAddingMovement } = useCashShift()
+  const { currentShift, salesSummary, movements, isLoadingMovements, addMovement, isAddingMovement } = useCashShift()
   const { config } = useRestaurantConfig()
 
   const [type, setType] = useState<'in' | 'out'>('in')
@@ -307,7 +307,14 @@ export function MovementsModal({ onClose }: MovementsModalProps) {
             </button>
           </form>
 
-          {/* Movements list */}
+          {/* Movements list — aria-busy mientras carga: "Sin movimientos" durante
+              la carga era un dato falso (y un test de ausencia pasaba por eso). */}
+          <div data-testid="movements-panel" aria-busy={isLoadingMovements}>
+          {isLoadingMovements && (
+            <div style={{ textAlign: 'center', padding: '20px 0', color: '#94a3b8', fontSize: 13 }}>
+              Cargando movimientos…
+            </div>
+          )}
           {movements.length > 0 && (
             <div>
               <div style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 }}>
@@ -349,11 +356,12 @@ export function MovementsModal({ onClose }: MovementsModalProps) {
             </div>
           )}
 
-          {movements.length === 0 && (
-            <div style={{ textAlign: 'center', padding: '20px 0', color: '#94a3b8', fontSize: 13 }}>
+          {!isLoadingMovements && movements.length === 0 && (
+            <div data-testid="movements-empty" style={{ textAlign: 'center', padding: '20px 0', color: '#94a3b8', fontSize: 13 }}>
               Sin movimientos manuales en este turno
             </div>
           )}
+          </div>
         </div>
       </div>
     </div>

@@ -1,0 +1,9 @@
+[
+  {
+    "tipo": "event_trigger",
+    "nombre": "issue_pg_graphql_access",
+    "prod": "48cfb20d8f447ea20edf51978d7fcb4f",
+    "local": "c07f175c561cb1c2b433c553edb29587",
+    "motivo": "Event trigger de la PLATAFORMA (dueño supabase_admin, no lo crea ningún .sql del repo). Solo difieren los tags: prod lo dispara con CREATE FUNCTION, la imagen local del CLI 2.90 con CREATE EXTENSION. Verificado el 2026-09-30: md5('ddl_command_end | O | grant_pg_graphql_access() | CREATE FUNCTION') = hash de prod del export docs/deriva-.csv; el local es el mismo string con CREATE EXTENSION. No afecta a la app (gestiona grants de pg_graphql). Se reabre sola si cualquiera de los dos valores cambia; probar si un CLI más nuevo la iguala antes de dejarla para siempre."
+  }
+]

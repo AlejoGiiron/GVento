@@ -56,3 +56,9 @@ vite.config.ts.timestamp-*.mjs
 
 # Empaquetado manual de las capturas — se regenera con `pnpm capturas`, no se versiona
 capturas-landing.zip
+
+# Exports de la deriva de esquema (supabase/diag/deriva-esquema.sql). Es el
+# esquema de PRODUCCION: no va a git. OJO: es una exclusion por PATRON; un export
+# guardado con otro nombre no queda cubierto. Guardalos como deriva-*.csv.
+deriva-*.csv
+docs/deriva-esquema*

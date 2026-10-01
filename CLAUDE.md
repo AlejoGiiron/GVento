@@ -14,22 +14,41 @@
 
 
 ## Descripción
-G-Vento es un sistema POS completo para restaurantes. Monorepo que incluye:
-- Panel administrativo y POS (apps/pos) → React + TypeScript + Tailwind
-- Tienda pública para clientes (apps/store) → Next.js 14 + App Router
-- App móvil para mozos (apps/mobile) → React Native + Expo
-- Tipos y utilidades compartidas (packages/shared)
+G-Vento es un sistema POS para restaurantes. **Es UNA sola app web** (Vite + React), con un
+solo `package.json` en la raíz — **no es un monorepo**: no hay `apps/`, ni `packages/`, ni
+`pnpm-workspace.yaml`, ni tienda Next.js, ni app React Native. Una versión anterior de este
+archivo los describía; nunca existieron en este repo (verificado el 2026-09-21:
+`git log --all --oneline -- apps packages pnpm-workspace.yaml` devuelve 0 commits).
+
+Lo que hay, y cómo reconfirmarlo (`ls` en la raíz):
+
+| dónde | qué |
+|---|---|
+| `src/` | la app: `pages/`, `components/`, `hooks/`, `lib/`, `stores/`, `types/`, `contexts/` |
+| `supabase/` | migraciones `.sql` (se aplican a mano, ver *"El estado de aplicación…"*) + `functions/` (Edge Functions) |
+| `tests/` | la suite E2E de Playwright (`tests/helpers/` compartidos) |
+| `scripts/` | generador RBAC (`gen-rbac-sql.mjs`) y el pipeline de `capturas/` |
+| `public/` | `manifest.json` + `sw.js` (hoy son los del KDS de Cocina) |
+| `docs/` | `BITACORA.md`, `DEUDAS.md`, planes |
+
+🔴 **EL POS MÓVIL ES UNA RUTA WEB, NO UNA APP NATIVA.** Se construye como `/m` dentro de esta
+misma app: su propio caparazón (`MobileShell`, navegación inferior) dentro de `ProtectedRoute`
+y **fuera** de `AppLayout`, reusando los mismos hooks y RPCs. Se usa desde el navegador del
+celular, instalable en la pantalla de inicio (manifest propio). **No lo busques en
+`apps/mobile` ni en Expo.** El escritorio no se ramifica con `isMobile`.
 
 ## Stack tecnológico
-- Frontend web: React 18, TypeScript (strict), Tailwind CSS, Vite
-- Frontend tienda: Next.js 14 App Router, TypeScript, Tailwind
+Para reconfirmarlo: `node -e "console.log(Object.keys(require('./package.json').dependencies))"`.
+- Frontend: React 18, TypeScript (strict), Tailwind CSS, Vite, react-router-dom
 - Base de datos: Supabase (PostgreSQL + Auth + Realtime + Storage)
 - Estado global: Zustand
 - Fetching: React Query (@tanstack/react-query)
-- Validación: Zod
-- Íconos: lucide-react
-- Fechas: date-fns
-- Monorepo: pnpm workspaces
+- Íconos: lucide-react · Fechas: date-fns · Gráficos: recharts · Excel: exceljs
+- Errores: Sentry (`src/lib/sentry.ts`) · toasts: react-hot-toast
+- Zod está en las dependencias, pero **`grep -rl "from 'zod'" src/` no devuelve nada**: no
+  asumas que hay validación con Zod.
+- Tests: Playwright (E2E, `tests/`) + Vitest (unit, `*.test.ts` junto al código)
+- Gestor: pnpm, **un solo paquete**
 
 ## Convenciones de código
 - Componentes: PascalCase en archivos .tsx
@@ -181,38 +200,52 @@ que un flujo se cae**. No hay error, no hay test rojo: hay una pantalla vacía m
 consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
 `grep -rln '<un valor del contrato>' src/ supabase/ tests/`.*
 
-1. **Catálogo de permisos RBAC — 7 lados.** Fuente nominal: `src/lib/permissions.ts`
-   (`PERMISSION_GROUPS`, 22 claves). Copias: `supabase/multi-tenant-rbac.sql`,
-   `supabase/lab-seed.sql`, `supabase/onboard-org.sql`, `supabase/onboard-org-paso1.sql`,
-   `supabase/onboard-org-paso3.sql` (comentado) — y **`tests/roles.spec.ts`**, que clava el
-   tamaño del catálogo con `expect(ALL_PERMISSION_KEYS.length).toBe(22)`. Ese séptimo lado
-   no es una copia más: es **el único mecanismo del repo que hoy vigila el contrato**, y por
-   eso se pone rojo a propósito cuando el catálogo crece. **No ajustar el número sin mirar
-   qué cambió** — ese rojo es el tripwire funcionando, no un test desactualizado.
-   🔴 **Ya falló:** `ventas.historial` y `ventas.anular` se sembraron con un `update … where
-   name='admin'` de UNA pasada sobre las orgs existentes; `onboard-org.sql` nunca se
-   actualizó ⇒ **toda organización creada con él nacía sin Historial de ventas ni anulación**,
-   más `sedes.gestionar`, `roles.gestionar` y `reportes.consolidado`, que nunca tuvieron
-   migración. Corregido en `onboard-org-paso1.sql` (admin con 23 permisos).
-   🔴 **Y SIGUE fallando: las 4 copias del seed divergen en 7 permisos** (medido 2026-08-31).
-   `admin` vale **16 / 20 / 18 / 23** según el archivo (`multi-tenant-rbac` / `lab-seed` /
-   `onboard-org` / `paso1`), y `cajero` **8 / 10 / 9 / 10**. Difieren en `compras.gestionar`,
-   `fiado.gestionar`, `ventas.historial`, `ventas.anular`, `reportes.consolidado`,
-   `sedes.gestionar` y `roles.gestionar`. **`mozo` es el único idéntico en las 4** — es el
-   único que nunca se tocó, que es exactamente la forma del defecto: lo que se agregó se
-   sembró en el archivo que estaba abierto ese día. Para reconfirmarlo:
-   `grep -A12 "'admin', true" supabase/lab-seed.sql supabase/onboard-org.sql supabase/onboard-org-paso1.sql`
-   ⚠️ **DOS residuos abiertos, en direcciones OPUESTAS** — el inventario listaba solo el primero:
-   - **`ventas.anular` se enforcea pero NO está en `PERMISSION_GROUPS`** ⇒ no se puede conceder
-     desde la UI de Roles, solo por SQL o por el comodín. Falla **cerrado**: alguien no puede
-     hacer algo, y se queja.
-   - **6 permisos son concedibles y no gatean nada.** Falla **abierto** y en silencio, que es
-     peor. Entrada propia en [`docs/DEUDAS.md`](docs/DEUDAS.md) → *"concedible pero inerte"*.
-   → **Salida de fondo decidida (2026-08-31), pendiente de construir:** generar
-   `seed_system_roles(p_org)` desde `PERMISSION_GROUPS` + una constante `SYSTEM_ROLES` nueva,
-   y que los seeds la **llamen** en vez de inlinear listas. Eso lleva 7 lados a 2 (fuente +
-   artefacto generado). Generar bloques y pegarlos en cada seed sería cosmético: una copia
-   generada se edita a mano igual de fácil que una escrita a mano.
+1. **Catálogo de permisos RBAC — UNA fuente, UN artefacto generado, UN tripwire.**
+   *(Misma descripción que da el hook `PreToolUse` al tocar el catálogo: si alguna vez
+   difieren, uno de los dos está mal — corregilos juntos.)*
+
+   | rol | archivo |
+   |---|---|
+   | FUENTE | `src/lib/permissions.ts` (`PERMISSION_GROUPS` + `SYSTEM_ROLES`) |
+   | GENERADO — **no editar a mano** | `supabase/seed-system-roles.sql` → `seed_system_roles(p_org)` |
+   | REGENERAR | `pnpm gen:rbac` |
+   | TRIPWIRE | `tests/roles.spec.ts` clava el tamaño con `expect(ALL_PERMISSION_KEYS.length).toBe(N)` |
+
+   Los seeds (`lab-seed`, `onboard-org`, `onboard-org-paso1`) **llaman** a
+   `seed_system_roles(v_org)` en vez de llevar listas; `onboard-org-paso3` deriva del rol ya
+   sembrado. Si estás por escribir un array de permisos dentro de un `.sql`, estás en el
+   archivo equivocado: editá `permissions.ts` y regenerá.
+
+   **NO DEDUZCAS EL ESTADO DE ESTE PÁRRAFO — correlo:**
+   ```bash
+   pnpm gen:rbac:check                    # ✓ = el .sql generado coincide con permissions.ts
+   grep -n "toBe(" tests/roles.spec.ts    # el N que clava el tripwire
+   for f in supabase/lab-seed.sql supabase/onboard-org.sql \
+            supabase/onboard-org-paso1.sql supabase/onboard-org-paso3.sql; do
+     echo "$f  llama:$(grep -c seed_system_roles $f)  inline:$(grep -c "'admin', true" $f)"
+   done                                   # esperado: inline:0 en los cuatro
+   ```
+   **El tripwire se pone rojo a propósito cuando el catálogo cambia.** No ajustar el número
+   sin mirar QUÉ permiso cambió: ese rojo es el mecanismo funcionando, no un test viejo.
+
+   **LO QUE EL GENERADOR NO ARREGLA** (estas sí siguen abiertas):
+   - **Las organizaciones YA creadas conservan el catálogo con el que nacieron.** Reconciliarlas
+     es una migración aparte, y tiene que ser UNIÓN (agregar lo que falta), nunca
+     `set permissions = <canónica>`: eso pisa los ajustes del cliente.
+   - **`multi-tenant-rbac.sql` está aplicada ⇒ es registro histórico, no fuente.** Su lista
+     inline está desactualizada a propósito. No editar (R5).
+   - **6 permisos son concedibles y no gatean nada.** Falla **abierto** y en silencio. Entrada
+     propia en [`docs/DEUDAS.md`](docs/DEUDAS.md) → *"concedible pero inerte"*. Que una clave
+     esté en el catálogo NO es evidencia de que algo esté protegido. Para reconfirmarlo:
+     `grep -rl "'<clave>'" src/ | grep -v permissions.ts`.
+
+   🔴 **Por qué existe el generador (historia, no estado):** `ventas.historial` y
+   `ventas.anular` se sembraron con un `update … where name='admin'` de UNA pasada, y
+   `onboard-org.sql` nunca se actualizó ⇒ toda organización creada con él nacía sin
+   Historial ni anulación. Medido el 2026-08-31: las 4 copias inline del seed divergían en
+   7 permisos (`admin` valía 16 / 20 / 18 / 23 según el archivo) y **solo `mozo` era idéntico
+   en las 4** — el único rol que nunca se tocó. Lo que se agregaba se sembraba en el archivo
+   que estaba abierto ese día. El generador cerró esa clase; los seeds dejaron de ser lados.
 
 2. **Enum `subscription_status` — 4 lados, DOS REPOS.** El `CHECK` en
    `supabase/organization-subscription.sql`, la constante `ESTADOS` de
@@ -612,6 +645,15 @@ Resumen rápido:
 - Botón CTA: `#10b981`, border-radius 10px, shadow `rgba(16,185,129,.35)`
 
 ## Política de testing (obligatoria)
+- 🔴 **TODA prueba corre contra el Supabase LOCAL en Docker, NUNCA contra la nube**
+  (2026-09-30). Suite, specs sueltos, `--repeat-each`, mediciones de carreras y scripts
+  con supabase-js. La nube cobra por **ingesta de logs** (el mes cerró en 2,58 GB contra
+  1 GB del plan), y que LAB esté aislada por RLS no cambia el medidor: es la misma base.
+  Preparar: `pnpm e2e:preparar`. **Mecanismo:** `playwright.config.ts` carga
+  `scripts/capturas/local.config` y **aborta si la URL no es loopback**. **No lo cubre:**
+  un script ad hoc con `createClient(.env)` — esos no pasan por la config. Si Docker no
+  está arriba, se pide levantarlo; la nube **no** es el plan B. Diagnóstico de producción
+  = SQL que corre el usuario en el SQL Editor, no scripts desde acá.
 - Todo módulo o funcionalidad nueva **DEBE** incluir su spec E2E en `tests/` antes de
   considerarse completo.
 - El prompt de cada feature nuevo termina con: "crea/actualiza el spec de Playwright que

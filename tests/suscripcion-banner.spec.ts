@@ -1,9 +1,8 @@
 import { test, expect, type Page } from '@playwright/test'
-import { readFileSync } from 'node:fs'
 import { createHmac } from 'node:crypto'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { loginAsOwner, ownerCreds } from './helpers/auth'
-import { waitPosReady } from './helpers/pos'
+import { waitPosReady, agregarProductoSimple } from './helpers/pos'
 
 // ============================================================================
 // FASE 2 — el banner que LEE la bandera de suscripción.
@@ -39,15 +38,6 @@ import { waitPosReady } from './helpers/pos'
 
 test.describe.configure({ mode: 'serial' })
 
-function loadEnv(path: string) {
-  try {
-    for (const line of readFileSync(path, 'utf8').split(/\r?\n/)) {
-      const m = line.match(/^([A-Z0-9_]+)=(.*)$/)
-      if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '')
-    }
-  } catch { /* ignore */ }
-}
-loadEnv('.env'); loadEnv('.env.test')
 
 const SECRETO = process.env.E2E_GCENTRO_HMAC_SECRET
 // Sin el secreto no hay forma de montar los escenarios: skip del archivo entero
@@ -150,16 +140,19 @@ test.beforeEach(async ({ page }) => {
 //   · con `resolveNotice` → siempre un aviso, ESTOS mueren (murió el primero y
 //     serial cortó el resto). Esa es la dirección que sí los discrimina, y es
 //     la razón por la que no son vacuos.
-// El contraste `cart-total` visible dentro de cada caso cubre lo tercero: que
-// el 0 no venga de una pantalla que no cargó.
+// Lo tercero —que el 0 no venga de una pantalla que no cargó— lo cubre el
+// marcador `subscription-banner-ausente` con su MOTIVO. Antes lo "cubría"
+// `cart-total` visible, que sale de OTRA query: el banner devolvía null igual
+// mientras su propia lectura cargaba (corregido 2026-09-30, barrido R3 de
+// aserciones de ausencia).
+const ausente = (page: Page) => page.getByTestId('subscription-banner-ausente')
 
 test('active no muestra banner', async ({ page }) => {
   await setEstado('active', 'Este texto no debe verse en ningún lado.')
   await recargarPos(page)
+  // Primero la señal POSITIVA: la lectura terminó y dijo "sin aviso".
+  await expect(ausente(page)).toHaveAttribute('data-motivo', 'sin-aviso', { timeout: 15_000 })
   await expect(banner(page)).toHaveCount(0)
-  // Contraste dentro del mismo caso: la pantalla cargó de verdad, así que el 0
-  // de arriba significa "no se muestra" y no "no cargó nada".
-  await expect(page.getByTestId('cart-total')).toBeVisible()
 })
 
 for (const estado of ['restricted', 'suspended']) {
@@ -169,8 +162,8 @@ for (const estado of ['restricted', 'suspended']) {
     // niveles no cambian NADA en el POS.
     await setEstado(estado, `Mensaje de ${estado} que no debe verse.`)
     await recargarPos(page)
+    await expect(ausente(page)).toHaveAttribute('data-motivo', 'sin-aviso', { timeout: 15_000 })
     await expect(banner(page)).toHaveCount(0)
-    await expect(page.getByTestId('cart-total')).toBeVisible()
   })
 }
 
@@ -212,6 +205,9 @@ test('el descarte sobrevive a la recarga y guarda estado + día', async ({ page 
   expect(parsed.dia).toMatch(/^\d{4}-\d{2}-\d{2}$/)
 
   await recargarPos(page)
+  // Tras recargar: la lectura volvió a traer 'expiring' y el banner NO está
+  // porque está DESCARTADO — no porque la query siga cargando.
+  await expect(ausente(page)).toHaveAttribute('data-motivo', 'descartado', { timeout: 15_000 })
   await expect(banner(page)).toHaveCount(0)
 })
 
@@ -262,7 +258,7 @@ test('grace no bloquea nada: el POS sigue operable', async ({ page }) => {
   await recargarPos(page)
   await expect(banner(page)).toBeVisible()
 
-  await page.getByTestId('product-card').first().click()
+  await agregarProductoSimple(page)
   await expect(page.getByText('Carrito vacío')).toHaveCount(0)
   const total = Number((await page.getByTestId('cart-total').innerText()).replace(/[^\d]/g, ''))
   expect(total).toBeGreaterThan(0)

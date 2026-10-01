@@ -73,6 +73,8 @@ export function useSalesHistory({ from, to, method, search, page }: SalesHistory
     pageCount: Math.max(1, Math.ceil(count / SALES_PAGE_SIZE)),
     isLoading: query.isLoading,
     isFetching: query.isFetching,
+    /** true mientras se muestran los datos del filtro ANTERIOR (keepPreviousData). */
+    isPlaceholderData: query.isPlaceholderData,
     error: query.error,
     refetch: query.refetch,
   }

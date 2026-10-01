@@ -129,7 +129,7 @@ export function ReportsPage() {
   const prevFrom = useMemo(() => format(subDays(parseISO(from), periodLen), 'yyyy-MM-dd'), [from, periodLen])
 
   // ─── Data ─────────────────────────────────────────────────────────────────
-  const { dailySales, productPerformance, hourlySales, vouchersTotal, isLoading } = useReports({ from, to })
+  const { dailySales, productPerformance, hourlySales, vouchersTotal, isLoading, error } = useReports({ from, to })
   const { dailySales: prevDailySales } = useReports({ from: prevFrom, to: prevTo })
 
   // ─── KPI aggregates ───────────────────────────────────────────────────────
@@ -202,7 +202,9 @@ export function ReportsPage() {
   }, [allProducts])
 
   const totalUnits = useMemo(() => allProducts.reduce((s, p) => s + p.total_qty, 0), [allProducts])
-  const isEmpty    = !isLoading && totalOrd === 0
+  // Con error NO es "vacío": decir "Sin ventas" cuando la consulta falló es
+  // mostrar un dato falso (fail-open). El error se muestra aparte.
+  const isEmpty    = !isLoading && !error && totalOrd === 0
 
   // ─── Stock: ranking de categorías (unidades + revenue) ────────────────────
   const categoryRanking = useMemo(() => {
@@ -440,6 +442,16 @@ export function ReportsPage() {
       {/* ── Contenido scrollable ── */}
       <div style={{ flex: 1, overflowY: 'auto', background: '#f8fafc' }}>
         <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+          {error && (
+            <div
+              data-testid="report-error"
+              role="alert"
+              style={{ padding: '12px 16px', borderRadius: 10, border: '1px solid #fecaca', background: '#fef2f2', color: '#b91c1c', fontSize: 13.5, fontWeight: 600 }}
+            >
+              No se pudieron cargar los reportes. Los números de abajo pueden estar incompletos — recargá la página.
+            </div>
+          )}
 
           {activeTab === 'financiero' && (
           <>

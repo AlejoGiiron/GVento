@@ -2,13 +2,20 @@ import { test, expect, type Page } from '@playwright/test'
 import { loginAsOwner } from './helpers/auth'
 import { openTableAndAddItems } from './helpers/tables'
 import { openShiftIfClosed, closeShiftIfOpen } from './helpers/shift'
+import { mesaFija, liberarMesa } from './helpers/lab'
 
 // Cocina por sede (uses_kitchen) + por producto (routes_to_kitchen).
 // Requiere lab-seed.sql RE-CORRIDO: crea "Sede Lab Sin Cocina" (uses_kitchen=false,
 // acceso owner.test, 1 mesa) y fija "Lab Agua" con routes_to_kitchen=false.
 
-const SUFFIX = Date.now().toString().slice(-6)
-const MESA = `Mesa Cocina ${SUFFIX}`
+// Mesa FIJA, reusada entre corridas (sin sufijo): no acumula residuo en LAB.
+// Ver tests/helpers/lab.ts.
+const MESA = 'E2E Fija Cocina'
+
+// Corre AUNQUE el test falle: libera la mesa y lo verifica.
+test.afterAll(async () => {
+  await liberarMesa(MESA)
+})
 
 const NORTE = 'Sede Lab Norte'
 const NO_KITCHEN = 'Sede Lab Sin Cocina'
@@ -62,12 +69,9 @@ test.describe.serial('Cocina por sede y por producto', () => {
     await page.goto('/ventas')
     await openShiftIfClosed(page, 0)
 
-    // Mesa dedicada en Norte (evita colisión con mesas seeded ocupadas).
-    await page.goto('/mesas')
-    await page.getByRole('button', { name: 'Configurar' }).click()
-    await page.getByPlaceholder('Mesa 1').fill(MESA)
-    await page.getByRole('button', { name: 'Crear mesa' }).click()
-    await expect(page.getByText(MESA)).toBeVisible()
+    // Mesa dedicada en Norte (evita colisión con mesas seeded ocupadas): existe
+    // y está LIBRE (se crea la primera vez).
+    await mesaFija(MESA)
 
     // Abrir la mesa y abrir el picker.
     await openTableAndAddItems(page, MESA)
@@ -77,7 +81,9 @@ test.describe.serial('Cocina por sede y por producto', () => {
     await pickProduct(page, NO_ROUTES)
     await page.getByRole('button', { name: 'Agregar a la mesa' }).click()
     await expect(page.getByRole('button', { name: 'Agregar a la mesa' })).toHaveCount(0)
-    await expect(page.getByText('Sin ítems — agrega productos')).toHaveCount(0)
+    // Señal POSITIVA de que el ítem quedó en la mesa: "Sin ítems" en 0 también
+    // se cumplía con el panel en "Cargando orden..." (barrido R3, 2026-09-30).
+    await expect(page.getByTestId('table-item').first()).toBeVisible({ timeout: 15_000 })
 
     // Contador: solo Cerveza enruta → "Cocina (1)", NUNCA "Cocina (2)".
     await expect(page.getByRole('button', { name: 'Cocina (1)' })).toBeVisible()
@@ -92,7 +98,7 @@ test.describe.serial('Cocina por sede y por producto', () => {
     // Globalmente solo un ítem fue a cocina.
     await expect(page.getByText('En cocina', { exact: true })).toHaveCount(1)
 
-    // Limpieza: cobrar la mesa (la libera), cerrar turno y eliminar la mesa.
+    // Limpieza: cobrar la mesa (la libera) y cerrar turno. La mesa se reusa.
     // Transferencia confirma directo (sin paso de monto en efectivo).
     await page.getByRole('button', { name: 'Cobrar' }).click()
     await page.getByTestId('pay-method-transferencia').click()
@@ -101,16 +107,6 @@ test.describe.serial('Cocina por sede y por producto', () => {
 
     await page.goto('/ventas')
     await closeShiftIfOpen(page)
-
-    // Eliminar la mesa dedicada (ya libre tras el cobro).
-    await page.goto('/mesas')
-    await page.getByRole('button', { name: 'Configurar' }).click()
-    const del = page.locator('div')
-      .filter({ has: page.getByText(MESA, { exact: true }) })
-      .filter({ has: page.getByTitle('Eliminar mesa') })
-      .last()
-      .getByTitle('Eliminar mesa')
-    if (await del.count()) await del.click()
   })
 
   test('OFF: en una sede sin cocina, "Cocina" desaparece del sidebar y del panel de mesa', async ({ page }) => {

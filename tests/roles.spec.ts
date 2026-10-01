@@ -1,21 +1,10 @@
 import { test, expect } from '@playwright/test'
-import { readFileSync } from 'node:fs'
 import { createClient } from '@supabase/supabase-js'
 import { loginAsOwner } from './helpers/auth'
 import { ALL_PERMISSION_KEYS } from '../src/lib/permissions'
 
 // VITE_GVENTO_* (backend del lab) viven en .env; playwright.config solo carga
 // .env.test. Cargamos .env aquí para el test del trigger vía API.
-function loadEnv(path: string) {
-  try {
-    for (const line of readFileSync(path, 'utf8').split(/\r?\n/)) {
-      const m = line.match(/^([A-Z0-9_]+)=(.*)$/)
-      if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '')
-    }
-  } catch { /* ignore */ }
-}
-loadEnv('.env')
-loadEnv('.env.test')
 
 const SYSTEM_NON_OWNER = ['admin', 'cajero', 'mozo']
 

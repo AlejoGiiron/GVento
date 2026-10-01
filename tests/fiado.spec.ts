@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { loginAsOwner, loginAsCashier } from './helpers/auth'
 import { openTableAndAddItems } from './helpers/tables'
 import { openShiftIfClosed, closeShiftIfOpen } from './helpers/shift'
+import { mesaFija, liberarMesa, desactivarClientes } from './helpers/lab'
 
 // Producto compuesto seeded (Lab Coctel = 18.000) que descuenta 1 "Lab Vaso"
 // (insumo con tracking) por venta. Permite verificar que el fiado SÍ baja stock.
@@ -11,7 +12,9 @@ const INSUMO = 'Lab Vaso'
 const SUFFIX = Date.now().toString().slice(-6)
 const CLIENTE = `E2E Fiado ${SUFFIX}`
 const CLIENTE_G = `E2E Grupo ${SUFFIX}`
-const MESA = `Mesa Fiado ${SUFFIX}`
+// Mesa FIJA, reusada entre corridas (sin sufijo): no acumula residuo en LAB.
+// Ver tests/helpers/lab.ts.
+const MESA = 'E2E Fija Fiado'
 
 // Órdenes del cliente-grupo (compartidas entre los tests de agrupación).
 let gN1 = 0
@@ -310,12 +313,9 @@ test.describe.serial('Fiado / Cartera', () => {
     // Stock del insumo ANTES de cualquier cosa.
     const before = await readStock(page, INSUMO)
 
-    // Crear una mesa dedicada (evita colisión con mesas seeded ocupadas).
-    await page.goto('/mesas')
-    await page.getByRole('button', { name: 'Configurar' }).click()
-    await page.getByPlaceholder('Mesa 1').fill(MESA)
-    await page.getByRole('button', { name: 'Crear mesa' }).click()
-    await expect(page.getByText(MESA)).toBeVisible()
+    // Mesa dedicada (evita colisión con mesas seeded ocupadas): existe y está
+    // LIBRE (se crea la primera vez).
+    await mesaFija(MESA)
 
     // Abrir la mesa y abrir el picker.
     await openTableAndAddItems(page, MESA)
@@ -331,7 +331,9 @@ test.describe.serial('Fiado / Cartera', () => {
     // cierre y que el panel ya no diga "Sin ítems" evita que readStock navegue y
     // aborte la RPC en vuelo (si no, el ítem no se inserta y el stock no baja).
     await expect(page.getByRole('button', { name: 'Agregar a la mesa' })).toHaveCount(0)
-    await expect(page.getByText('Sin ítems — agrega productos')).toHaveCount(0)
+    // Señal POSITIVA de que el ítem quedó en la mesa: "Sin ítems" en 0 también
+    // se cumplía con el panel en "Cargando orden..." (barrido R3, 2026-09-30).
+    await expect(page.getByTestId('table-item').first()).toBeVisible({ timeout: 15_000 })
 
     // El stock bajó EXACTAMENTE 1 al agregar el ítem (etapa b).
     const afterAdd = await readStock(page, INSUMO)
@@ -397,17 +399,13 @@ test.describe.serial('Fiado / Cartera', () => {
         await expect(page.getByTestId('customer-row').filter({ hasText: name })).toHaveCount(0)
       }
     }
+  })
 
-    // Borrado best-effort de la mesa creada (la orden a fiado quedó 'delivered'
-    // y la mesa libre, así que no debería estar bloqueada). No se hard-assertea:
-    // el borrado puede depender de residuos del estado compartido del lab.
-    await page.goto('/mesas')
-    await page.getByRole('button', { name: 'Configurar' }).click()
-    const del = page.locator('div')
-      .filter({ has: page.getByText(MESA, { exact: true }) })
-      .filter({ has: page.getByTitle('Eliminar mesa') })
-      .last()
-      .getByTitle('Eliminar mesa')
-    if (await del.count() > 0) await del.click()
+  // Corre AUNQUE un test previo falle (el de limpieza de arriba, no: es el
+  // último de un describe.serial). Libera la mesa y, como red de seguridad,
+  // desactiva los clientes de ESTA corrida por API — con aserción.
+  test.afterAll(async () => {
+    await liberarMesa(MESA)
+    await desactivarClientes([CLIENTE, CLIENTE_G])
   })
 })

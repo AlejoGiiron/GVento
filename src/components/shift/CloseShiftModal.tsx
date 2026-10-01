@@ -35,7 +35,7 @@ export function CloseShiftModal({ onClose }: CloseShiftModalProps) {
   // Deliveries sin entregar (pending/preparing/ready) de la sede. MISMO hook que
   // el badge del sidebar: un segundo conteo escrito acá sería una copia que se
   // desincroniza (R1).
-  const deliveriesAbiertos = useDeliveryCount()
+  const { count: deliveriesAbiertos, estado: deliveriesEstado } = useDeliveryCount()
   const [rawAmount, setRawAmount] = useState('')
   // Arqueo multi-método: declarado por método NO-efectivo (blanco = 0) + comentario.
   const [declaredOther, setDeclaredOther] = useState<Record<OtherMethod, string>>({
@@ -417,7 +417,23 @@ export function CloseShiftModal({ onClose }: CloseShiftModalProps) {
               Salchimelo son un flujo INTENCIONAL y por eso no se avisan (ver
               CLAUDE.md → "Comportamientos del negocio"). Acá el aviso lo pidió
               el cliente. */}
-          {deliveriesAbiertos > 0 && (
+          {/* Estado de la verificación SIEMPRE presente: "ninguno" es una
+              afirmación distinta de "todavía no sé" (cargando) y de "no pude
+              saber" (error). Un test —o un humano— puede esperar la respuesta. */}
+          <div data-testid="close-shift-delivery-check" data-estado={
+            deliveriesEstado === 'cargando' ? 'cargando'
+              : deliveriesEstado === 'error' ? 'error'
+              : (deliveriesAbiertos ?? 0) > 0 ? 'pendientes' : 'ninguno'
+          } />
+          {deliveriesEstado === 'error' && (
+            <div
+              data-testid="close-shift-delivery-error"
+              style={{ marginTop: 12, padding: '10px 14px', borderRadius: 10, background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', fontSize: 12.5, fontWeight: 600 }}
+            >
+              No se pudo verificar si quedan domicilios sin entregar.
+            </div>
+          )}
+          {(deliveriesAbiertos ?? 0) > 0 && (
             <div
               data-testid="close-shift-delivery-warning"
               style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, padding: '10px 14px', borderRadius: 10, background: '#fffbeb', border: '1px solid #fde68a' }}

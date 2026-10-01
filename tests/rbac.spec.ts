@@ -31,6 +31,11 @@ test.describe('RBAC — gating de permisos', () => {
     // Ítems que sí debe ver
     await expect(page.getByRole('link', { name: 'Ventas' })).toBeVisible()
     await expect(page.getByRole('link', { name: 'Mesas' })).toBeVisible()
+    // Señal POSITIVA de "permisos cargados": un enlace CON permiso que este rol
+    // SÍ tiene (Fiado, fiado.gestionar). Mientras el rol carga, can() da false y TODO enlace con
+    // permiso está ausente — las ausencias de abajo pasaban por la carga. Ventas y
+    // Mesas no sirven de señal: no tienen permiso, se ven siempre (R3, 2026-09-30).
+    await expect(page.getByRole('link', { name: 'Fiado' })).toBeVisible({ timeout: 15_000 })
     // Ítems ocultos por permiso
     for (const label of CASHIER_HIDDEN) {
       await expect(page.getByRole('link', { name: label })).toHaveCount(0)
@@ -39,6 +44,9 @@ test.describe('RBAC — gating de permisos', () => {
 
   test('cajero: grupos completos sin permiso desaparecen; los que tienen ≥1 item se ven', async ({ page }) => {
     await loginAsCashier(page)
+    // Primero lo POSITIVO (antes venía al final): con los permisos ya cargados,
+    // las ausencias de abajo significan algo.
+    await expect(page.getByTestId('group-header-clientes')).toBeVisible({ timeout: 15_000 })
     // Sin productos.editar ni compras.gestionar → "Catálogo e inventario" no aparece.
     await expect(page.getByTestId('group-header-catalogo')).toHaveCount(0)
     // Sin reportes.financiero ni config.acceder → "Análisis y admin" no aparece.

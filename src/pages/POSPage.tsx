@@ -453,7 +453,7 @@ function CartPanel({
   onHold,
   heldCount,
   onShowHeld,
-  productsWithExtras,
+  tieneExtras,
   onEditExtras,
 }: {
   subtotal: number
@@ -468,7 +468,7 @@ function CartPanel({
   onHold: () => void
   heldCount: number
   onShowHeld: () => void
-  productsWithExtras: Set<string>
+  tieneExtras: (productId: string) => boolean
   onEditExtras: (item: CartItem) => void
 }) {
   const items = useCartStore((s) => s.items)
@@ -586,7 +586,7 @@ function CartPanel({
               index={idx}
               noting={notingIdx === idx}
               onToggleNote={() => setNotingIdx(notingIdx === idx ? null : idx)}
-              hasExtras={productsWithExtras.has(item.product.id)}
+              hasExtras={tieneExtras(item.product.id)}
               onEditExtras={() => onEditExtras(item)}
             />
           ))
@@ -1575,7 +1575,7 @@ export function POSPage() {
   const [editingItem, setEditingItem] = useState<CartItem | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const { isOpen: isShiftOpen } = useCashShift()
-  const productsWithExtras = useProductsWithExtras()
+  const { isLoading: extrasLoading, requiereConfig, tieneExtras } = useProductsWithExtras()
 
   // Cobrar exige turno abierto: si no hay, abre el modal de apertura primero.
   const handleCheckout = () => {
@@ -1688,7 +1688,7 @@ export function POSPage() {
   // Agregar producto: si tiene extras asignados, abrir el modal de
   // configuración; si no, agregar directo (sin fricción).
   const handleAddProduct = (product: ProductWithCategory) => {
-    if (productsWithExtras.has(product.id)) setConfigProduct(product)
+    if (requiereConfig(product.id)) setConfigProduct(product)
     else add(product)
   }
 
@@ -1704,7 +1704,9 @@ export function POSPage() {
   const iva = Math.round(afterDiscount - afterDiscount / 1.19)
   const total = afterDiscount
 
-  if (catsLoading || prodsLoading) {
+  // El set de extras entra al gate: sin él, un producto con extras se agregaría
+  // sin abrir el modal (ver useProductsWithExtras).
+  if (catsLoading || prodsLoading || extrasLoading) {
     return (
       <div className="flex items-center justify-center h-full text-slate-400 text-sm">
         Cargando productos...
@@ -1865,7 +1867,7 @@ export function POSPage() {
         onHold={() => setShowHoldModal(true)}
         heldCount={heldOrders.length}
         onShowHeld={() => setShowHeldPanel(true)}
-        productsWithExtras={productsWithExtras}
+        tieneExtras={tieneExtras}
         onEditExtras={(item) => setEditingItem(item)}
       />
 
