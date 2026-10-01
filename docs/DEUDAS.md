@@ -186,8 +186,13 @@ cancele y libere la mesa. No "reintentar el segundo request".
 
 ### 🔴 `register_sale_payment` acepta cobros SIN turno abierto — medido; el cambio va sin aviso a clientes (2026-09-30)
 
-**🟡 RESUELTO EN RAMA `feat/cobro-turno` (2026-09-30) — pendiente de aplicar en prod, DESPUÉS de
-la fase 1 de D** (`supabase/cobro-turno.sql` parte del texto de las funciones con el protocolo).
+**✅ DESPLEGADO EL 2026-10-01** (lo reportó el usuario): release `main = 04273f3` a las ~11:45 y,
+justo después, `cobro-turno.sql` en prod. La verificación del encabezado dio 3 filas `t t t t f`.
+Pruebas en Café Aroma con el frontend nuevo: abono en efectivo sin turno → aviso amarillo y botón
+deshabilitado; abono por transferencia sin turno → OK. Con el frontend viejo, antes de que Vercel
+terminara, el efectivo sin turno dio el error genérico y no registró nada, como se había medido.
+Reversa preparada (fuera de git): `cobro-revertir.sql`. *(Historia del arreglo, abajo.)*
+`supabase/cobro-turno.sql` parte del texto de las funciones con el protocolo.
 Cobro: turno obligatorio con cualquier método (FOR SHARE, primer lock) + orden FOR UPDATE.
 Abonos (decidido 2026-09-30): **el EFECTIVO exige turno**; los otros métodos no. Motivo, medido
 en prod con `supabase/diag/abonos-efectivo-fuera-de-turno.sql`: Salchimelo, 2 abonos en efectivo
@@ -294,6 +299,28 @@ cobro: No hay un turno de caja abierto…". Queda la orden en `pending` / `paid`
 - **D, despliegue:** la RPC es nueva, así que el SQL va **ANTES** del frontend que la llama.
   Las RPC actuales no cambian (Mesas las sigue usando) y una pestaña vieja sigue funcionando.
 
+### UX del cierre: un abono de fiado en efectivo aparece como "Ingresos manuales" (anotado 2026-10-01)
+
+La cuenta está bien: el abono en efectivo crea un `cash_movement` de tipo `in` ("Abono de
+<cliente>"), y el arqueo lo suma como cualquier ingreso. Pero el modal de cierre lo rotula
+**"Ingresos manuales"**, y el dueño va a preguntar qué ingreso manual hizo. Visto en Café Aroma
+en la prueba del 2026-10-01.
+
+**Propuesta, sin construir:** una línea aparte, **"Abonos de fiado"**, separada de "Ingresos
+manuales".
+- **Cómo distinguirlos:** por el vínculo `debt_payments.cash_movement_id`, que es la definición
+  de "este ingreso es un abono". **NO por el texto** "Abono de…" del `reason` (R2: el texto es
+  una descripción, no una identidad).
+- **Lados a tocar en la misma pasada (R1):**
+  - `close_cash_shift`, que hoy devuelve un solo `movements_in`: sumar `abonos_fiado`;
+  - `CloseShiftModal` (vista previa);
+  - `ShiftDetailModal` (historial);
+  - `printer.ts`, que en el ticket imprime "Ingresos";
+  - `MovementsModal`.
+- **La fórmula del arqueo NO cambia** (contrato R1 #6): ingresos totales = manuales + abonos. Es
+  solo presentación, así que el invariante de `cierre-turno-servidor.spec.ts` no se toca. Sí
+  hay que agregar un test que separe las dos líneas.
+
 ### Precio del POS: ¿se valida `unit_price` contra `products.price`? — NO por ahora (B2, 2026-10-01)
 
 `register_pos_sale` va a validar el TOTAL contra las líneas (B1), pero el `unit_price` de cada
@@ -317,6 +344,23 @@ Salió del punto C del diseño de `register_pos_sale`, que pedía marcar el vale
 la misma transacción; eso no se puede hacer porque no hay qué marcar. Si hace falta, es una
 decisión de producto (vales con código y un solo uso), no un arreglo técnico. **Se habla con el
 cliente antes.**
+
+**Quién puede aplicar un descuento o un vale (código al 2026-10-01, develop `806d8a0`):**
+- **POS:** solo con `pos.descuento`. La sección de descuento está dentro de
+  `{can('pos.descuento') && (` en `POSPage.tsx` (bloque comentado "Discount — requiere permiso
+  pos.descuento"). Lo tienen owner (`*`), admin y cajero; el mozo no (`SYSTEM_ROLES` en
+  `src/lib/permissions.ts`).
+- **Mesas:** **sin permiso.** El checkout de mesa muestra la sección "Descuento / vale — aplica
+  antes del pago…" de `TablesPage.tsx` sin ningún `can(...)`, y la aplica con `applyOrderDiscount`
+  (UPDATE directo a `orders`). Cualquiera que llegue a cobrar una mesa puede descontar.
+- **Base:** **nada lo controla.** Ninguna función ni policy consulta `pos.descuento`
+  (`select proname from pg_proc where prosrc ilike '%pos.descuento%'` devuelve solo
+  `seed_system_roles`, que lo CONCEDE). Las policies "orders: staff crea" y "orders: staff
+  actualiza" aceptan `discount_*` de cualquier miembro del staff.
+  ⇒ `pos.descuento` es un control **solo de pantalla y solo en el POS**: misma clase que
+  "concedible pero inerte" (más abajo), con la diferencia de que acá sí gatea algo, pero en un
+  único lugar. La salida es la misma que para el total (B1 de `register_pos_sale`): validarlo en
+  el servidor. Para Mesas, con el cobro de mesa en una RPC (`close_table_sale`).
 
 ### 🔴 Re-aplicar una migración vieja revierte en silencio las funciones que redefinió una posterior (medido 2026-09-30)
 
@@ -566,7 +610,12 @@ select tablename, policyname, cmd, roles from pg_policies
 
 ### 🔴 Registrar un movimiento y cerrar turno EN SEGUIDA puede persistir un esperado sin ese movimiento (hallado 2026-09-07)
 
-**🟡 RESUELTO EN RAMA `feat/close-cash-shift` (2026-09-30) — pendiente de aplicar en prod.**
+**✅ FASE 1 DESPLEGADA EL 2026-10-01** (lo reportó el usuario): `close-cash-shift.sql` de `3339978`
+a las 10:40, con las 4 verificaciones OK; frontend que cierra por `close_cash_shift` a las ~11:45.
+Cierre de prueba en Café Aroma con el frontend nuevo: congelado = recalculado (63.500).
+**FASE 2 (`close-cash-shift-revoke.sql`): queda para el 2026-10-02**, después de correr
+`fase2-precheck.sql` (fuera de git), que distingue por qué camino cerró cada turno.
+*(Historia del arreglo, abajo.)*
 `supabase/close-cash-shift.sql`: cierre en el servidor (`close_cash_shift`), UPDATE revocado a
 authenticated y anon sobre `cash_shifts` (una pestaña vieja recibe 42501: toast "Error al cerrar
 el turno", el turno sigue abierto — medido), trigger que rechaza movimientos en turnos cerrados, y
