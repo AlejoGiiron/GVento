@@ -9,10 +9,23 @@
 --      congela el arqueo. El navegador solo manda lo DECLARADO.
 --   2. (FASE 2, archivo aparte: close-cash-shift-revoke.sql) authenticated y
 --      anon pierden el UPDATE sobre cash_shifts.
---   3. Trigger en cash_movements (INSERT/UPDATE): rechaza movimientos en un
---      turno cerrado. NO en DELETE: los seeds purgan movimientos de turnos
---      cerrados (lab-seed, demo-seed*), y la app nunca borra ni edita
---      movimientos (grep de from('cash_movements') en src/: solo insert).
+--   3. Trigger en cash_movements (INSERT, UPDATE y DELETE): un turno CERRADO
+--      no gana, no pierde ni cambia movimientos. Mira el turno NUEVO (insert,
+--      update) y el VIEJO (update, delete): mover un movimiento de un turno
+--      cerrado a uno abierto también lo saca de un arqueo congelado.
+--      DELETE agregado el 2026-10-01: medido, un cajero borraba por la API un
+--      egreso de un turno ya cerrado (la policy de cash_movements es ALL).
+--      La app nunca borra ni edita movimientos (origin/main: solo insert), así
+--      que una pestaña vieja no lo nota.
+--      ⚠️ COSTO: los seeds que purgan su sede (lab-seed, demo-seed,
+--      demo-seed-cafeteria, landing-seed) ya NO se pueden re-correr sobre una
+--      base donde esa sede tenga turnos cerrados: fallan al borrar sus
+--      movimientos. Los cuatro van en begin/commit, así que fallan enteros
+--      (rollback), sin dejar nada a medias. Localmente no pasa: preparar-local
+--      resetea antes de sembrar. Para un reset DELIBERADO en el SQL Editor,
+--      dentro de la transacción del reset:
+--        set local session_replication_role = replica;   -- solo superusuario
+--      Eso apaga los triggers solo en esa transacción; la app no puede hacerlo.
 --   4. register_debt_payment, register_debt_payments_batch y register_sale_void
 --      toman el turno con FOR SHARE (ver el protocolo).
 --
@@ -96,6 +109,8 @@
 -- NO DEDUZCAS EL ESTADO DE ESTE COMENTARIO — correlo:
 --   select proname from pg_proc where proname = 'close_cash_shift';           -- 1 fila
 --   select tgname from pg_trigger where tgname = 'trg_cash_movements_turno_abierto';  -- 1 fila
+--   select pg_get_triggerdef(oid) ilike '% delete %' from pg_trigger      -- t (Postgres lo
+--    where tgname = 'trg_cash_movements_turno_abierto';   -- escribe INSERT OR DELETE OR UPDATE)
 --   select count(*) from pg_proc where proname in ('register_debt_payment',
 --     'register_debt_payments_batch','register_sale_void')
 --     and prosrc ilike '%for share%';                                         -- 3
@@ -134,16 +149,39 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  v_turno uuid;
 begin
-  -- PROTOCOLO: el turno, primero y con FOR SHARE.
-  perform 1
-     from public.cash_shifts
-    where id = new.shift_id
-      and closed_at is null
-      for share;
-  if not found then
-    raise exception 'El turno de caja ya está cerrado: no se pueden registrar movimientos en él'
-      using errcode = 'P0001', hint = 'Recargá la página: el turno activo cambió.';
+  -- Los turnos cuyas cifras toca esta fila: el nuevo (insert, update) y el
+  -- viejo (update, delete). PROTOCOLO: cada uno con FOR SHARE, antes de que la
+  -- fila cambie; si son dos, en orden de id, para que dos escritores nunca los
+  -- tomen cruzados.
+  for v_turno in
+    select distinct t
+      from unnest(array[
+             case when tg_op in ('UPDATE', 'DELETE') then old.shift_id end,
+             case when tg_op in ('INSERT', 'UPDATE') then new.shift_id end]) as t
+     where t is not null
+     order by t
+  loop
+    perform 1
+       from public.cash_shifts
+      where id = v_turno
+        and closed_at is null
+        for share;
+    if not found then
+      if tg_op = 'INSERT' then
+        raise exception 'El turno de caja ya está cerrado: no se pueden registrar movimientos en él'
+          using errcode = 'P0001', hint = 'Recargá la página: el turno activo cambió.';
+      else
+        raise exception 'El turno de caja ya está cerrado: sus movimientos no se pueden borrar ni cambiar'
+          using errcode = 'P0001', hint = 'El arqueo de ese turno ya se congeló.';
+      end if;
+    end if;
+  end loop;
+
+  if tg_op = 'DELETE' then
+    return old;
   end if;
   return new;
 end;
@@ -153,7 +191,7 @@ revoke execute on function public.enforce_cash_movement_turno_abierto() from pub
 
 drop trigger if exists trg_cash_movements_turno_abierto on public.cash_movements;
 create trigger trg_cash_movements_turno_abierto
-  before insert or update on public.cash_movements
+  before insert or update or delete on public.cash_movements
   for each row
   execute function public.enforce_cash_movement_turno_abierto();
 

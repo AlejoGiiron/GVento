@@ -183,6 +183,51 @@ test.describe.serial('Cierre de turno en el servidor', () => {
     expect(psql(`select count(*) from public.cash_movements where shift_id = '${turno}';`)).toBe('0')
   })
 
+  test('un movimiento de un turno CERRADO no se puede borrar ni mover a otro turno', async () => {
+    const turno = await turnoNuevo()
+    const mov = async (amount: number) => (await owner.from('cash_movements').insert({
+      shift_id: turno, restaurant_id: SEDE, type: 'out', amount, reason: 'E2E borrar', created_by: OWNER_ID,
+    }).select('id').single()).data!.id as string
+    const [queda, sobra] = [await mov(4000), await mov(1000)]
+
+    // Control positivo: con el turno ABIERTO, borrar sí se puede. Si esto
+    // fallara, el rechazo de abajo no probaría nada sobre el turno cerrado.
+    const abierto = await cajero.from('cash_movements').delete().eq('id', sobra)
+    expect(abierto.error, abierto.error?.message).toBeNull()
+    expect(psql(`select count(*) from public.cash_movements where id = '${sobra}';`)).toBe('0')
+
+    expect((await owner.rpc('close_cash_shift', { p_shift_id: turno, p_declarado: { cash: 0 } })).error).toBeNull()
+
+    const borrar = await cajero.from('cash_movements').delete().eq('id', queda)
+    expect(borrar.error?.message ?? '', 'se borró un movimiento de un turno cerrado').toMatch(/turno de caja ya está cerrado: sus movimientos no se pueden borrar/)
+
+    // Mover el movimiento a un turno ABIERTO también lo saca del arqueo congelado.
+    const otro = await turnoNuevo()
+    const mover = await owner.from('cash_movements').update({ shift_id: otro }).eq('id', queda)
+    expect(mover.error?.message ?? '', 'se movió un movimiento fuera de un turno cerrado').toMatch(/turno de caja ya está cerrado/)
+
+    expect(psql(`select shift_id from public.cash_movements where id = '${queda}';`)).toBe(turno)
+    const inv = invariante(turno)
+    expect(inv.congelado).toBe(inv.recalculado)
+  })
+
+  test('CARRERA borrar movimiento vs cierre: el DELETE espera y se rechaza', async () => {
+    const turno = await turnoNuevo()
+    const id = (await owner.from('cash_movements').insert({
+      shift_id: turno, restaurant_id: SEDE, type: 'out', amount: 6000, reason: 'E2E carrera borrar', created_by: OWNER_ID,
+    }).select('id').single()).data!.id as string
+    const { fin } = await cierreLento(turno)
+    const t0 = Date.now()
+    const { error } = await cajero.from('cash_movements').delete().eq('id', id)
+    const espero = Date.now() - t0
+    await fin
+    expect(espero, 'el DELETE no esperó al cierre (no tomó el turno)').toBeGreaterThan(1000)
+    expect(error?.message ?? '', 'se borró un movimiento de un turno que se estaba congelando').toMatch(/turno de caja ya está cerrado/)
+    expect(psql(`select count(*) from public.cash_movements where id = '${id}';`)).toBe('1')
+    const inv = invariante(turno)
+    expect(inv.congelado).toBe(inv.recalculado)
+  })
+
   test('CARRERA abono en efectivo vs cierre: el abono ESPERA y no cae en el turno congelado', async () => {
     const turno = await turnoNuevo()
     const orden = await ordenFiado(8000)
