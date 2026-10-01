@@ -186,6 +186,28 @@ cancele y libere la mesa. No "reintentar el segundo request".
 
 ### 🔴 `register_sale_payment` acepta cobros SIN turno abierto — medido; el cambio va sin aviso a clientes (2026-09-30)
 
+**🟡 RESUELTO EN RAMA `feat/cobro-turno` (2026-09-30) — pendiente de aplicar en prod, DESPUÉS de
+la fase 1 de D** (`supabase/cobro-turno.sql` parte del texto de las funciones con el protocolo).
+Cobro: turno obligatorio con cualquier método (FOR SHARE, primer lock) + orden FOR UPDATE.
+Abonos (decidido 2026-09-30): **el EFECTIVO exige turno**; los otros métodos no. Motivo, medido
+en prod con `supabase/diag/abonos-efectivo-fuera-de-turno.sql`: Salchimelo, 2 abonos en efectivo
+por $48.000 el 31/08 (00:29 Bogotá) fuera de todo arqueo; G-10 76 abonos y 0 fuera; Café Aroma 0.
+El abono simple ahora bloquea la orden (el hallazgo lateral de D). La UI de abono avisa ANTES de
+confirmar y ofrece abrir el turno ahí (`AvisoEfectivoRequiereTurno`).
+`tests/cobro-concurrente.spec.ts` (10) y `tests/abono-efectivo-turno.spec.ts` (3). El doble cobro
+ahora se fuerza con una sesión retenida (`tests/helpers/db-local.ts`), ya no por azar de red:
+el mutante sin `for update` da 2 pagos. Mutantes: v1 de cada RPC, sin-lock de cobro y de abono,
+hook de la UI en identidad y `mensajeDeError` viejo → cada uno rojo en su test, por su razón.
+
+**Lo que vio una pestaña vieja (medido en Docker con los modales anteriores):** abono en efectivo
+sin turno → toast **"Error al registrar el abono"** (en lote: "Error al registrar el pago"), el
+modal queda abierto, no se registra nada. Genérico porque el `onError` hacía
+`err instanceof Error ? … : 'genérico'` y `PostgrestError` no es `instanceof Error`: la misma
+clase estaba en 22 lugares de `src/` (Mesas mostraba "Error desconocido" al cobrar). Barrida con
+`src/lib/errorMessage.ts`. Con el código nuevo se ve el mensaje del servidor.
+
+**Antes (el registro del hallazgo):**
+
 - **El defecto** (`tests/cobro-concurrente.spec.ts`, rama `diag/verificaciones-pre-m1`): con
   la sede sin turno la RPC acepta el cobro (20/20) y el pago no cae en ninguna ventana de
   turno, o sea en ningún arqueo.
@@ -197,6 +219,138 @@ cancele y libere la mesa. No "reintentar el segundo request".
 - **Doble cobro:** el mecanismo es real (check-then-act sin lock bajo READ COMMITTED) pero
   dio 0/160 duplicados por red. Lo cierra el `for update` del mismo cambio; el spec NO lo
   caza y está marcado así.
+
+### 🔴 Tablas que solo deberían escribirse por RPC y aceptan escritura DIRECTA — inventario (medido 2026-10-01)
+
+**Decidido (2026-10-01):** el endurecimiento va **después de M1**, como cambio propio. Todavía no
+está construido. **Excepción, ya hecha:** el DELETE (y el UPDATE desde un turno cerrado) de
+`cash_movements` entró en la **fase 1 de D** (commit `3339978`).
+**El inventario encontró el handler del 3.5 del plan:** `handleRemoveItem` en `TablesPage` borra
+la línea de mesa con `removeOrderItem` (DELETE directo) **sin devolver el stock** que
+`add_order_items_with_extras` descontó al agregarla. Es la misma deuda que el TODO de ese handler,
+y la salida es la de la fila de `order_items`: una RPC que devuelva el stock.
+
+**Una pestaña vieja tiene que seguir funcionando.** Por eso los caminos legítimos se midieron
+contra **`origin/main`** (`95bcf61`, lo desplegado), no contra develop. Para re-medir:
+`node scripts/escrituras-directas.mjs origin/main`, que busca cada `.from('<tabla>')` seguido de
+`.insert/.update/.delete/.upsert`, más un control de que no haya `.from(<variable>)`. Lo
+escriben en la base: `pg_proc.prosrc` con `insert into|update|delete from <tabla>`. Todos son
+SECURITY DEFINER. Las policies y grants salen de `pg_policies` y
+`information_schema.role_table_grants`.
+
+| tabla | escritura legítima (base) | escritura directa que usa el frontend desplegado | policies de escritura hoy | propuesta |
+|---|---|---|---|---|
+| `payments` | `register_sale_payment` (I), `register_sale_void` (D) | **ninguna** (`createPayment` sin llamadores) | INSERT cajero/admin · DELETE admin | **quitar las 2 y revocar I/U/D.** Medido: el cajero insertó directo un pago en efectivo SIN turno (rollback). |
+| `debt_payments` | `register_debt_payment(_batch)` (I) | **ninguna** | INSERT con `fiado.gestionar` | **quitar y revocar.** Es la forma de los $48.000 de Salchimelo. Antes: pasar el fixture de `anular-venta.spec` a la RPC. |
+| `order_items` | `add_order_items_with_extras` (I, descuenta stock) | UPDATE `sent_to_kitchen` (Mesas) · DELETE de un ítem (Mesas, **sin devolver stock**: TODO conocido en `handleRemoveItem`) | INSERT · UPDATE · DELETE "staff" | **INSERT: quitar** (`addOrderItems` sin llamadores; hoy se puede dar de alta un ítem sin descontar stock). **UPDATE: solo la columna** (`grant update (sent_to_kitchen)`); hoy se puede cambiar `qty` o `unit_price` de un ítem ya descontado. **DELETE: dos fases**, primero una RPC que devuelva el stock (el TODO) y, cuando ya no haya pestañas viejas, revocar. |
+| `order_item_extras` | `add_order_items_with_extras` (I) | **ninguna** | INSERT "staff" | **quitar.** |
+| `cash_movements` | abonos (I) | INSERT (movimientos manuales, legítimo) | **ALL** por sede | 🔴 Medido: el cajero borraba un egreso de 5.000 de un turno CERRADO (el trigger era `BEFORE INSERT OR UPDATE`), y un UPDATE podía mover un movimiento fuera de un turno cerrado. **✅ Cerrado en la fase 1 de D** (`3339978`): el trigger cubre DELETE y mira el turno viejo. **Queda para después de M1:** quitar UPDATE y DELETE también en turnos abiertos (la app nunca los usa). |
+| `purchase_invoices` / `_items` | `register_purchase` | **ninguna** | INSERT con permiso / ninguna | **quitar el INSERT de `purchase_invoices`** (una factura sin ítems ni stock). |
+| `orders` | abonos y anulación (U) | INSERT (POS y Mesas) y 6 UPDATE (estado, total, descuento, número, fiado, domiciliario) | INSERT · UPDATE "staff" · DELETE admin | **no se puede cerrar todavía**: es el camino vivo del POS y de Mesas. **DELETE admin: quitar** (sin uso; cascada a `debt_payments`). El resto se achica con `register_pos_sale` (ver la entrada de abajo) y después con el cobro de mesa. |
+| `products` | stock por `add_order_items_with_extras`, `adjust_stock`, `register_purchase`, anulación | `stock_qty` = 0/null al crear o al apagar el seguimiento (modal de producto) | INSERT · UPDATE · DELETE admin | dejar. `updateProductStock` no tiene llamadores, pero el modal escribe `stock_qty` y una restricción por columna lo rompería. |
+| `stock_movements`, `store_sequences`, `purchase_invoice_items` | solo RPC | — | **ninguna** ✅ | ya está bien: es el modelo a copiar. |
+| `cash_shifts` | `close_cash_shift` (U) | INSERT (abrir turno) | INSERT | UPDATE ya revocado en la fase 2 de D. |
+
+`anon` tiene grants I/U/D en todas (deuda aparte, más abajo); lo frena la RLS, no el grant.
+
+### 🔴 POS: si el cobro falla DESPUÉS de crear la orden, queda una orden huérfana con stock descontado (medido 2026-09-30)
+
+`POSPage` crea la orden, agrega ítems (descuenta stock) y **después** llama a
+`register_sale_payment`. Si el pago falla, la orden queda. **Medido en Docker:** checkout abierto
+con turno, otra terminal cierra el turno y el cajero confirma. Toast: "Error al procesar el
+cobro: No hay un turno de caja abierto…". Queda la orden en `pending` / `paid` / sin número /
+1 ítem / 0 pagos. La ve Cocina, porque filtra `pending`.
+- **No es nueva:** cualquier falla del pago la deja así (por ejemplo, Σ ≠ total). El cambio (1)
+  le suma un disparador: cerrar el turno en otra terminal con un checkout abierto. Antes, ese
+  mismo cobro se aceptaba fuera de todo arqueo, en silencio.
+- Con UNA terminal por sede es raro. Con M1 (varios celulares) deja de serlo.
+- **Salida:** que crear la orden y cobrar sea UNA transacción. Va con la extracción de
+  `useSaleCheckout`, antes de M1, y no en (1).
+
+**Diseño APROBADO (2026-10-01): `register_pos_sale(p_sale_id, p_order, p_items, p_payments)`.**
+- Hace todo en UNA transacción, en este orden: permiso → turno (`for share`) → orden con
+  `p_sale_id` (idempotente: `on conflict (id) do nothing`) → ítems por
+  `add_order_items_with_extras` → pago por `register_sale_payment` → número por
+  `next_order_number`, al final.
+- **A:** el turno es obligatorio también para fiado y venta gratis.
+- **B1:** el servidor recalcula el total y RECHAZA si no coincide:
+  `Σ ítems + Σ extras − discount_amount` (cualquier descuento, no solo el vale). **Antes de
+  construirlo:** `supabase/diag/pos-total-formula.sql` en prod, rama `diag/b1-total-pos`. Si
+  algo no cuadra, hay una regla de precio que la fórmula no conoce.
+- **C, todo lo que escribe hoy la secuencia de cobro** (develop, `handleConfirm` de
+  `CheckoutModal`), y todo queda dentro de la RPC:
+  - `orders` INSERT: tipo, estado, total, sede, autor, `discount_*` y, si es fiado,
+    `payment_status`, `customer_id` y `customer_name`;
+  - ítems, extras, stock y `stock_movements` (`add_order_items_with_extras`, con la nota de
+    cada ítem);
+  - `payments` (`register_sale_payment`);
+  - `store_sequences` y `orders.order_number` (`assignOrderNumber`; desaparece
+    `retryOrderNumber`).
+  - **Afuera, a propósito:** el alta rápida de cliente (`CustomerFormModal`). Es previa a
+    confirmar y no mueve plata.
+  - **No existen:** el "uso del vale", datos de domicilio o notas de la orden en el checkout.
+    Un vale es solo `discount_kind = 'vale'` más el monto en la orden: **no tiene identidad,
+    así que nada impide reusarlo.** Ver la entrada de abajo.
+- **D, despliegue:** la RPC es nueva, así que el SQL va **ANTES** del frontend que la llama.
+  Las RPC actuales no cambian (Mesas las sigue usando) y una pestaña vieja sigue funcionando.
+
+### Precio del POS: ¿se valida `unit_price` contra `products.price`? — NO por ahora (B2, 2026-10-01)
+
+`register_pos_sale` va a validar el TOTAL contra las líneas (B1), pero el `unit_price` de cada
+línea lo sigue mandando el cliente sin control. Antes de decidir si se compara contra
+`products.price`, hay dos preguntas abiertas:
+1. **¿El POS permite editar un precio a mano?** Si lo permite, comparar contra `products.price`
+   rechazaría ventas legítimas. *Lo que dice el código (develop, 2026-10-01):* `cartStore` no
+   tiene ninguna acción que cambie un precio (solo cantidad, nota, extras, descuento y órdenes
+   en espera); `unit_price` sale de `item.product.price`. Falta confirmar con el cliente si lo
+   necesitan.
+2. **¿Qué pasa con un carrito abierto si el dueño cambia un precio?** El carrito guarda una
+   foto del producto al agregarlo, y las órdenes EN ESPERA (`holdCurrentOrder`) la conservan
+   todo lo que duren. Con la validación, esa venta se rechazaría al cobrar; sin ella, se cobra
+   el precio viejo.
+
+### Un vale de descuento no tiene identidad: nada impide reusarlo (anotado 2026-10-01)
+
+El "vale" (ruletazo) es `orders.discount_kind = 'vale'` + `discount_amount` + `discount_reason`.
+No hay tabla ni código de vale, ni nada que lo marque usado: el cajero lo aplica a mano.
+Salió del punto C del diseño de `register_pos_sale`, que pedía marcar el vale como usado en
+la misma transacción; eso no se puede hacer porque no hay qué marcar. Si hace falta, es una
+decisión de producto (vales con código y un solo uso), no un arreglo técnico. **Se habla con el
+cliente antes.**
+
+### 🔴 Re-aplicar una migración vieja revierte en silencio las funciones que redefinió una posterior (medido 2026-09-30)
+
+Re-aplicar en prod una migración que define una función ya redefinida por otra posterior
+devuelve esa función a su versión vieja. Da `exit 0`, sin ningún aviso. Medido con
+`close-cash-shift.sql` sobre `cobro-turno.sql`: deja `exige_turno=false` en los dos abonos.
+Pasa porque no hay ledger: nada en la base sabe qué versión es la vigente.
+
+**Cerrado SOLO para `close-cash-shift.sql`:** su paso 0 aborta si los abonos ya tienen el
+marcador de cobro-turno (`tests/guard-reaplicar.spec.ts`, con mutante). Se pudo hacer porque
+ese archivo todavía no estaba aplicado en prod. **A los ya aplicados no se les agrega guard (R5).**
+
+**Inventario (2026-09-30, sobre el ORDEN de `preparar-local`):** función → archivo que gana →
+archivos que la REVIERTEN si se re-aplican.
+
+| función | gana | revierten |
+|---|---|---|
+| `get_my_restaurant_id`, `get_my_role` | `profiles-is-active-enforced.sql` | `schema.sql` |
+| `get_my_organization_id`, `has_permission` | `profiles-is-active-enforced.sql` | `multi-tenant-rbac.sql` |
+| `handle_new_user` | `profiles-organization-invariant.sql` | `schema.sql` |
+| `enforce_profile_organization` | `fix-enforce-profile-organization-definer.sql` | `profiles-organization-invariant.sql` |
+| `add_order_items_with_extras` | `order-items-stock-recipes.sql` | `order-extras-rpc.sql` |
+| `register_purchase` | `compra-no-toca-caja.sql` | `compras-proveedores.sql` |
+| `register_sale_payment` | `cobro-turno.sql` | `register-sale-payment.sql` |
+| `register_sale_void` | `close-cash-shift.sql` | `register-sale-void.sql` |
+| `register_debt_payment` | `cobro-turno.sql` | `fiado-clientes.sql` (y `close-cash-shift.sql`, con guard) |
+| `register_debt_payments_batch` | `cobro-turno.sql` | `fiado-abono-lote.sql` (y `close-cash-shift.sql`, con guard) |
+
+Las 5 primeras filas son de **seguridad**: re-aplicar `schema.sql` o `multi-tenant-rbac.sql`
+desactiva el bloqueo de usuarios inactivos (`profiles-is-active-enforced.sql`).
+Para regenerar la tabla: el guard GANA de `scripts/capturas/preparar-local.mjs` ya calcula
+quién define qué; los perdedores son los archivos de cada entrada que no son el ganador.
+**Salida de fondo:** el ledger `schema_migrations` (CLAUDE.md → *"El estado de aplicación…"*).
+Hasta entonces: **antes de re-aplicar un archivo en prod, buscarlo en esta tabla.**
 
 ### ✅ La base local es un PROXY de producción — deriva 0 alcanzada el 2026-09-30 (5.6 se reabre)
 
@@ -301,6 +455,7 @@ Arreglo: `supabase/product-images-policies.sql` (rama `fix/product-images-carpet
 alcance que logos (carpeta = sede activa + `productos.editar`). Antes de aplicarlo en prod:
 `supabase/diag/storage-escrituras-cruzadas.sql` (cubre los dos buckets; detecta plantados y
 reemplazos porque `storage.objects.owner` pasa a ser el último que escribió — medido).
+**Corrida en prod el 2026-09-30, después de aplicar logos: 0 filas** ⇒ el hueco no se usó.
 El QR de Nequi, en cambio, se lee de `config.nequi_qr_url` (guardada solo tras una subida
 propia exitosa) y solo lo muestra la vista previa de Configuración: un archivo plantado no
 podía volverse "su QR de pago".
@@ -419,11 +574,15 @@ el PROTOCOLO DE LOCKS en los dos abonos y la anulación. `tests/cierre-turno-ser
 el escenario medido + una carrera forzada por escritor + todos a la vez ×10 sin 40P01; mutantes
 verificados (escritores sin FOR SHARE → rojo; cliente viejo → congela 100.000 en vez de 89.423).
 **Falta:** el cobro (`register_sale_payment`) todavía no toma el turno → cambio (1).
+→ Hecho en rama `feat/cobro-turno` (2026-09-30); ver la entrada de `register_sale_payment` arriba.
 
 **Hallazgo lateral (2026-09-30, leyendo el código para D):** `register_debt_payment` (abono de UNA
 venta) lee el saldo SIN bloquear la orden: dos abonos simultáneos a la misma venta pueden pasarse
 del saldo. El lote SÍ bloquea las órdenes (su paso 3 dice exactamente esto). Misma clase (R3); con
 varios celulares cobrando fiados se vuelve probable. No se tocó en D (no es del turno).
+→ Arreglado con el cambio (1) en `feat/cobro-turno`: test de dos abonos simultáneos que juntos
+se pasan del saldo (5000 + 5000 sobre 8000) → el segundo espera y se rechaza; mutante sin el
+lock → abonado 10000.
 
 **✅ MEDIDO el 2026-09-21** (contra LAB en la nube, antes de pasar las pruebas a Docker; esperado leído del PATCH a `cash_shifts`): con red local y sin pausa, 3/3 correcto; con el GET de `cash_movements` demorado 2 s y sin pausa, **3/3 CARRERA** (se persistió la apertura sin el egreso); a ritmo humano con la misma demora, 3/3 correcto; y con **dos dispositivos** (B registra un egreso con el modal de cierre de A abierto) **siempre carrera**: `cash_movements` no tiene realtime ni polling, así que el modal de A nunca se entera. Con varios celulares es el caso normal, no el raro. Salida: el Paso D (`close_cash_shift`, esperado calculado en el servidor).
 

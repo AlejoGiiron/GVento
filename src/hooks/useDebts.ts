@@ -7,6 +7,7 @@ import {
 } from '@/lib/supabase-helpers'
 import { useAuth } from '@/hooks/useAuth'
 import type { SentryArea } from '@/lib/sentry'
+import { mensajeDeError } from '@/lib/errorMessage'
 
 export type { DebtPaymentRow }
 
@@ -112,6 +113,9 @@ export function useRegisterDebtPayment() {
       if (paymentMethod === 'cash' && !result.shift_open) {
         // Inequívoco: el abono SÍ quedó; lo único que NO pasó es el ingreso de
         // caja (no hay turno al cual atribuirlo).
+        // Con supabase/cobro-turno.sql el servidor RECHAZA el efectivo sin turno,
+        // así que esta rama solo se alcanza contra una base sin esa migración.
+        // Se queda: si alguna vez vuelve a pasar, que se vea.
         toast(
           'Abono registrado. El efectivo no entró a caja (sin turno abierto).',
           { icon: '⚠️', duration: 7000 },
@@ -124,7 +128,7 @@ export function useRegisterDebtPayment() {
         toast.success(`Abono registrado · saldo: ${saldoCOP}${extra}`)
       }
     },
-    onError: (err) => toast.error(err instanceof Error ? err.message : 'Error al registrar el abono'),
+    onError: (err) => toast.error(mensajeDeError(err, 'Error al registrar el abono')),
   })
 
   return { registerDebtPayment: mutation.mutateAsync, isRegistering: mutation.isPending }
@@ -164,7 +168,8 @@ export function useRegisterDebtPaymentsBatch() {
       if (paymentMethod === 'cash' && !result.shift_open) {
         // Inequívoco, igual que en el abono individual: el lote SÍ quedó; lo
         // único que no pasó es el ingreso de caja (no hay turno al cual
-        // atribuirlo).
+        // atribuirlo). Defensiva, como la del abono individual: con
+        // cobro-turno.sql el servidor rechaza el efectivo sin turno.
         toast(
           `Pago repartido en ${tocadas} venta${tocadas === 1 ? '' : 's'}. ` +
           'El efectivo no entró a caja (sin turno abierto).',
@@ -180,7 +185,7 @@ export function useRegisterDebtPaymentsBatch() {
       }
     },
     onError: (err) =>
-      toast.error(err instanceof Error ? err.message : 'Error al registrar el pago'),
+      toast.error(mensajeDeError(err, 'Error al registrar el pago')),
   })
 
   return { registerBatch: mutation.mutateAsync, isRegistering: mutation.isPending }

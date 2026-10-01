@@ -6,6 +6,7 @@ import {
   type SalesHistoryRow, type SaleDetailRow, type SaleVoidResult,
 } from '@/lib/supabase-helpers'
 import type { Enums } from '@/types/database.types'
+import { mensajeDeError } from '@/lib/errorMessage'
 
 export type { SalesHistoryRow, SaleDetailRow }
 
@@ -164,7 +165,7 @@ export function useVoidSale() {
       toast.success(`Venta anulada · ${parts.join(' · ')}`)
     },
     onError: (err) => {
-      const msg = err instanceof Error ? err.message : (err as { message?: string })?.message ?? 'Error desconocido'
+      const msg = mensajeDeError(err, 'Error desconocido')
       toast.error(`No se pudo anular: ${msg}`)
     },
   })

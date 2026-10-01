@@ -290,6 +290,15 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    Y **todo camino que cambie las cifras de un turno sigue el PROTOCOLO DE LOCKS** del encabezado
    de ese `.sql`: su primer lock o escritura es la fila del turno (`for share`; el cierre
    `for update`). Un escritor nuevo que no lo siga reabre la carrera en silencio.
+   Si además toca una ORDEN, la bloquea **después** del turno (`for update`), nunca antes:
+   orden→turno contra otro escritor turno→orden, con un cierre esperando en la cola del turno,
+   arma un ciclo de espera (40P01) — razonado, NO medido. Desde `supabase/cobro-turno.sql`
+   el cobro también lo cumple, y lo vigila `tests/cobro-concurrente.spec.ts`. Para enumerar
+   los escritores, buscar por las TABLAS que lee la fórmula (`payments`, `cash_movements`,
+   `cash_shifts`, `debt_payments`) y no por `cash_shifts` ni por nombres de función: el cobro
+   viejo escribía `payments` sin nombrar el turno, así que un grep por `cash_shifts` no lo
+   encontraba (R2, caso #15). El comando está en DEUDAS → *"`payments` y `debt_payments`
+   aceptan escritura DIRECTA"*.
 
 → **Evidencia:** [`docs/BITACORA.md`](docs/BITACORA.md) → *"FASE 1 — estado de suscripción"*
 (el aviso a G-Centro) · el hallazgo del onboarding está en el inventario de arriba · el caso de
@@ -386,6 +395,13 @@ y [`docs/BITACORA.md`](docs/BITACORA.md) → *"Trampas de TERMINAL"*.
 ### R5 · MIGRACIÓN APLICADA = INMUTABLE
 
 Todo cambio de esquema va en un archivo **nuevo**. Jamás se edita una migración ya ejecutada.
+**Y en prod nunca se RE-APLICA un archivo ya aplicado: si hace falta, se escribe uno nuevo.**
+Re-aplicar un archivo viejo devuelve a su versión vieja toda función que una migración
+posterior redefinió, con `exit 0` y sin ningún aviso. Medido el 2026-09-30: 12 funciones
+expuestas, 5 de seguridad (el bloqueo de usuarios inactivos). La tabla está en
+[`docs/DEUDAS.md`](docs/DEUDAS.md) → *"Re-aplicar una migración vieja revierte en silencio"*.
+Solo `close-cash-shift.sql` tiene guard, porque se escribió antes de aplicarse; la protección
+mecánica de la clase es el ledger (5.6).
 
 **Modo de fallo:** el archivo y la BD divergen **en silencio**; el repo describe un esquema
 que no existe y el próximo que lo lea razona sobre ficción.
