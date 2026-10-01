@@ -81,7 +81,7 @@ Fuera de este plan, a propósito: DIAN, app nativa e ideas de producto (margen, 
 | 3.2 | **Devoluciones** | Pendiente. La anulación ya rechaza ventas de turnos cerrados con "para corregirla se necesita una devolución", así que la promesa sigue en pie. Medio. |
 | 3.3 | **Abonos invisibles en el tab Financiero** | Pendiente. **Bloqueado por tu decisión** (ver abajo). |
 | 3.4 | **`payment_status DEFAULT 'paid'`** | Pendiente. Medio, con cuidado. |
-| 3.5 | **Borrar un ítem de mesa no devuelve stock** | Sin verificar: falta ubicar el handler correcto. |
+| 3.5 | **Borrar un ítem de mesa no devuelve stock** | 🔴 **Ubicado (01/10)** por el inventario de escrituras directas: `handleRemoveItem` en `TablesPage` borra la línea con `removeOrderItem` (DELETE directo en `order_items`) y ajusta el total, **sin devolver el stock** que `add_order_items_with_extras` descontó al agregarla. El TODO está en el propio handler. Salida: una RPC que devuelva el stock antes de borrar (DEUDAS → fila de `order_items`). Va con el endurecimiento, después de M1. |
 | 3.6 | **Carrera en el cierre de turno** | 🟡 **Construido (`feat/close-cash-shift`, `97b328e`, 238/238). Se despliega en fases esta semana.** Ver detalle abajo. |
 
 #### 3.6 en detalle (D)
@@ -103,8 +103,8 @@ Fuera de este plan, a propósito: DIAN, app nativa e ideas de producto (margen, 
 | cuándo | qué | quién |
 |---|---|---|
 | 1/10, temprano | Release de `develop` → `main` (lo de hoy + product-images, **sin D**) y mensaje a clientes | Alejandro |
-| 1/10, antes de que abra G-10 | Fase 1: `close-cash-shift.sql` + 3 consultas de verificación | Alejandro |
-| 2/10, temprano | Si la fase 1 anduvo un día sin problemas: merge de D, suite, release, mensaje de "recarguen la página" | Claude Code merge, Alejandro release |
+| 1/10, antes de que abra G-10 | Fase 1: `close-cash-shift.sql` **del commit `3339978`** (rama `feat/close-cash-shift`: guard contra el re-apply, y el trigger de `cash_movements` cubre DELETE y el turno viejo; suite 240/240 el 30/09) + consultas de verificación | Alejandro |
+| 2/10, temprano | Si la fase 1 anduvo un día sin problemas: merge de D + (1), suite, release, mensaje de "recarguen la página"; **justo después del release, `cobro-turno.sql`** | Claude Code merge, Alejandro release y SQL |
 | 3/10 | Fase 2: `close-cash-shift-revoke.sql` + verificación (0 filas de UPDATE) | Alejandro |
 | después del release | Prueba real en Café Aroma: abrir turno, venta en efectivo, gasto, cerrar | Alejandro |
 
@@ -130,7 +130,7 @@ Fuera de este plan, a propósito: DIAN, app nativa e ideas de producto (margen, 
 | 5.3 | Los 6 errores de eslint preexistentes | Pendiente. |
 | 5.4 | Imágenes fuera del backup | Pendiente. **Bloqueado por tu decisión.** |
 | 5.5 | Concepto de organización de prueba (`es_laboratorio`) | Pendiente. |
-| 5.6 | **Ledger de migraciones** | 🟢 **Desbloqueado (30/09).** El orden de migraciones de `preparar-local` arma una base **igual a producción**, medido con la herramienta de deriva y no solo "corrió sin error". Antes no lo era: aplicaba una versión vieja de `add_order_items_with_extras` y la base local vendía sin descontar stock. Listo para sembrar `schema_migrations`. |
+| 5.6 | **Ledger de migraciones** | 🔴 **PRIORIDAD SUBIDA (01/10):** es la protección MECÁNICA de la clase "re-aplicar un archivo viejo revierte en silencio". Hay 12 funciones expuestas, 5 de seguridad (DEUDAS → *"Re-aplicar una migración vieja revierte en silencio"*). Hasta tenerlo, la regla es de proceso (CLAUDE.md, R5: en prod nunca se re-aplica un archivo). 🟢 **Desbloqueado (30/09).** El orden de migraciones de `preparar-local` arma una base **igual a producción**, medido con la herramienta de deriva y no solo "corrió sin error". Antes no lo era: aplicaba una versión vieja de `add_order_items_with_extras` y la base local vendía sin descontar stock. Listo para sembrar `schema_migrations`. |
 | 5.7 | Multi-sede real | Pendiente (latente). |
 | 5.8 | Disponibilidad de compuestos en el POS | Pendiente. |
 | 5.9 | Landing y manual | Pendiente. |
@@ -178,7 +178,7 @@ Lo que apareció en el camino y se cerró. Va acá para que no se pierda.
 
 | Fase | Qué | Estado |
 |---|---|---|
-| Prerequisitos | Cambio (1) en el cobro · extraer `useSaleCheckout` (PR propio, sin cambio de comportamiento) · compresión de fotos en el cliente | (1) ✅ construido, se despliega el 2/10 |
+| Prerequisitos | Cambio (1) en el cobro · **query de B1 en prod** (`supabase/diag/pos-total-formula.sql`) · **`register_pos_sale` + `useSaleCheckout`**: la venta del POS en UNA transacción, idempotente, con la orden, los ítems, el pago y el número. Ya no es "sin cambio de comportamiento". **Despliegue: el SQL ANTES del frontend que la llama** (RPC nueva; las actuales no cambian) · compresión de fotos en el cliente | (1) ✅ construido, se despliega el 2/10 · `register_pos_sale`: diseño aprobado (01/10) |
 | **M1 — Barra** | Ruta `/m` con `MobileShell` · manifest e íconos propios (192, 512, maskable, apple-touch 180) · `viewport-fit=cover` · más vendidos (automáticos desde `product_performance` + fijados en `restaurants.config`) · **sin "Cerrar turno" en `/m` hasta que D esté en prod** | No empezado |
 | Demo | Café Aroma. Hacer una venta real 5 minutos antes; no cerrar turno en vivo | Después de M1 |
 | **M2 — Mesas** | Necesita: la decisión sobre si los meseros cobran, archivar mesas, cerrar mesa sin consumo como RPC | Bloqueado por decisión |
@@ -210,7 +210,7 @@ Lo que apareció en el camino y se cerró. Va acá para que no se pierda.
 - **Plan de cierre (Bloques 1-4):** 9-11 sesiones. El Bloque 0 y el 3.6 casi salen de la cuenta; el Bloque 2 sigue siendo el más grande.
 - **POS móvil hasta la demo:** 2-3 sesiones después de (1).
 
-**Orden sugerido:** cambio (1) → `useSaleCheckout` → compresión de fotos → **M1 y demo** → Bloque 2 → Bloque 1 → Bloque 3 → M2 → Bloque 4. El Bloque 0 se intercala, porque le quedan minutos.
+**Orden sugerido (actualizado 01/10):** semana de despliegue (1/10 a 3/10) → query de B1 → `register_pos_sale` + `useSaleCheckout` → compresión de fotos → **M1 y demo** → endurecimiento de escrituras directas (DEUDAS; el DELETE de `cash_movements` ya entró en la fase 1 de D) → Bloque 2 → Bloque 1 → Bloque 3 → M2 → Bloque 4. El Bloque 0 se intercala, porque le quedan minutos.
 
 **Regla que sigue en pie:** cada bloque cierra con la suite completa en verde, **en Docker**, leyendo `PLAYWRIGHT_EXIT` del archivo. Y ahora también **con la deriva en 0**: un verde contra una base que no es la de producción vale menos.
 
@@ -220,5 +220,5 @@ Lo que apareció en el camino y se cerró. Va acá para que no se pierda.
 
 - **0.2 y 0.3:** marcados pendientes porque ninguna sesión reportó haberlos hecho. Puede que alguno esté hecho.
 - **"Una policy antigua de `restaurants` sigue viva":** la deriva compara repo contra prod, no responde si esa policy existe. Se verifica con `select policyname, qual from pg_policies where tablename = 'restaurants';`.
-- **3.5:** sigue sin ubicarse el handler.
+- **3.5:** ubicado el 01/10 (ver la fila del 3.5).
 - **Si el HMAC se rotó:** se infiere que no por el prefijo, pero solo tú lo puedes confirmar.
