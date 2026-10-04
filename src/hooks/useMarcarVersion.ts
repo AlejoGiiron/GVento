@@ -6,7 +6,14 @@ const CLAVE_EQUIPO = 'gvento.equipo'
 /** Como mucho una marca cada 30 min por pestaña (más es ruido en la base). */
 const CADA_MS = 30 * 60 * 1000
 
-/** Id aleatorio y estable de este navegador. Sin localStorage, uno por pestaña. */
+/** Respaldo sin localStorage: UNO por pestaña, no uno por marca. */
+let equipoDeEstaPestana: string | null = null
+
+/**
+ * Id aleatorio y estable de este navegador. Sin localStorage (modo privado), uno
+ * por pestaña: antes devolvía un id nuevo en CADA llamada, y ese equipo habría
+ * sumado una fila nueva a app_versiones cada 30 min en vez de actualizar la suya.
+ */
 function idDeEquipo(): string {
   try {
     const guardado = window.localStorage.getItem(CLAVE_EQUIPO)
@@ -15,7 +22,8 @@ function idDeEquipo(): string {
     window.localStorage.setItem(CLAVE_EQUIPO, nuevo)
     return nuevo
   } catch {
-    return crypto.randomUUID()
+    equipoDeEstaPestana ??= crypto.randomUUID()
+    return equipoDeEstaPestana
   }
 }
 
