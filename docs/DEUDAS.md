@@ -299,6 +299,56 @@ cobro: No hay un turno de caja abierto…". Queda la orden en `pending` / `paid`
 - **D, despliegue:** la RPC es nueva, así que el SQL va **ANTES** del frontend que la llama.
   Las RPC actuales no cambian (Mesas las sigue usando) y una pestaña vieja sigue funcionando.
 
+### 🔴 El navegador ejecuta DOS VECES escrituras que el usuario hizo una vez (reenvío de Chromium) — medido 2026-10-01/04
+
+**El mecanismo (reproducido en Docker, `Chromium ─ proxy TCP ─ Supabase local`):** si una conexión
+keep-alive **reutilizada** se corta después de que el servidor procesó un POST, Chromium reenvía
+el POST solo, por una conexión nueva, y le entrega al código la respuesta del SEGUNDO envío.
+
+| corte | POST que llegan | qué ve el código | en la base |
+|---|---|---|---|
+| inmediato, RST o cierre ordenado (FIN) | 2 | **HTTP 204, éxito** | **2 veces** |
+| conexión colgada **19 s** y después RST o FIN | 2, **a 19 s** | **HTTP 204, éxito** | **2 veces, a 19 s** |
+| en conexión NUEVA (no reutilizada) | 1 | **error** ("Failed to fetch") | **1 vez: guardado** |
+
+Ni postgrest-js (solo reintenta GET, HEAD y OPTIONS) ni nuestro código reenvían: es la capa de
+red del navegador, y la app no puede enterarse. Medido sobre HTTP/1.1 (lo que hay en local); prod
+va por HTTPS y ahí no se midió el protocolo exacto.
+
+**Evidencia en prod (60 días, hasta 2026-10-04):**
+- **#2945 de G-10:** `add_order_items_with_extras` ejecutado dos veces, a **19,5 s**: Σ ítems 48.000
+  contra total y pago de 24.000. Limpiada (`limpieza-02-2945.sql`, fuera de git).
+- **#2908 de G-10:** `createOrder` reenviado a 533 ms; la gemela 7784e3fa quedó huérfana, sin ítems.
+- **Turno 95ecc259 de G-10 (23/09):** egreso manual de 45.000 duplicado a 1,997 s. El arqueo no se
+  corrige: se explica con una nota en `close_comment` (`turno-95ecc259-nota.sql`, fuera de git).
+- **994601b1 de G-10 (09/08):** los ítems se guardaron, la app recibió un error y no cobró (el caso
+  de "conexión nueva"); rehecha como #1332. Se cancela sin devolver stock (`limpieza-04-fantasma.sql`).
+- **Salchimelo, mesa #1193 (23/08):** tanda "SALCHIDOBLEAA PERSONAL" duplicada a 35 ms; Σ ítems
+  36.000 contra total y pagos de 12.000. **No se toca (decisión 2026-10-04).** En mesas el total lo
+  suma el cliente una vez por tanda, así que se cobró bien; el reenvío infló el reporte de productos
+  y, si tiene receta, descontó stock de más.
+- Abonos gemelos: **ninguno**.
+
+**Para detectarlo:** `supabase/diag/duplicados-reenvio-detector.sql`. POS: una orden con ítems de
+más de un `created_at` (toda venta POS inserta sus ítems en una llamada), a cualquier distancia.
+Mesas: la misma tanda repetida con hasta 60 s.
+
+**Prevención, en este orden (decidido 2026-10-04):**
+1. **`register_pos_sale`**: cubre el reenvío de `createOrder`, de los ítems y del pago. La segunda
+   ejecución con el mismo `p_sale_id` devuelve la venta ya hecha, con éxito. El test cubre los
+   cuatro modos de la tabla, más el reintento manual después del error en conexión nueva.
+2. **Movimientos de caja manuales**: id generado por el cliente + insert que ignora duplicados.
+   Es chico y va con `register_pos_sale`.
+3. **Clave por tanda en Mesas** (`add_order_items_with_extras(..., p_lote)`): va con M2.
+4. **Abonos**: sin casos en prod; queda acá. Si aparecen, clave por abono.
+
+### "Regalado en vales" cuenta órdenes anuladas y huérfanas (anotado 2026-10-04)
+
+`getVouchersTotal` (Reportes) suma `discount_amount` de toda orden con `discount_kind = 'vale'`
+sin mirar el estado ni los pagos. Una venta anulada con vale, o una huérfana con vale, sigue
+sumando. El vale del cierre (`close_cash_shift`) sí exige pago. No se arregló: se anota porque
+las limpiezas de huérfanas no la sacan de ese número.
+
 ### UX del cierre: un abono de fiado en efectivo aparece como "Ingresos manuales" (anotado 2026-10-01)
 
 La cuenta está bien: el abono en efectivo crea un `cash_movement` de tipo `in` ("Abono de
