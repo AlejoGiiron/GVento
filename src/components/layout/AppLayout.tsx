@@ -232,6 +232,10 @@ export function AppLayout() {
             <LogOut className="w-4 h-4 flex-shrink-0" />
             Cerrar sesión
           </button>
+          {/* Versión de esta pestaña: para preguntarle a un cajero qué versión tiene. */}
+          <div data-testid="app-version" className="px-3 pt-1 text-[10px] text-slate-500 font-mono">
+            v{__APP_VERSION__}
+          </div>
         </div>
       </aside>
 

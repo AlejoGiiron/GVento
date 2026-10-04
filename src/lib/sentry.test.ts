@@ -50,6 +50,10 @@ interface ColumnaEsquema {
 }
 
 const COLUMNAS_DEL_ESQUEMA: ColumnaEsquema[] = [
+  // ── app_versiones (app-version.sql): identifican un dispositivo, no salen
+  { tabla: 'app_versiones', columna: 'equipo', ejemplo: '3f1c2a9e-0b7d-4c55-9a21-6c0f8d2e4b17' },
+  { tabla: 'app_versiones', columna: 'user_agent', ejemplo: 'Mozilla/5.0 (Linux; Android 14) Chrome/129' },
+  { tabla: 'app_versiones', columna: 'version', ejemplo: '04273f3' },
   // ── restaurants / organizations (schema.sql, multi-tenant-rbac.sql)
   { tabla: 'restaurants', columna: 'name', ejemplo: 'Salchimelo Norte' },
   { tabla: 'restaurants', columna: 'address', ejemplo: 'Calle 45 #12-30' },

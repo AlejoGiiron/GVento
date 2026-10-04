@@ -8,6 +8,7 @@ import { ErrorFallback } from '@/components/ErrorFallback'
 import { captureError, type SentryArea } from '@/lib/sentry'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { AppLayout } from '@/components/layout/AppLayout'
+import { VersionBanner } from '@/components/layout/VersionBanner'
 import { LoginPage } from '@/pages/LoginPage'
 import { POSPage } from '@/pages/POSPage'
 import { TablesPage } from '@/pages/TablesPage'
@@ -51,6 +52,7 @@ function App() {
     <AuthProvider>
       <BrowserRouter>
         <Toaster position="top-right" toastOptions={{ duration: 4000 }} />
+        <VersionBanner />
         <Routes>
           <Route path="/login" element={<LoginPage />} />
 

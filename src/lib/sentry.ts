@@ -603,7 +603,10 @@ export function initSentry(): void {
   Sentry.init({
     dsn: DSN,
     environment: (import.meta.env.VITE_SENTRY_ENVIRONMENT as string) ?? 'production',
-    release: import.meta.env.VITE_SENTRY_RELEASE as string | undefined,
+    // Sin VITE_SENTRY_RELEASE, la versión del bundle (vite.config.ts): así Sentry
+    // agrupa por versión y muestra qué usuarios siguen en una vieja.
+    release: (import.meta.env.VITE_SENTRY_RELEASE as string | undefined)
+      ?? (__APP_VERSION__ !== 'dev' ? __APP_VERSION__ : undefined),
 
     // v1 = SOLO errores. Sin performance, sin replay, sin profiling.
     //
