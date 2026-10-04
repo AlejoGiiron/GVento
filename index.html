@@ -3,12 +3,25 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover: el POS móvil (/m) usa env(safe-area-inset-*) para que nada quede bajo la barra de inicio del iPhone. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#0f172a" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="manifest" href="/manifest.json" />
+    <script>
+      // El POS móvil (/m) tiene SU manifest, ícono y nombre (public/movil/), solo
+      // en /m: Cocina instalada en una tablet conserva los suyos. Se aplican al
+      // cargar según la ruta; MobileShell hace lo mismo al entrar navegando
+      // (src/lib/posMovil.ts → aplicarIdentidadMovil, que debe coincidir con esto).
+      if (location.pathname === '/m' || location.pathname.indexOf('/m/') === 0) {
+        document.querySelector('link[rel="manifest"]').setAttribute('href', '/movil/manifest.webmanifest')
+        var i = document.createElement('link'); i.rel = 'apple-touch-icon'; i.href = '/movil/apple-touch-icon-180.png'; i.setAttribute('data-movil', '')
+        var t = document.createElement('meta'); t.name = 'apple-mobile-web-app-title'; t.content = 'Vender'; t.setAttribute('data-movil', '')
+        document.head.appendChild(i); document.head.appendChild(t)
+      }
+    </script>
     <title>G-Vento POS</title>
   </head>
   <body>

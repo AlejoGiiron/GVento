@@ -11,6 +11,8 @@ export interface RestaurantConfig {
   cash_out_reasons?: string[]
   payment_methods?: PaymentMethod[]
   nequi_qr_url?: string | null
+  /** POS móvil (/m). Leer SIEMPRE con leerPosMovil (src/lib/posMovil.ts): trae los valores por defecto. */
+  pos_movil?: unknown
   kitchen_pin?: string | null
   kitchen_stations?: string[]
   kds_timers?: { green: number; amber: number }

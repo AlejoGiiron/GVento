@@ -23,6 +23,9 @@ import { SalesHistoryPage } from '@/pages/SalesHistoryPage'
 import { ShiftHistoryPage } from '@/pages/ShiftHistoryPage'
 import { ExpensesHistoryPage } from '@/pages/ExpensesHistoryPage'
 import { ConfigPage } from '@/pages/ConfigPage'
+import { MobileShell } from '@/components/movil/MobileShell'
+import { VenderMovil } from '@/pages/movil/VenderMovil'
+import { MisVentasMovil } from '@/pages/movil/MisVentasMovil'
 
 function App() {
   const [queryClient] = useState(
@@ -61,6 +64,12 @@ function App() {
 
           {/* Rutas protegidas — cualquier usuario autenticado */}
           <Route element={<ProtectedRoute />}>
+            {/* POS móvil: dentro de ProtectedRoute y FUERA de AppLayout (su propio
+                caparazón). En un celular, ProtectedRoute manda acá a quien cobra. */}
+            <Route path="m" element={<MobileShell />}>
+              <Route index element={<VenderMovil />} />
+              <Route path="ventas" element={<MisVentasMovil />} />
+            </Route>
             <Route element={<AppLayout />}>
               <Route index element={<Navigate to="/ventas" replace />} />
               <Route path="ventas" element={<POSPage />} />
