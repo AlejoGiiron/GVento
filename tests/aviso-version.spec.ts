@@ -78,3 +78,26 @@ test('el equipo reporta su versión a la base; la tabla no se lee directo', asyn
   const directo = await c.from('app_versiones').select('version')
   expect(directo.error?.code, 'un usuario de la app pudo leer app_versiones directo').toBe('42501')
 })
+
+test('sin localStorage (modo privado): las marcas de una pestaña actualizan UNA fila, no suman', async ({ page }) => {
+  const { uid } = await cliente(ownerCreds())
+  psql(`delete from public.app_versiones where user_id = '${uid}';`)
+  // localStorage falla SOLO para la clave del equipo (la sesión de Supabase sigue usándolo).
+  await page.addInitScript(() => {
+    const get = Storage.prototype.getItem
+    const set = Storage.prototype.setItem
+    Storage.prototype.getItem = function (k: string) { if (k === 'gvento.equipo') throw new Error('sin storage'); return get.call(this, k) }
+    Storage.prototype.setItem = function (k: string, v: string) { if (k === 'gvento.equipo') throw new Error('sin storage'); return set.call(this, k, v) }
+  })
+  await page.clock.install()
+  await loginAsOwner(page)
+  await expect.poll(() => psql(`select count(*) from public.app_versiones where user_id = '${uid}';`), { timeout: 10_000 }).toBe('1')
+  const antes = psql(`select ultima_vez from public.app_versiones where user_id = '${uid}';`)
+
+  // Pasan 31 min (la marca es como mucho cada 30) y la pestaña vuelve a primer plano.
+  await page.clock.fastForward('31:00')
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+  await expect.poll(() => psql(`select ultima_vez from public.app_versiones where user_id = '${uid}';`), { timeout: 10_000 })
+    .not.toBe(antes)                                                   // la segunda marca llegó…
+  expect(psql(`select count(*) from public.app_versiones where user_id = '${uid}';`), 'el equipo sumó una fila nueva en vez de actualizar la suya').toBe('1')
+})
