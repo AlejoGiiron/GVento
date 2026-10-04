@@ -317,12 +317,12 @@ va por HTTPS y ahí no se midió el protocolo exacto.
 
 **Evidencia en prod (60 días, hasta 2026-10-04):**
 - **#2945 de G-10:** `add_order_items_with_extras` ejecutado dos veces, a **19,5 s**: Σ ítems 48.000
-  contra total y pago de 24.000. Limpiada (`limpieza-02-2945.sql`, fuera de git).
+  contra total y pago de 24.000. **No se limpia** (decisión 2026-10-04, ver la entrada siguiente).
 - **#2908 de G-10:** `createOrder` reenviado a 533 ms; la gemela 7784e3fa quedó huérfana, sin ítems.
 - **Turno 95ecc259 de G-10 (23/09):** egreso manual de 45.000 duplicado a 1,997 s. El arqueo no se
-  corrige: se explica con una nota en `close_comment` (`turno-95ecc259-nota.sql`, fuera de git).
+  corrige. **No se agregó la nota** (decisión 2026-10-04, ver la entrada siguiente).
 - **994601b1 de G-10 (09/08):** los ítems se guardaron, la app recibió un error y no cobró (el caso
-  de "conexión nueva"); rehecha como #1332. Se cancela sin devolver stock (`limpieza-04-fantasma.sql`).
+  de "conexión nueva"); rehecha como #1332. **No se limpia** (decisión 2026-10-04, ver la entrada siguiente).
 - **Salchimelo, mesa #1193 (23/08):** tanda "SALCHIDOBLEAA PERSONAL" duplicada a 35 ms; Σ ítems
   36.000 contra total y pagos de 12.000. **No se toca (decisión 2026-10-04).** En mesas el total lo
   suma el cliente una vez por tanda, así que se cobró bien; el reenvío infló el reporte de productos
@@ -341,6 +341,52 @@ Mesas: la misma tanda repetida con hasta 60 s.
    Es chico y va con `register_pos_sale`.
 3. **Clave por tanda en Mesas** (`add_order_items_with_extras(..., p_lote)`): va con M2.
 4. **Abonos**: sin casos en prod; queda acá. Si aparecen, clave por abono.
+
+### ✅ DECIDIDO (2026-10-04): los datos históricos del reenvío y del cobro en dos pasos NO se limpian
+
+**Si un diagnóstico encuentra alguno de estos casos, NO es un hallazgo nuevo:** están medidos,
+explicados y la decisión es dejarlos como están. Lo que se arregla es el mecanismo (la entrada
+anterior, "Prevención"), no los datos.
+
+**Única excepción admitida:** cancelar huérfanas que se ven en **Cocina** (status `pending`,
+`preparing` o `ready`), si molestan al operar. Cancelar no devuelve stock ni toca ítems.
+
+**Los casos (prod, ventana de 60 días medida el 2026-10-01/04):**
+
+| caso | qué es | estado al 2026-10-04 | qué afecta |
+|---|---|---|---|
+| **15 huérfanas sin ítems** de G-10 (POS) | cobro en dos pasos: la orden se creó, la carga de ítems no se guardó, la app no cobró; todas con reintento exitoso, todas de "valeria sanchez", 10 el 27/09 (8 entre 18:07 y 23:32) | `pending`, sin ítems, pagos, número ni stock | **se ven en Cocina** (candidatas a la excepción); no inflan ventas ni historial |
+| **7784e3fa** (una de las 15) | `createOrder` reenviado por el navegador a 533 ms; la gemela es la #2908 | idem | idem |
+| **#2945** de G-10 (`c1a79e70…`) | `add_order_items_with_extras` ejecutado dos veces, a 19,5 s; líneas `5656898f…` (original) y `6204a166…` (reenvío) | Σ ítems 48.000; total = pago = 24.000 | infla el reporte de productos en 2 Explosion 12onz / 24.000; ventas no |
+| **994601b1** de G-10 (09/08, 43.000) | huérfana CON ítems: se guardaron, la app recibió un error y no cobró; rehecha como #1332 | `pending`, 3 ítems, 2 movimientos de stock, sin pago ni número | **se ve en Cocina** (candidata a la excepción); infla el reporte de productos |
+| **turno 95ecc259** de G-10 (23/09 18:56) | egreso manual de 45.000 "cocteles came y sebas se desconto" duplicado a 1,997 s | arqueo cerrado, sin nota | el esperado congelado puede mostrar un sobrante aparente de 45.000 |
+| **mesa #1193** de Salchimelo (23/08) | tanda "SALCHIDOBLEAA PERSONAL" duplicada a 35 ms | Σ ítems 36.000; total = pagos = 12.000 | se cobró bien; infla el reporte de productos y, si tiene receta, el stock |
+
+Las 15, por si hay que identificarlas: `c7dc1724`, `fde49aa8`, `2c31c598`, `f02987cd`, `00d31d5a`,
+`3b4e4c18`, `e02fefd1`, `7784e3fa`, `4f3ab8bc`, `a3fb0240`, `67b9027d`, `a0238998`, `d6f4f710`,
+`8aaebb37`, `1e491b0e` (prefijos de UUID; G-10 = `12b53bae-a4f7-4076-80f9-8f9288bd0567`).
+
+**Qué los reproduce (todo de solo lectura, en `supabase/diag/`):**
+
+| query | qué devuelve de la lista |
+|---|---|
+| `pos-total-formula.sql` | por organización: ventas POS que no cuadran (la #2945) y `sin_items` (las 15) |
+| `b1-detalle.sql` | el detalle de la que no cuadra y de cada sin ítems, con dónde aparece y su reintento |
+| `duplicados-reenvio-detector.sql` | POS con ítems de más de una llamada (#2945) y tandas de mesa repetidas (#1193) |
+| `duplicados-reenvio.sql` | bloque 3: órdenes gemelas (7784e3fa / #2908); 5: movimientos gemelos (turno 95ecc259); 7: huérfanas con ítems (994601b1) |
+
+🔴 **Todas usan una ventana de 60 días** (`params.desde`). Estos casos van saliendo de la ventana:
+la #1193 deja de aparecer hacia el 22/10 y la 994601b1 ya está cerca del borde. **Para
+reconocerlos después, la tabla de arriba es la referencia, no el resultado del detector;** y para
+volver a verlos con la query, ampliar `desde`.
+
+**Los scripts para aplicar la excepción ya existen, fuera de git** (en la raíz del repo de
+Alejandro, probados en Docker con los UUID de prod el 2026-10-04):
+- huérfanas: `limpieza-00-respaldo.sql` → `limpieza-01-huerfanas.sql` → `limpieza-03-verificar.sql`, con reversa;
+- fantasma: `limpieza-04-fantasma-respaldo.sql` → `limpieza-04-fantasma.sql`, con reversa.
+
+`limpieza-02-2945.sql` y `turno-95ecc259-nota.sql` también existen, pero **quedan fuera de la
+decisión**: tocan datos que no se ven en Cocina.
 
 ### "Regalado en vales" cuenta órdenes anuladas y huérfanas (anotado 2026-10-04)
 
