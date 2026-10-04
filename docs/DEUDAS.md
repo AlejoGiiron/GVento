@@ -294,6 +294,21 @@ cobro: No hay un turno de caja abierto…". Queda la orden en `pending` / `paid`
 - **D, despliegue:** la RPC es nueva, así que el SQL va **ANTES** del frontend que la llama.
   Las RPC actuales no cambian (Mesas las sigue usando) y una pestaña vieja sigue funcionando.
 
+**CONSTRUIDO (2026-10-04, rama `feat/pos-sale-lotes`):** `supabase/pos-sale-lotes.sql` +
+`useSaleCheckout` (POS) + `useAgregarTanda` (Mesas, clave por tanda y total desde las líneas,
+que elimina H1). Para saber si está en una base, no leas esta nota: correlo:
+`select to_regprocedure('public.register_pos_sale(uuid,jsonb,jsonb,jsonb)');` (null = no está).
+Lo que hay que saber al operarlo:
+- **El id de venta se conserva entre reintentos MIENTRAS el contenido sea el mismo** (ítems,
+  descuento, tipo, cliente; el método de pago NO cuenta). Si el primer intento entró en
+  efectivo y el cajero reintenta con tarjeta, recibe la venta en efectivo (`ya_existia`) y la
+  pantalla lo avisa (`success-ya-existia`). Es a propósito: entre una venta con el método
+  equivocado y una venta DUPLICADA, la duplicada es peor (arqueo y stock).
+- **En el POS ya no existe "venta cobrada sin número"**: el número va en la misma transacción.
+  El aviso y su reintento siguen en Mesas, y `tests/numeracion-fallo.spec.ts` ahora prueba ahí.
+- **Reversa:** `pos-sale-lotes-revertir.sql` (raíz, fuera de git), con autoverificación por
+  md5 contra el export de prod. **Primero el frontend, después el SQL.**
+
 ### Precio del POS: ¿se valida `unit_price` contra `products.price`? — NO por ahora (B2, 2026-10-01)
 
 `register_pos_sale` va a validar el TOTAL contra las líneas (B1), pero el `unit_price` de cada
@@ -338,7 +353,7 @@ archivos que la REVIERTEN si se re-aplican.
 | `get_my_organization_id`, `has_permission` | `profiles-is-active-enforced.sql` | `multi-tenant-rbac.sql` |
 | `handle_new_user` | `profiles-organization-invariant.sql` | `schema.sql` |
 | `enforce_profile_organization` | `fix-enforce-profile-organization-definer.sql` | `profiles-organization-invariant.sql` |
-| `add_order_items_with_extras` | `order-items-stock-recipes.sql` | `order-extras-rpc.sql` |
+| `add_order_items_with_extras` | `pos-sale-lotes.sql` (3 argumentos, con `p_lote`; borra la de 2) | `order-items-stock-recipes.sql`, `order-extras-rpc.sql` — **no la revierten: AGREGAN la de 2 argumentos al lado.** Medido en Docker el 2026-10-04: con las dos vivas, la llamada de 2 argumentos (frontend anterior al paso 2) falla con `PGRST203`; la de 3 y `register_pos_sale` siguen andando. Se arregla re-aplicando `pos-sale-lotes.sql`. |
 | `register_purchase` | `compra-no-toca-caja.sql` | `compras-proveedores.sql` |
 | `register_sale_payment` | `cobro-turno.sql` | `register-sale-payment.sql` |
 | `register_sale_void` | `close-cash-shift.sql` | `register-sale-void.sql` |

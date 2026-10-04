@@ -19,7 +19,7 @@ import { useCashShift } from '@/hooks/useCashShift'
 import { OpenShiftModal } from '@/components/shift/OpenShiftModal'
 import { ItemConfigModal } from '@/components/pos/ItemConfigModal'
 import { PaymentSplitEditor } from '@/components/pos/PaymentSplitEditor'
-import { createOrder, addOrderItemsWithExtras, registerSalePayment, assignOrderNumber, retryOrderNumber } from '@/lib/supabase-helpers'
+import { useSaleCheckout } from '@/hooks/useSaleCheckout'
 import type { SalePaymentPart } from '@/lib/supabase-helpers'
 import { captureError } from '@/lib/sentry'
 import { CustomerPicker } from '@/components/fiado/CustomerPicker'
@@ -852,10 +852,8 @@ function CheckoutModal({
   const [submitting, setSubmitting] = useState(false)
   const [orderId, setOrderId] = useState<string | null>(null)
   const [orderNumber, setOrderNumber] = useState<number | null>(null)
-  // Número que la secuencia entregó pero no se pudo grabar: el reintento lo
-  // reusa en vez de pedir otro (ver AssignOrderNumberResult).
-  const [numeroReservado, setNumeroReservado] = useState<number | null>(null)
-  const [reintentandoNumero, setReintentandoNumero] = useState(false)
+  const [yaExistia, setYaExistia] = useState(false)
+  const { cobrar } = useSaleCheckout()
   // Fiado: cliente seleccionado (solo aplica si method === 'fiado').
   const [customerId, setCustomerId] = useState<string | null>(null)
   const [customerName, setCustomerName] = useState<string>('')
@@ -893,68 +891,44 @@ function CheckoutModal({
     if (isFiado && !customerId) { toast.error('Selecciona un cliente para la venta a fiado'); return }
     setSubmitting(true)
     try {
-      // Venta a fiado: la orden se crea como pendiente de pago y ligada al
-      // cliente; NO entra dinero (no toca caja) y NO se registra payment.
-      // El stock SÍ se descuenta igual (la mercancía salió). Copiamos el nombre
-      // del cliente a customer_name para que tickets/historial sigan leyéndolo.
-      const { data: order, error: orderErr } = await createOrder({
-        type: orderType,
-        status: 'pending',
+      // UNA llamada: orden + ítems (con stock) + pago + número, atómico e
+      // idempotente (ver useSaleCheckout). Si algo falla no queda nada a medias.
+      // Fiado: sin pago, payment_status pending, ligada al cliente (customer_name
+      // se copia para tickets/historial). Venta GRATIS (total 0 = vale 100%): sin
+      // pago. El vale es siempre 'fixed' (forzado en el store); sin monto (0) →
+      // kind normal + type null (respeta la constraint vale⇒fixed).
+      // En la rama simple (!split) el método nunca es fiado (isFiado lo excluye),
+      // pero el isFiado compuesto impide a TS estrecharlo → cast explícito.
+      const payments: SalePaymentPart[] = isFiado || total === 0
+        ? []
+        : split
+          ? splitParts
+          : [{ method: methodMap[method as Exclude<PaymentMethodUI, 'fiado'>], amount: total }]
+      const venta = await cobrar({
+        type: orderType === 'delivery' ? 'delivery' : 'takeaway',
         total,
-        restaurant_id: profile.restaurant_id,
-        created_by: profile.id,
-        // Descuento REAL persistido (monto en COP ya reflejado en total) + su
-        // clase (normal | vale). El vale es siempre 'fixed' (forzado en el store).
-        // Sin monto (0) → kind normal + type null (no es un vale; respeta la
-        // constraint vale⇒fixed).
         discount_amount: discountAmt,
         discount_type: discountAmt > 0 ? discountType : null,
         discount_kind: discountAmt > 0 ? discountKind : 'normal',
         discount_reason: discountAmt > 0 ? (discountReason.trim() || null) : null,
-        ...(isFiado
-          ? { payment_status: 'pending', customer_id: customerId, customer_name: customerName }
-          : {}),
-      })
-      if (orderErr || !order) throw orderErr ?? new Error('Error al crear orden')
-
-      const { error: itemsErr } = await addOrderItemsWithExtras(
-        order.id,
-        items.map((item) => ({
+        fiado: isFiado,
+        customer_id: isFiado ? customerId : null,
+        customer_name: isFiado ? customerName : null,
+        items: items.map((item) => ({
           product_id: item.product.id,
           qty: item.qty,
           unit_price: item.product.price,
           notes: item.note || null,
           extras: item.extras.map((ex) => ({ extra_id: ex.extra_id, qty: ex.qty })),
         })),
-      )
-      if (itemsErr) throw itemsErr
-
-      // Venta GRATIS (total 0 = vale 100%): NO hay dinero que cobrar. Se salta
-      // register_sale_payment (valida amount>0). La orden queda registrada con su
-      // vale (entra al vouchers_total) pero SIN payment; payment_status='paid'
-      // (default, saldada — no es fiado). El nº se asigna igual (abajo).
-      if (!isFiado && total > 0) {
-        // Un solo camino de cobro: simple = una parte al total; dividir = las
-        // partes del editor. La RPC valida atómicamente que Σ = total (rechaza
-        // si no cuadra) e inserta una fila por método.
-        // En la rama simple (!split) el método nunca es fiado (isFiado lo excluye),
-        // pero el isFiado compuesto impide a TS estrecharlo → cast explícito.
-        const parts: SalePaymentPart[] = split
-          ? splitParts
-          : [{ method: methodMap[method as Exclude<PaymentMethodUI, 'fiado'>], amount: total }]
-        const { error: payErr } = await registerSalePayment(order.id, parts)
-        if (payErr) throw payErr
-      }
-
-      // Numeración: es una venta real (cobrada o a fiado) → asignar número
-      // correlativo. Si falla, no se tumba la venta (queda registrada igual).
-      const num = await assignOrderNumber(order.id, profile.restaurant_id)
-      setOrderNumber(num.orderNumber)
-      setNumeroReservado(num.numeroReservado)
+        payments,
+      })
+      setOrderNumber(venta.order_number)
+      setYaExistia(venta.ya_existia)
 
       if (isFiado) queryClient.invalidateQueries({ queryKey: ['debts'] })
       refetchSales()
-      setOrderId(order.id)
+      setOrderId(venta.order_id)
       setStep('success')
     } catch (err) {
       const msg = mensajeDeError(err, 'Error desconocido')
@@ -970,22 +944,6 @@ function CheckoutModal({
       })
     } finally {
       setSubmitting(false)
-    }
-  }
-
-  // Reintento a pedido del cajero cuando la venta quedó sin número. La venta YA
-  // está cobrada y registrada: esto solo completa el correlativo.
-  const handleRetryNumero = async () => {
-    if (!orderId || !profile) return
-    setReintentandoNumero(true)
-    try {
-      const num = await retryOrderNumber(orderId, profile.restaurant_id, numeroReservado)
-      setOrderNumber(num.orderNumber)
-      setNumeroReservado(num.numeroReservado)
-      if (num.orderNumber != null) toast.success(`Número asignado: venta #${num.orderNumber}`)
-      else toast.error('No se pudo asignar el número. La venta está cobrada igual.')
-    } finally {
-      setReintentandoNumero(false)
     }
   }
 
@@ -1269,39 +1227,18 @@ function CheckoutModal({
               {orderNumber != null ? `Venta #${orderNumber}` : `#${orderId.slice(-8).toUpperCase()}`}
             </div>
 
-            {/* La venta se cobró, pero quedó sin correlativo. Antes esto fallaba
-                MUDO: la pantalla decía "¡Cobro exitoso!" y nadie se enteraba de
-                que la venta no iba a aparecer en el Historial ni se iba a poder
-                reimprimir. */}
-            {orderNumber == null && (
+            {/* El reintento encontró la venta del intento anterior: se muestra
+                ESA (con su método de pago), no se cobró dos veces. */}
+            {yaExistia && (
               <div
-                data-testid="success-sin-numero"
+                data-testid="success-ya-existia"
                 style={{
-                  background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8,
+                  background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8,
                   padding: '10px 12px', margin: '0 0 20px',
-                  fontSize: 12, color: '#92400e', lineHeight: 1.5,
+                  fontSize: 12, color: '#1e40af', lineHeight: 1.5,
                 }}
               >
-                <div style={{ fontWeight: 600, marginBottom: 6 }}>
-                  Venta registrada — sin número asignado
-                </div>
-                <div style={{ marginBottom: 8 }}>
-                  El cobro está guardado. Falta el número para que aparezca en el
-                  historial y se pueda reimprimir.
-                </div>
-                <button
-                  onClick={handleRetryNumero}
-                  disabled={reintentandoNumero}
-                  data-testid="retry-order-number"
-                  style={{
-                    padding: '6px 14px', border: '1.5px solid #d97706', background: '#fff',
-                    borderRadius: 7, cursor: reintentandoNumero ? 'default' : 'pointer',
-                    fontSize: 12, fontWeight: 600, color: '#92400e',
-                    opacity: reintentandoNumero ? 0.6 : 1,
-                  }}
-                >
-                  {reintentandoNumero ? 'Reintentando…' : 'Reintentar'}
-                </button>
+                Esta venta ya se había registrado en el intento anterior. No se cobró dos veces.
               </div>
             )}
             <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>

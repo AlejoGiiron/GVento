@@ -161,12 +161,8 @@ export type OrderItemPayload = {
   extras: OrderItemExtraPayload[]
 }
 
-// Inserta order_items + order_item_extras y descuenta stock vinculado, atómico.
-export const addOrderItemsWithExtras = (orderId: string, items: OrderItemPayload[]) =>
-  supabase.rpc('add_order_items_with_extras', {
-    p_order_id: orderId,
-    p_items: items as unknown as Json,
-  })
+// add_order_items_with_extras se llama SOLO desde useAgregarTanda (Mesas, con
+// clave por tanda) y, adentro de register_pos_sale, desde useSaleCheckout (POS).
 
 // --- Inventario por recetas: product_components (receta / BOM) ---
 
@@ -412,6 +408,10 @@ export const setOrderNumber = (orderId: string, orderNumber: number) =>
  * ─────────────────────────────────────────────────────────────────────────────
  * ARREGLO DE FONDO PENDIENTE (opción C): asignar el correlativo DENTRO de
  * `register_sale_payment`, no acá.
+ *
+ * 📌 HECHO PARA EL POS (supabase/pos-sale-lotes.sql): `register_pos_sale` numera
+ * en la misma transacción que el cobro, así que el POS ya no usa esto. Lo que
+ * sigue vale para el ÚNICO llamador que queda: el cobro de MESAS (TablesPage).
  *
  * Lo de abajo (reintento del UPDATE + aviso al cajero) reduce la ventana y la
  * hace visible, pero NO la cierra: entre que la RPC de cobro hace commit y que

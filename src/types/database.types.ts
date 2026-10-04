@@ -1401,7 +1401,7 @@ export type Database = {
     }
     Functions: {
       add_order_items_with_extras: {
-        Args: { p_items: Json; p_order_id: string }
+        Args: { p_items: Json; p_lote?: string | null; p_order_id: string }
         Returns: undefined
       }
       adjust_stock: {
@@ -1434,6 +1434,10 @@ export type Database = {
       }
       register_purchase: {
         Args: { p_invoice: Json; p_items: Json }
+        Returns: Json
+      }
+      register_pos_sale: {
+        Args: { p_items: Json; p_order: Json; p_payments?: Json; p_sale_id: string }
         Returns: Json
       }
       register_sale_payment: {
