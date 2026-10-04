@@ -83,7 +83,28 @@ test.describe.serial('Foto de producto por la UI', () => {
     expect(despues, 'el archivo no se reemplazó').not.toBe(antes)
   })
 
+  test('quitar y CANCELAR: la foto y el archivo siguen (nada se borra antes de guardar)', async ({ page }) => {
+    const antes = await imageUrl()
+    expect(antes, 'precondición: el producto tiene foto').not.toBeNull()
+    await loginAsOwner(page)
+    await editar(page)
+    await page.getByTitle('Eliminar imagen').click()
+    await page.getByRole('button', { name: 'Cancelar', exact: true }).click()
+    await expect(page.getByPlaceholder('Ej: Mojito Cubano')).toHaveCount(0)
+
+    expect(await imageUrl()).toBe(antes)
+    expect(await existe(owner.c, BUCKET, ruta()), 'cancelar borró el archivo de Storage').toBe(true)
+  })
+
   test('quitar: el producto queda sin foto Y el archivo se borra de verdad', async ({ page }) => {
+    // El borrado en Storage se DEMORA 1,5 s y se guarda enseguida. Con el borrado
+    // hecho al tocar "Eliminar" (antes del arreglo), el guardado caía SIEMPRE en
+    // medio y guardaba la URL vieja apuntando a un archivo borrado; en la suite
+    // pasaba solo a veces (fue un rojo intermitente el 2026-10-04).
+    await page.route('**/storage/v1/object/product-images', async (r) => {
+      if (r.request().method() === 'DELETE') await new Promise((ok) => setTimeout(ok, 1500))
+      await r.continue()
+    })
     await loginAsOwner(page)
     await editar(page)
     await page.getByTitle('Eliminar imagen').click()
