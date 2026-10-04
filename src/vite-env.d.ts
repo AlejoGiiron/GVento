@@ -8,3 +8,6 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv
 }
+
+/** Versión de la app incrustada en el build (vite.config.ts → define). 'dev' fuera de Vercel. */
+declare const __APP_VERSION__: string

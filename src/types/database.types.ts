@@ -1419,6 +1419,10 @@ export type Database = {
         Returns: Database["public"]["Enums"]["user_role"]
       }
       has_permission: { Args: { perm: string }; Returns: boolean }
+      marcar_version: {
+        Args: { p_equipo: string; p_user_agent?: string | null; p_version: string }
+        Returns: undefined
+      }
       next_order_number: { Args: { p_restaurant_id: string }; Returns: number }
       register_debt_payment: {
         Args: { p_amount: number; p_order_id: string; p_payment_method: string }

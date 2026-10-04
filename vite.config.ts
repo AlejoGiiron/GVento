@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { sentryVitePlugin } from '@sentry/vite-plugin'
 import path from 'path'
@@ -9,9 +9,39 @@ import path from 'path'
 const SENTRY_AUTH_TOKEN = process.env.SENTRY_AUTH_TOKEN
 const subeSourceMaps = !!SENTRY_AUTH_TOKEN
 
+// ── Versión de la app (aviso de versión nueva) ─────────────────────────────────
+// Vercel expone el commit que despliega en VERCEL_GIT_COMMIT_SHA durante el build.
+// Fuera de Vercel (dev, E2E) la versión es 'dev'. La misma cadena va incrustada en
+// el bundle (__APP_VERSION__) y publicada en /version.json: la app compara las dos
+// y, si difieren, avisa que hay una versión nueva (src/hooks/useVersionCheck.ts).
+const APP_VERSION = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? 'dev'
+
+function versionJson(): Plugin {
+  const cuerpo = JSON.stringify({ version: APP_VERSION })
+  return {
+    name: 'gvento-version-json',
+    // Dev/E2E: servido por el dev server, sin caché.
+    configureServer(server) {
+      server.middlewares.use('/version.json', (_req, res) => {
+        res.setHeader('Content-Type', 'application/json')
+        res.setHeader('Cache-Control', 'no-store')
+        res.end(cuerpo)
+      })
+    },
+    // Build: archivo estático en dist/ (vercel.json lo sirve con no-store).
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'version.json', source: cuerpo })
+    },
+  }
+}
+
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(APP_VERSION),
+  },
   plugins: [
     react(),
+    versionJson(),
     // ⚠️ SIEMPRE al final del array: necesita ver el bundle ya generado.
     ...(subeSourceMaps
       ? [

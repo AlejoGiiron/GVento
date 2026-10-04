@@ -95,6 +95,7 @@ const ORDEN = [
   'close-cash-shift.sql',               // FASE 1: cierre en el servidor + protocolo de locks (compatible con el frontend viejo)
   'close-cash-shift-revoke.sql',        // FASE 2: sin UPDATE directo sobre cash_shifts (después del deploy del frontend)
   'cobro-turno.sql',                    // cambio (1): turno obligatorio para cobrar y para abonos en efectivo + lock de la orden
+  'app-version.sql',                    // cada equipo reporta su versión de la app (aviso de versión nueva)
 ]
 
 // ── QUIÉN GANA cuando una función está definida en más de un .sql ─────────────
