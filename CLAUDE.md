@@ -312,10 +312,16 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    que decide quién va a `/m` en un celular. Si divergen, se manda a `/m` a alguien que el
    servidor rechaza, o se deja afuera a alguien que podría vender.
 
-9. **Identidad instalable de `/m` — 2 lados (agregado 2026-10-04).** El script del `<head>` de
-   `index.html` (al cargar directo en `/m`) y `aplicarIdentidadMovil` en `src/lib/posMovil.ts`
-   (al entrar navegando): manifest `/movil/manifest.webmanifest`, ícono de Apple y título
-   "Vender". Lo vigila `tests/m-pos-movil.spec.ts` (manifest e íconos).
+9. **Qué documento (y qué manifest) recibe cada ruta — 2 lados (rehecho 2026-10-05).**
+   `identidadDeRuta` en `src/lib/identidadRutas.ts` (lo usa el plugin de `vite.config.ts` en dev
+   y en el build, que genera `movil.html` y `cocina.html` desde el ÚNICO `index.html`) y las
+   `rewrites` de `vercel.json` (producción). Lo vigila `src/lib/identidadRutas.test.ts`, que emula
+   las rewrites de `vercel.json` y las compara con la regla.
+   🔴 **Por qué un HTML por identidad y no JS:** Safari de iPhone toma el manifest del DOCUMENTO
+   al "Agregar a inicio". Cambiar el `<link>` por JS no alcanzó: medido en un iPhone 16 Pro Max el
+   2026-10-05, el ícono agregado desde `/m` abría Cocina. Por la misma razón, entrar y salir de
+   `/m` es una carga completa de página (`cargarDocumento` en `src/lib/posMovil.ts`), nunca
+   `navigate`.
 
 → **Evidencia:** [`docs/BITACORA.md`](docs/BITACORA.md) → *"FASE 1 — estado de suscripción"*
 (el aviso a G-Centro) · el hallazgo del onboarding está en el inventario de arriba · el caso de

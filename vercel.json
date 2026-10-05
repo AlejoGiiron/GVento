@@ -1,6 +1,18 @@
 {
   "rewrites": [
     {
+      "source": "/m",
+      "destination": "/movil.html"
+    },
+    {
+      "source": "/m/(.*)",
+      "destination": "/movil.html"
+    },
+    {
+      "source": "/cocina",
+      "destination": "/cocina.html"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

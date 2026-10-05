@@ -139,23 +139,50 @@ test('un mozo en el celular NO va a /m (no puede cobrar); si entra a /m, se le d
   await expect(page.getByTestId('m-sin-permiso')).toBeVisible()
 })
 
-test('/m usa SU manifest (íconos que cargan); el escritorio conserva el de Cocina', async ({ page, request }) => {
-  await entrar(page, cashierCreds())
-  await expect(page.locator('link[rel="manifest"]')).toHaveAttribute('href', '/movil/manifest.webmanifest')
-  const man = await (await request.get('/movil/manifest.webmanifest')).json() as { start_url: string; icons: { src: string; sizes: string; purpose: string }[] }
-  expect(man.start_url).toBe('/m')
+/** Manifests del DOCUMENTO cargado y la URL con la que se cargó (no navegación interna). */
+async function documento(page: Page) {
+  return page.evaluate(() => ({
+    manifests: [...document.querySelectorAll('link[rel="manifest"]')].map((l) => l.getAttribute('href')),
+    iconoApple: document.querySelector('link[rel="apple-touch-icon"]')?.getAttribute('href') ?? null,
+    cargadoEn: new URL((performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming).name).pathname,
+  }))
+}
+
+test('cada ruta trae SU documento: /m solo su manifest, /cocina solo el del KDS, el resto ninguno', async ({ request }) => {
+  const html = async (ruta: string) => (await request.get(ruta, { headers: { accept: 'text/html' } })).text()
+  const manifests = (h: string) => [...h.matchAll(/rel="manifest" href="([^"]+)"/g)].map((m) => m[1])
+  for (const ruta of ['/m', '/m/ventas']) {
+    const h = await html(ruta)
+    expect(manifests(h), ruta).toEqual(['/movil/manifest.webmanifest'])
+    expect(h, ruta).toContain('href="/movil/apple-touch-icon-180.png"')
+  }
+  expect(manifests(await html('/cocina'))).toEqual(['/manifest.json'])
+  for (const ruta of ['/ventas', '/mesas', '/login', '/']) expect(manifests(await html(ruta)), ruta).toEqual([])
+
+  const man = await (await request.get('/movil/manifest.webmanifest')).json() as { start_url: string; scope: string; icons: { src: string; purpose: string }[] }
+  expect([man.start_url, man.scope]).toEqual(['/m', '/m'])
   expect(man.icons.map((i) => i.purpose).sort()).toEqual(['any', 'any', 'maskable'])
   for (const i of [...man.icons.map((x) => x.src), '/movil/apple-touch-icon-180.png']) {
     const r = await request.get(i)
     expect(r.status(), i).toBe(200)
     expect(r.headers()['content-type'], i).toContain('image/png')
   }
-  await page.getByTestId('m-nav-menu').click()
-  await page.getByTestId('m-version-completa').click()
-  await expect(page.locator('link[rel="manifest"]')).toHaveAttribute('href', '/manifest.json')
 })
 
-// ── Vender ─────────────────────────────────────────────────────────────────
+test('entrar a /m después del login es una CARGA del documento de /m (no navegación interna); salir también', async ({ page }) => {
+  await entrar(page, cashierCreds())
+  // El iPhone toma el manifest del DOCUMENTO: tiene que ser el de /m, cargado en /m.
+  expect(await documento(page)).toEqual({ manifests: ['/movil/manifest.webmanifest'], iconoApple: '/movil/apple-touch-icon-180.png', cargadoEn: '/m' })
+  await page.getByTestId('m-nav-menu').click()
+  await page.getByTestId('m-version-completa').click()
+  await expect(page).toHaveURL(/\/ventas$/)
+  await expect.poll(async () => (await documento(page)).cargadoEn).toBe('/ventas')
+  expect((await documento(page)).manifests).toEqual([])
+  await page.getByTestId('app-usar-movil').click()
+  await expect(page).toHaveURL(/\/m$/)
+  await expect.poll(async () => (await documento(page)).cargadoEn).toBe('/m')
+  expect((await documento(page)).manifests).toEqual(['/movil/manifest.webmanifest'])
+})
 
 test('venta en EFECTIVO: con vuelto, número, y queda a nombre del cajero', async ({ page }) => {
   await turnoAbierto()
@@ -229,22 +256,124 @@ test('sin turno: se puede armar el carrito pero NO cobrar, y se dice por qué', 
   await page.getByTestId('m-hoja-volver').click()
 })
 
-test('los botones de cobro quedan DENTRO de la pantalla (no bajo la barra de inicio)', async ({ page }) => {
-  await turnoAbierto()
-  await entrar(page, cashierCreds())
-  await agregar(page, 'Lab Cerveza')
-  const alto = page.viewportSize()!.height
-  const abrir = await page.getByTestId('m-carrito-abrir').boundingBox()
-  expect(abrir!.y + abrir!.height).toBeLessThanOrEqual(alto)
-  await page.getByTestId('m-carrito-abrir').click()
-  for (const id of ['m-pagar-cash', 'm-pagar-nequi']) {
-    const b = await page.getByTestId(id).boundingBox()
-    expect(b!.y + b!.height, id).toBeLessThanOrEqual(alto)
-    expect(b!.height, `${id}: blanco para el pulgar`).toBeGreaterThanOrEqual(56)
+// ── Nada nuestro tapa la acción principal (medido en un iPhone 16 Pro Max el ─
+// 2026-10-05: la barra inferior tapaba Cobrar, Confirmar y Agregar; el aviso de
+// instalación tapaba el primer ítem, el monto y el ícono de venta exitosa). Los
+// tests anteriores medían la barra de inicio del iPhone y el teclado: un proxy.
+type Caja = { x: number; y: number; width: number; height: number }
+const seCruzan = (a: Caja, b: Caja) =>
+  a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+// Lo nuestro que puede tapar algo: barra inferior, avisos y aviso de versión.
+const NUESTRO = ['m-nav', 'm-ayuda-ios', 'm-aviso-instalar', 'm-pantalla-aviso', 'version-nueva']
+
+/**
+ * (a) entero dentro del viewport VISIBLE; (b) su caja no se cruza con nada de
+ * NUESTRO que esté visible; (c) arriba de todo en su centro (lo que se tocaría);
+ * (d) solo botones de acción: sin un ancestro con scroll (un fixed adentro de un
+ * contenedor con scroll es lo que el iPhone apila y recorta distinto).
+ * El click real lo hace el test después, sin force.
+ */
+async function usable(page: Page, testid: string, accion: boolean) {
+  const el = page.getByTestId(testid).first()
+  await expect(el, testid).toBeVisible()
+  const c = (await el.boundingBox())!
+  const vv = await page.evaluate(() => {
+    const v = window.visualViewport!
+    return { x: v.offsetLeft, y: v.offsetTop, w: v.width, h: v.height }
+  })
+  expect(c.x >= vv.x - 0.5 && c.y >= vv.y - 0.5 && c.x + c.width <= vv.x + vv.w + 0.5 && c.y + c.height <= vv.y + vv.h + 0.5,
+    `(a) ${testid} no está entero dentro del viewport visible`).toBe(true)
+  for (const otro of NUESTRO) {
+    const o = page.getByTestId(otro)
+    if (await o.count() && await o.first().isVisible()) {
+      expect(seCruzan(c, (await o.first().boundingBox())!), `(b) ${testid} se cruza con ${otro}`).toBe(false)
+    }
   }
-  await page.getByTestId('m-pagar-cash').click()
-  const c = await page.getByTestId('m-confirmar').boundingBox()
-  expect(c!.y + c!.height).toBeLessThanOrEqual(alto)
+  expect(await el.evaluate((e) => {
+    const r = e.getBoundingClientRect()
+    const arriba = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+    return !!arriba && (arriba === e || e.contains(arriba))
+  }), `(c) algo tapa el centro de ${testid}`).toBe(true)
+  if (accion) {
+    expect(await el.evaluate((e) => {
+      for (let a = e.parentElement; a; a = a.parentElement) {
+        const o = getComputedStyle(a).overflowY
+        if (o === 'auto' || o === 'scroll') return `${a.tagName}${a.dataset.testid ? '#' + a.dataset.testid : ''}`
+      }
+      return null
+    }), `(d) ${testid} está adentro de un contenedor con scroll`).toBeNull()
+  }
+}
+
+/** Muestra TODOS los avisos nuestros a la vez: versión nueva y, en Android, "Instalar". */
+async function conAvisos(page: Page, info: { project: { name: string } }) {
+  await page.route('**/version.json', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: '{"version":"otra"}' }))
+  await entrar(page, cashierCreds())
+  await expect(page.getByTestId('version-nueva')).toBeVisible()
+  if (info.project.name === 'm-android') {
+    await page.evaluate(() => {
+      const e = Object.assign(new Event('beforeinstallprompt'), { prompt: async () => undefined, userChoice: Promise.resolve({ outcome: 'dismissed' }) })
+      window.dispatchEvent(e)
+    })
+    await expect(page.getByTestId('m-aviso-instalar')).toBeVisible()
+  } else {
+    await expect(page.getByTestId('m-ayuda-ios')).toBeVisible()
+  }
+}
+
+test.describe('nada nuestro tapa la acción principal', () => {
+  // serviceWorkers 'block': conAvisos fuerza el aviso de versión con page.route sobre
+  // /version.json, y en WebKit page.route no ve los pedidos de una página controlada por
+  // el service worker (medido 2026-10-04, ver "reintento"). Lo que se mide acá es la
+  // disposición de la pantalla, que no depende del service worker.
+  test.use({ serviceWorkers: 'block' })
+  test('Vender → carrito → EFECTIVO → venta exitosa', async ({ page }, info) => {
+    await turnoAbierto()
+    await conAvisos(page, info)
+    await usable(page, 'm-producto', false)                     // contenido bajo los avisos
+    await agregar(page, 'Lab Cerveza')
+    await usable(page, 'm-carrito-abrir', true)
+    await page.getByTestId('m-carrito-abrir').click()
+    await usable(page, 'm-item', false)                         // primer ítem del carrito
+    await usable(page, 'm-pagar-cash', true)
+    await usable(page, 'm-pagar-nequi', true)
+    await page.getByTestId('m-pagar-cash').click()
+    await usable(page, 'm-recibido', false)                     // el campo del monto
+    await usable(page, 'm-confirmar', true)
+    await page.getByTestId('m-confirmar').click()
+    await expect(page.getByTestId('m-exito')).toBeVisible({ timeout: 15_000 })
+    await usable(page, 'm-exito-icono', false)
+    await usable(page, 'm-nueva-venta', true)
+    await page.getByTestId('m-nueva-venta').click()
+    // Al cerrar la capa, la barra y los avisos vuelven.
+    await expect(page.getByTestId('m-nav')).toBeVisible()
+    await expect(page.getByTestId('version-nueva')).toBeVisible()
+  })
+
+  test('cobro en NEQUI', async ({ page }, info) => {
+    await turnoAbierto()
+    await conAvisos(page, info)
+    await agregar(page, 'Lab Cerveza')
+    await page.getByTestId('m-carrito-abrir').click()
+    await page.getByTestId('m-pagar-nequi').click()
+    await usable(page, 'm-confirmar', true)
+    await page.getByTestId('m-confirmar').click()
+    await expect(page.getByTestId('m-exito')).toBeVisible({ timeout: 15_000 })
+    await usable(page, 'm-nueva-venta', true)
+    await page.getByTestId('m-nueva-venta').click()
+  })
+
+  test('hoja de EXTRAS', async ({ page }, info) => {
+    await turnoAbierto()
+    await conAvisos(page, info)
+    await page.getByTestId('m-buscar').fill('Lab Coctel')
+    await page.getByTestId('m-productos').getByTestId('m-producto').filter({ hasText: 'Lab Coctel' }).first().click()
+    await usable(page, 'm-extra', false)
+    await usable(page, 'm-extras-confirmar', true)
+    await page.getByTestId('m-extras-confirmar').click()
+    await expect(page.getByTestId('m-extras')).toHaveCount(0)
+    await usable(page, 'm-carrito-abrir', true)
+  })
 })
 
 test('producto con EXTRAS: hoja propia dentro de la pantalla, subtotal, y el extra llega a la venta', async ({ page }) => {
@@ -407,6 +536,12 @@ test('se pierde la respuesta del cobro y el vendedor reintenta: UNA venta, y se 
 test('A pierde la respuesta y cierra sesión; B entra en la MISMA pestaña con el mismo carrito: B hace SU venta', async ({ page }) => {
   // El id pendiente vive en la pestaña. Sin el usuario en la huella, B
   // reenviaría el id de A y recibiría la venta de A (ya_existia) a nombre de A.
+  // ⚠️ R10 — ESTE TEST YA NO DISTINGUE ESE MUTANTE (medido 2026-10-05): desde que
+  // entrar a /m recarga la página (manifest por documento), el login de B pasa por
+  // una carga completa que vacía el id pendiente. Queda como prueba del resultado; la
+  // que distingue el mutante es la del POS de escritorio, donde cerrar sesión y
+  // volver a entrar NO recarga (tests/pos-sale-lotes.spec.ts › "POS escritorio: A
+  // pierde la respuesta…").
   await turnoAbierto()
   const ids: string[] = []
   let primera = true

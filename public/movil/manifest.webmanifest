@@ -4,7 +4,7 @@
   "short_name": "Vender",
   "description": "POS móvil de G-Vento para vender desde el celular",
   "start_url": "/m",
-  "scope": "/",
+  "scope": "/m",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#0f172a",

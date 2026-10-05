@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-hot-toast'
 import { Search, Minus, Plus, X, Banknote, Smartphone, CreditCard, Building2, Check, ChevronLeft, Star } from 'lucide-react'
@@ -12,6 +13,8 @@ import { useMasVendidos } from '@/hooks/usePosMovil'
 import { useTecladoTapa } from '@/hooks/useDispositivoMovil'
 import { useCartStore, cartItemTotal, type ProductWithCategory } from '@/stores/cartStore'
 import { ExtrasMovil } from '@/components/movil/ExtrasMovil'
+import { CapaMovil } from '@/components/movil/CapaMovil'
+import { useShellMovil } from '@/components/movil/contextoShell'
 import { M, botonGrande, formatCOP } from '@/components/movil/estilo'
 import { leerPosMovil } from '@/lib/posMovil'
 import { cashQuickAmounts } from '@/lib/cashRounding'
@@ -40,6 +43,7 @@ export function VenderMovil() {
   const [categoria, setCategoria] = useState<string | null>(null)
   const [configurando, setConfigurando] = useState<ProductWithCategory | null>(null)
   const [hoja, setHoja] = useState<Paso | null>(null)
+  const { slotAccion } = useShellMovil()
 
   const porId = useMemo(() => new Map(productos.map((p) => [p.id, p])), [productos])
 
@@ -72,7 +76,7 @@ export function VenderMovil() {
   const total = items.reduce((s, i) => s + cartItemTotal(i), 0)
 
   return (
-    <div style={{ padding: '12px 12px 96px' }}>
+    <div style={{ padding: 12 }}>
       <label style={{
         display: 'flex', alignItems: 'center', gap: 10, background: M.panel, borderRadius: 12,
         padding: '0 14px', minHeight: 50, border: `1px solid ${M.borde}`,
@@ -132,30 +136,34 @@ export function VenderMovil() {
         <div style={{ color: M.suave, padding: 24, textAlign: 'center' }}>Sin productos</div>
       )}
 
-      {cantidad > 0 && hoja === null && (
+      {/* "Cobrar" en el lugar del caparazón (en el flujo, sobre la barra inferior):
+          nunca fixed dentro del contenido que se desplaza. */}
+      {cantidad > 0 && hoja === null && slotAccion && createPortal(
         <button
           type="button"
           data-testid="m-carrito-abrir"
           onClick={() => setHoja('carrito')}
           style={{
-            ...botonGrande(M.verde), position: 'fixed', left: 12, right: 12,
-            bottom: 'calc(env(safe-area-inset-bottom) + 72px)', zIndex: 20, justifyContent: 'space-between',
-            boxShadow: '0 10px 24px rgba(16,185,129,.35)',
+            ...botonGrande(M.verde), width: 'calc(100% - 24px)', margin: '8px 12px',
+            justifyContent: 'space-between', boxShadow: '0 6px 18px rgba(16,185,129,.30)',
           }}
         >
           <span>Cobrar · {cantidad}</span>
           <span data-testid="m-carrito-total" style={{ fontFamily: 'monospace' }}>{formatCOP(total)}</span>
-        </button>
+        </button>,
+        slotAccion,
       )}
 
-      {hoja !== null && <HojaCobro paso={hoja} setPaso={setHoja} />}
+      {hoja !== null && <CapaMovil><HojaCobro paso={hoja} setPaso={setHoja} /></CapaMovil>}
 
       {configurando && (
-        <ExtrasMovil
-          product={configurando}
-          onConfirm={(extras) => { addItem(configurando, extras); setConfigurando(null) }}
-          onClose={() => setConfigurando(null)}
-        />
+        <CapaMovil>
+          <ExtrasMovil
+            product={configurando}
+            onConfirm={(extras) => { addItem(configurando, extras); setConfigurando(null) }}
+            onClose={() => setConfigurando(null)}
+          />
+        </CapaMovil>
       )}
     </div>
   )
@@ -228,6 +236,7 @@ function HojaCobro({ paso, setPaso }: { paso: Paso; setPaso: (p: Paso | null) =>
       data-paso={paso}
       style={{
         position: 'fixed', top: 0, left: 0, right: 0, bottom: tapa, zIndex: 50, background: M.fondo, color: M.texto,
+        fontFamily: 'Inter, system-ui, sans-serif',
         display: 'flex', flexDirection: 'column', paddingTop: 'env(safe-area-inset-top)',
       }}
     >
@@ -340,7 +349,7 @@ function HojaCobro({ paso, setPaso }: { paso: Paso; setPaso: (p: Paso | null) =>
 
         {paso === 'exito' && venta && (
           <div data-testid="m-exito" style={{ display: 'grid', gap: 14, justifyItems: 'center', textAlign: 'center', paddingTop: 48 }}>
-            <div style={{ width: 88, height: 88, borderRadius: '50%', background: 'rgba(16,185,129,.18)', display: 'grid', placeItems: 'center', color: M.verde }}>
+            <div data-testid="m-exito-icono" style={{ width: 88, height: 88, borderRadius: '50%', background: 'rgba(16,185,129,.18)', display: 'grid', placeItems: 'center', color: M.verde }}>
               <Check size={48} strokeWidth={3} />
             </div>
             <div data-testid="m-exito-numero" style={{ fontSize: 26, fontWeight: 800 }}>Venta #{venta.numero}</div>

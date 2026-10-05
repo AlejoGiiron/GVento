@@ -374,6 +374,54 @@ test.describe('reenvío del navegador', () => {
 // error (route.fetch + abort), y el reintento desde la UI tiene que mandar el
 // mismo id de venta / de tanda. Sin eso, la clave del servidor no sirve de nada.
 test.describe('frontend: el reintento lleva la MISMA clave', () => {
+  test('POS escritorio: A pierde la respuesta y cierra sesión; B entra en la MISMA pestaña (sin recargar) con el mismo carrito → B hace SU venta', async ({ page }) => {
+    // En el escritorio, cerrar sesión y volver a entrar NO recarga la página: el id
+    // de venta pendiente de A sigue en memoria. Sin el usuario en la huella de
+    // useSaleCheckout, B lo reenviaría y recibiría la venta de A (ya_existia). En /m
+    // esto ya no pasa (entrar a /m recarga la página), así que la prueba que
+    // distingue ese mutante vive acá.
+    await turnoAbierto()
+    const ids: string[] = []
+    let primera = true
+    await page.route('**/rest/v1/rpc/register_pos_sale', async (route) => {
+      ids.push((route.request().postDataJSON() as { p_sale_id: string }).p_sale_id)
+      if (primera) { primera = false; await route.fetch(); await route.abort('connectionreset'); return }
+      await route.continue()
+    })
+    const cobrar = async () => {
+      await agregarProductoSimple(page)
+      await page.getByRole('button', { name: 'Cobrar' }).click()
+      await page.getByText('Efectivo', { exact: true }).click()
+      await page.getByRole('button', { name: /Continuar/ }).click()
+      await page.getByTestId('checkout-received').fill('20000')
+      await page.getByRole('button', { name: /Confirmar cobro/ }).click()
+    }
+    const entrarSinRecargar = async (email: string, password: string) => {
+      await page.locator('input[autocomplete="email"]').fill(email)
+      await page.locator('input[autocomplete="current-password"]').fill(password)
+      await page.getByRole('button', { name: 'Ingresar' }).click()
+      await expect(page).toHaveURL(/\/ventas$/, { timeout: 15_000 })
+      await waitPosReady(page)
+    }
+
+    await page.goto('/login')
+    await entrarSinRecargar(cashierCreds().email, cashierCreds().password)
+    await cobrar()
+    await expect(page.getByText(/Error al procesar el cobro/)).toBeVisible({ timeout: 15_000 })
+    await page.getByRole('button', { name: 'Cerrar sesión' }).click()
+    await expect(page).toHaveURL(/\/login$/)
+
+    await entrarSinRecargar(ownerCreds().email, ownerCreds().password)
+    await cobrar()
+    await expect(page.getByText(/¡Venta #\d+ registrada!/)).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByTestId('success-ya-existia')).toHaveCount(0)
+    expect(ids).toHaveLength(2)
+    expect(ids[1], 'B reenvió el id pendiente de A').not.toBe(ids[0])
+    expect(psql(`select created_by from public.orders where id = '${ids[0]}';`)).toBe(psql(`select id from auth.users where email = '${cashierCreds().email}';`))
+    expect(psql(`select created_by from public.orders where id = '${ids[1]}';`)).toBe(OWNER_ID)
+    await page.getByRole('button', { name: 'Nueva venta' }).click()
+  })
+
   test('POS: se pierde la respuesta, el cajero reintenta → UNA venta y el aviso; la venta siguiente lleva otro id', async ({ page }) => {
     const ids: string[] = []
     let primera = true

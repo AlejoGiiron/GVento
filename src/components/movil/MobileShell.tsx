@@ -1,12 +1,15 @@
-import { useEffect, useState } from 'react'
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { ShoppingBag, ReceiptText, Menu, X, Monitor, LogOut, Download, Share, MoonStar } from 'lucide-react'
+import { useCallback, useMemo, useState } from 'react'
+import { NavLink, Outlet } from 'react-router-dom'
+import { ShoppingBag, ReceiptText, Menu, X, Monitor, LogOut, Download, Share, MoonStar, RefreshCw } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useCashShift } from '@/hooks/useCashShift'
 import { useRestaurantConfig } from '@/hooks/useRestaurantConfig'
 import { usePantallaEncendida, useInstalacion } from '@/hooks/useDispositivoMovil'
-import { aplicarIdentidadMovil, pedirVersionCompleta, puedeCobrar } from '@/lib/posMovil'
+import { useVersionCheck } from '@/hooks/useVersionCheck'
+import { pedirVersionCompleta, puedeCobrar, cargarDocumento } from '@/lib/posMovil'
 import { M, botonGrande } from '@/components/movil/estilo'
+import { ContextoShellMovil } from '@/components/movil/contextoShell'
+import { CapaMovil } from '@/components/movil/CapaMovil'
 
 // ============================================================================
 // Caparazón del POS móvil (/m). Dentro de ProtectedRoute y FUERA de AppLayout:
@@ -26,17 +29,25 @@ export function MobileShell() {
   const { isOpen, isLoadingShift } = useCashShift()
   const pantalla = usePantallaEncendida()
   const instalacion = useInstalacion()
-  const navigate = useNavigate()
+  // El aviso de versión nueva, en /m, es una franja más (VersionBanner no se muestra acá).
+  const { hayNueva } = useVersionCheck()
   const [menu, setMenu] = useState(false)
-
-  useEffect(() => {
-    aplicarIdentidadMovil(true)
-    return () => aplicarIdentidadMovil(false)
+  // Capas abiertas (cobro, extras, menú). Con alguna abierta no se muestran la barra
+  // inferior ni los avisos: el botón principal de la capa no puede quedar debajo
+  // de nada nuestro (contextoShell.ts).
+  const [capas, setCapas] = useState(0)
+  const abrirCapa = useCallback(() => {
+    setCapas((c) => c + 1)
+    return () => setCapas((c) => c - 1)
   }, [])
+  const [slotAccion, setSlotAccion] = useState<HTMLElement | null>(null)
+  const contexto = useMemo(() => ({ abrirCapa, slotAccion }), [abrirCapa, slotAccion])
+  const sinCapas = capas === 0
+
 
   const irAVersionCompleta = (ruta: string) => {
     pedirVersionCompleta(true)
-    navigate(ruta)
+    cargarDocumento(ruta)   // carga completa: el documento del escritorio NO trae el manifest de /m
   }
 
   // /m solo cobra. Un rol que el servidor rechaza (register_pos_sale) no tiene
@@ -54,7 +65,8 @@ export function MobileShell() {
   }
 
   return (
-    <div data-testid="m-shell" style={pantallaCompleta}>
+    <ContextoShellMovil.Provider value={contexto}>
+    <div data-testid="m-shell" data-capas={capas} style={pantallaCompleta}>
       <header style={{
         paddingTop: 'calc(env(safe-area-inset-top) + 10px)', paddingLeft: 16, paddingRight: 16, paddingBottom: 10,
         borderBottom: `1px solid ${M.borde}`, display: 'flex', alignItems: 'center', gap: 10,
@@ -76,20 +88,28 @@ export function MobileShell() {
         )}
       </header>
 
-      {pantalla !== 'activa' && (
+      {sinCapas && hayNueva && (
+        <div data-testid="version-nueva" role="status" style={avisoFranja}>
+          <span style={{ flex: 1 }}>Hay una versión nueva</span>
+          <button type="button" data-testid="version-recargar" onClick={() => window.location.reload()} style={botonChico}>
+            <RefreshCw size={15} /> Recargar
+          </button>
+        </div>
+      )}
+      {sinCapas && pantalla !== 'activa' && (
         <div data-testid="m-pantalla-aviso" data-estado={pantalla} style={avisoFranja}>
           <MoonStar size={16} /> La pantalla se puede apagar sola en este equipo.
         </div>
       )}
-      {instalacion.puedeInstalar && (
-        <div style={avisoFranja}>
+      {sinCapas && instalacion.puedeInstalar && (
+        <div data-testid="m-aviso-instalar" style={avisoFranja}>
           <span style={{ flex: 1 }}>Instalá Vender en la pantalla de inicio.</span>
           <button type="button" data-testid="m-instalar" onClick={() => void instalacion.instalar()} style={botonChico}>
             <Download size={15} /> Instalar
           </button>
         </div>
       )}
-      {instalacion.ayudaIOS && (
+      {sinCapas && instalacion.ayudaIOS && (
         <div data-testid="m-ayuda-ios" style={avisoFranja}>
           <Share size={16} />
           <span style={{ flex: 1 }}>Para instalarla: <b>Compartir</b> → <b>Agregar a inicio</b>.</span>
@@ -99,11 +119,15 @@ export function MobileShell() {
         </div>
       )}
 
-      <main style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+      <main style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
         <Outlet />
       </main>
 
-      <nav style={{
+      {/* Lugar EN EL FLUJO para el botón de acción de la pantalla (el "Cobrar" de
+          Vender): entre el contenido y la barra, nunca encima de ninguno. */}
+      <div ref={setSlotAccion} data-testid="m-slot-accion" />
+
+      {sinCapas && <nav data-testid="m-nav" style={{
         display: 'flex', borderTop: `1px solid ${M.borde}`, background: M.fondo,
         paddingBottom: 'env(safe-area-inset-bottom)',
       }}>
@@ -112,9 +136,10 @@ export function MobileShell() {
         <button type="button" data-testid="m-nav-menu" onClick={() => setMenu(true)} style={estiloPestana(false)}>
           <Menu size={22} /><span>Menú</span>
         </button>
-      </nav>
+      </nav>}
 
       {menu && (
+        <CapaMovil>
         <div onClick={() => setMenu(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 60, display: 'flex', alignItems: 'flex-end' }}>
           <div onClick={(e) => e.stopPropagation()} style={{
             width: '100%', background: M.panel, borderRadius: '18px 18px 0 0',
@@ -128,8 +153,10 @@ export function MobileShell() {
             </button>
           </div>
         </div>
+        </CapaMovil>
       )}
     </div>
+    </ContextoShellMovil.Provider>
   )
 }
 

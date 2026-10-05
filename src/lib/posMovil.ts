@@ -5,6 +5,7 @@
 // ============================================================================
 
 import type { Database } from '@/types/database.types'
+import { identidadDeRuta } from '@/lib/identidadRutas'
 
 /** restaurants.config.pos_movil */
 export interface PosMovilConfig {
@@ -79,8 +80,19 @@ export function estaInstalada(): boolean {
     || (navigator as Navigator & { standalone?: boolean }).standalone === true
 }
 
-/** /m y sus subrutas. OJO: '/mesas' también empieza con '/m'. */
-export const esRutaMovil = (path: string): boolean => path === '/m' || path.startsWith('/m/')
+/** /m y sus subrutas (la MISMA regla que decide su documento). OJO: '/mesas' también empieza con '/m'. */
+export const esRutaMovil = (path: string): boolean => identidadDeRuta(path) === 'movil'
+
+/**
+ * Entrar a /m o salir de /m SIEMPRE con carga completa de página (nunca con
+ * navigate del router): así el documento es el de esa ruta, con SU manifest
+ * escrito en el HTML. Safari de iPhone toma el manifest del documento al
+ * "Agregar a inicio" (ver src/lib/identidadRutas.ts).
+ */
+export function cargarDocumento(ruta: string, reemplazar = false): void {
+  if (reemplazar) window.location.replace(ruta)
+  else window.location.assign(ruta)
+}
 
 // "Versión completa": preferencia POR EQUIPO. Un dueño o cajero que en el celular
 // trabaja con Mesas o Reportes la elige UNA vez y queda (antes valía solo para la
@@ -113,23 +125,6 @@ export function pedirVersionCompleta(si: boolean): void {
       else if (!si) a.removeItem(CLAVE_COMPLETA)
     } catch { /* siguiente */ }
   }
-}
-
-// ── Identidad instalable de /m ──────────────────────────────────────────────
-// 🔴 MISMOS VALORES que el script del <head> de index.html (que lo hace al
-// cargar directo en /m). Acá se hace al ENTRAR navegando (el login lleva a /m
-// sin recargar) y se deshace al salir. Idempotente.
-const MANIFEST_APP = '/manifest.json'
-const MANIFEST_MOVIL = '/movil/manifest.webmanifest'
-export function aplicarIdentidadMovil(activa: boolean): void {
-  document.querySelector('link[rel="manifest"]')?.setAttribute('href', activa ? MANIFEST_MOVIL : MANIFEST_APP)
-  document.querySelectorAll('[data-movil]').forEach((el) => el.remove())
-  if (!activa) return
-  const icono = document.createElement('link')
-  icono.rel = 'apple-touch-icon'; icono.href = '/movil/apple-touch-icon-180.png'; icono.setAttribute('data-movil', '')
-  const titulo = document.createElement('meta')
-  titulo.name = 'apple-mobile-web-app-title'; titulo.content = 'Vender'; titulo.setAttribute('data-movil', '')
-  document.head.append(icono, titulo)
 }
 
 /** ¿Hay que mandar a /m a este usuario, en esta ruta, en este equipo? */

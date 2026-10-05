@@ -31,9 +31,9 @@ separado** en un iPhone (Safari) y en un Android (Chrome).
 |---|---|---|---|---|
 | 1 | Entrar con el usuario de caja | Cae directo en **Vender** (`/m`), sin el menú lateral del escritorio | ☐ | ☐ |
 | 2 | **Instalar** | Android: aparece "Instalá Vender…" con botón **Instalar** → queda el ícono en la pantalla de inicio. iPhone: aparece UNA vez "Compartir → Agregar a inicio"; tras cerrarla y recargar, no vuelve | ☐ | ☐ |
-| 3 | Abrir desde el ícono instalado | Abre sin barra del navegador, en **Vender**, con el nombre "Vender" | ☐ | ☐ |
+| 3 | Abrir desde el ícono instalado | Abre sin barra del navegador, en **Vender**, con el nombre "Vender" — **nunca** "Cocina KDS". 🔴 Si lo agregaste ANTES del arreglo del 2026-10-05, borrá ese ícono y agregalo de nuevo desde `/m`: el teléfono guardó el manifest viejo y no lo actualiza solo | ☐ | ☐ |
 | 4 | Dejar el teléfono quieto en Vender 2–3 min (más que el apagado automático) | La pantalla **no se apaga**. Si se apaga, tiene que haber una franja amarilla "La pantalla se puede apagar sola" (en iPhone instalado puede pasar según la versión de iOS: anotar versión) | ☐ | ☐ |
-| 5 | Mirar el borde de abajo con el carrito lleno y en la pantalla de cobro | El botón verde **Cobrar** y los de **Efectivo / Nequi** quedan enteros **arriba** de la barra de inicio (iPhone) / de los botones del sistema (Android) | ☐ | ☐ |
+| 5 | Mirar el borde de abajo con el carrito lleno y en la pantalla de cobro | El botón verde **Cobrar** y los de **Efectivo / Nequi** quedan enteros, se tocan, y **no los tapa nada**: ni la barra de inicio (iPhone), ni los botones del sistema (Android), ni **nuestra barra inferior** (Vender / Mis ventas / Menú), ni los avisos. Revisar en: carrito, cobro en efectivo, cobro en Nequi, extras y venta exitosa | ☐ | ☐ |
 | 6 | Efectivo → tocar "¿Con cuánto paga?" | Sale el teclado **numérico**, y el botón **Cobrar** queda **visible arriba del teclado** (no tapado) | ☐ | ☐ |
 | 7 | Nequi con QR | El QR se ve grande y nítido; un teléfono de cliente lo escanea | ☐ | ☐ |
 | 8 | Vender con poca luz (brillo bajo) | Se leen nombres, precios y el total sin esfuerzo; los botones se aciertan con el pulgar | ☐ | ☐ |
