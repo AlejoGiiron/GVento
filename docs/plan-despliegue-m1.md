@@ -1,0 +1,640 @@
+# Plan de despliegue — aviso de versión, paso 2, config y M1
+
+Escrito el 2026-10-04. Se sigue **al pie de la letra y en orden**. Cada paso es un release
+chico que se diagnostica solo. **No se arranca un paso si el anterior no pasó su
+verificación.**
+
+## Reglas del plan (valen para todos los pasos)
+
+- **Quién hace qué.** Los merges a `develop` y la suite los hago yo (Claude Code) y te aviso
+  el commit. Los **releases** (`main`) y **todo el SQL** de producción los hacés vos. Yo no
+  toco producción.
+- **Horario:** fuera del horario de G-10 y Salchimelo. Se decide con datos (Paso 0) y se
+  confirma **justo antes** de cada paso con la consulta **Q-AHORA**.
+- **SQL y frontend: el SQL va ANTES del frontend que lo necesita.** En la reversa es al
+  revés: **primero el frontend (Vercel), después el SQL.**
+- **Si una verificación no da lo esperado: NO sigas.** Pegame la salida.
+- **Un `.sql` ya aplicado en producción no se vuelve a aplicar** (R5). Si la consulta
+  "ANTES" de un paso dice que ya está, se salta la aplicación y se va directo a la
+  verificación.
+- **Rollback en Vercel (plan Hobby): solo vuelve al deploy INMEDIATAMENTE anterior.** Por
+  eso los releases van de a uno y con tiempo entre medio. Después de un rollback, Vercel
+  **deja de publicar sola** lo que se empuja a `main`, hasta que se toca **Undo Rollback**.
+
+### Cómo sacar un `.sql` del repo sin que cambie (todos los pasos)
+
+En **Git Bash**. Así el archivo sale **exacto** del commit, sin conversión de finales de
+línea, y el md5 se puede comparar:
+
+```bash
+mkdir -p /c/Users/Alejandro/Documents/Proyectos/gvento-despliegue
+cd /c/Users/Alejandro/Documents/Proyectos/gvento
+git show <COMMIT>:<RUTA> > /c/Users/Alejandro/Documents/Proyectos/gvento-despliegue/<NOMBRE>.sql
+md5sum /c/Users/Alejandro/Documents/Proyectos/gvento-despliegue/<NOMBRE>.sql
+```
+
+Después se abre **en VS Code**, Ctrl+A, Ctrl+C, y se pega en el SQL Editor de Supabase.
+No uses `clip` ni la consola de PowerShell para copiar: pueden romper las tildes, y las
+funciones tienen mensajes con tildes. Si eso pasara, la verificación por md5 de la función
+lo detecta (da otro md5).
+
+Los archivos **de la raíz** del repo (fuera de git: reversas y consultas) se usan tal cual,
+con su md5:
+
+```bash
+cd /c/Users/Alejandro/Documents/Proyectos/gvento
+md5sum <ARCHIVO>.sql
+```
+
+### Cómo se hace un release (pasos 1, 1b, 3 y 5)
+
+En **Git Bash**, cuando yo te diga que `develop` está listo y en qué commit:
+
+```bash
+cd /c/Users/Alejandro/Documents/Proyectos/gvento
+git checkout develop
+git log -1 --format='%h %s' develop          # tiene que ser el commit que te pasé
+git fetch origin
+git diff --stat origin/main develop           # tiene que listar SOLO los archivos del paso
+git push origin develop
+git checkout main
+git pull --ff-only origin main
+git merge --no-ff develop -m "release: <título del paso>"
+git push origin main
+git rev-parse --short=7 HEAD                  # ← ESTA es la versión que va a mostrar la app
+git checkout develop
+```
+
+Después: en Vercel, esperar a que el deploy de `main` diga **Ready**. Abrir en el navegador
+**la dirección de producción + `/version.json`**. Tiene que mostrar
+`{"version":"<los 7 caracteres de arriba>"}`.
+
+### Cómo se hace el rollback de un frontend
+
+Vercel → proyecto → **Overview** → en el recuadro *Production Deployment*, **Instant
+Rollback** → elegir el deploy anterior → **Continue** → **Confirm Rollback**.
+Luego, en el navegador, `/version.json` tiene que mostrar la versión del release anterior.
+**Ojo:** después de esto, empujar a `main` ya no publica. Para volver a publicar: en el
+mismo recuadro, **Undo Rollback**.
+
+---
+
+## Consultas que se repiten
+
+**Q-AHORA** — ¿hay alguien vendiendo? (correr justo antes de cada paso)
+
+```sql
+select org.name as organizacion,
+       count(o.id) as ventas_ultimos_30_min,
+       (select count(*) from public.cash_shifts s join public.restaurants r2 on r2.id = s.restaurant_id
+         where r2.organization_id = org.id and s.closed_at is null) as turnos_abiertos
+  from public.organizations org
+  left join public.restaurants r on r.organization_id = org.id
+  left join public.orders o on o.restaurant_id = r.id and o.created_at > now() - interval '30 minutes'
+ group by org.id, org.name
+ order by org.name;
+```
+
+**Esperado:** `ventas_ultimos_30_min = 0` en **G-10** y en **Salchimelo**. Si alguna tiene
+ventas: **no arranques**, están trabajando. `turnos_abiertos` es informativo: un turno puede
+quedar abierto de la noche anterior.
+
+**Q-FUNCIONES** — huella de las funciones de los pasos 2 y 4 (pasos 2, 3, 4 y 5)
+
+```sql
+select p.oid::regprocedure as funcion,
+       md5(regexp_replace(regexp_replace(pg_get_functiondef(p.oid), E'\r','','g'), E'[ \t]+\n', E'\n','g')) as md5,
+       has_function_privilege('anon', p.oid, 'execute') as anon_ejecuta,
+       has_function_privilege('authenticated', p.oid, 'execute') as auth_ejecuta
+  from pg_proc p
+ where p.pronamespace = 'public'::regnamespace
+   and p.proname in ('add_order_items_with_extras', 'register_pos_sale', 'update_restaurant_config')
+ order by 1;
+```
+
+El md5 es **normalizado**: no cambia por finales de línea ni espacios al final.
+
+---
+
+## Paso 0 — Elegir el horario (una vez)
+
+**Q-HORARIO** — ventas por hora de Bogotá, últimos 30 días:
+
+```sql
+select org.name as organizacion,
+       extract(hour from o.created_at at time zone 'America/Bogota')::int as hora_bogota,
+       count(*) as ventas_30_dias
+  from public.organizations org
+  join public.restaurants r on r.organization_id = org.id
+  join public.orders o on o.restaurant_id = r.id
+ where o.created_at >= now() - interval '30 days'
+ group by 1, 2
+ order by 1, 2;
+```
+
+**Cómo leerlo:** buscá un tramo de **al menos 2 horas seguidas** en el que **G-10 y
+Salchimelo** tengan 0 (o casi 0) ventas en 30 días. Las horas que no aparecen son 0. Ese es
+el horario de todos los pasos. Como referencia: la fase 1 de D se aplicó el 1/10 a las 10:40
+y el release fue a las 11:45, sin problemas. Igual, confirmalo con esta consulta.
+
+---
+
+## Paso 1 — Aviso de versión
+
+- **Depende de:** nada. (Si ya lo hiciste hoy, saltá a **Verificación** y **Prueba**.)
+- **Qué lleva:** `supabase/app-version.sql` y el frontend de `develop` = `3fb4471`.
+- **Horario:** el del Paso 0. **Q-AHORA** antes.
+
+**1.1 — ANTES** (¿ya está aplicado?):
+
+```sql
+select to_regclass('public.app_versiones') as tabla,
+       to_regprocedure('public.marcar_version(text, text, text)') as rpc;
+```
+
+Esperado: `null | null`. Si sale `app_versiones | marcar_version(...)`, ya está aplicado: **no lo
+apliques** e ir a 1.3.
+
+**1.2 — Aplicar el SQL:**
+
+```bash
+git show 3fb4471:supabase/app-version.sql > /c/Users/Alejandro/Documents/Proyectos/gvento-despliegue/p1-app-version.sql
+md5sum /c/Users/Alejandro/Documents/Proyectos/gvento-despliegue/p1-app-version.sql
+```
+
+md5 esperado: **`f86eecbe559626427b01a810e5529c5d`**. Si da otro, pará. Pegalo en el SQL
+Editor y correlo. Tiene que terminar sin error.
+
+**1.3 — Verificación del SQL:**
+
+```sql
+select to_regclass('public.app_versiones') is not null                                   as tabla,
+       (select relrowsecurity from pg_class where oid = 'public.app_versiones'::regclass) as rls,
+       (select count(*) from pg_policies where schemaname = 'public' and tablename = 'app_versiones') as policies,
+       has_table_privilege('anon', 'public.app_versiones', 'select')                      as anon_lee,
+       has_table_privilege('authenticated', 'public.app_versiones', 'insert')             as auth_escribe,
+       md5(regexp_replace(regexp_replace(pg_get_functiondef('public.marcar_version(text, text, text)'::regprocedure), E'\r','','g'), E'[ \t]+\n', E'\n','g')) as md5_rpc,
+       has_function_privilege('anon', 'public.marcar_version(text, text, text)', 'execute')          as anon_ejecuta,
+       has_function_privilege('authenticated', 'public.marcar_version(text, text, text)', 'execute') as auth_ejecuta;
+```
+
+Esperado, **exacto**: `t | t | 0 | f | f | 208a273b942d98a1f2af6ddf1682c7d8 | f | t`.
+
+**1.4 — Release del frontend** (*Cómo se hace un release*), con estos datos:
+- `git log -1 --format='%h %s' develop` → `3fb4471 merge: aviso de versión — id de equipo estable sin localStorage`
+- `git diff --stat origin/main develop` → **17 archivos**, entre ellos `supabase/app-version.sql`,
+  `src/components/layout/VersionBanner.tsx`, `src/hooks/useVersionCheck.ts`,
+  `src/hooks/useMarcarVersion.ts`, `vercel.json`, `vite.config.ts`, `public/sw.js` y
+  `src/components/products/ProductModal.tsx` (el arreglo de la foto). Si aparece algo de
+  `pos-sale-lotes`, `movil` o `restaurant-config`, **pará**: `develop` no está donde debe.
+- Título: `release: aviso de versión nueva`
+
+**1.5 — Este release es el ÚLTIMO que necesita el mensaje de "recarguen".** El frontend
+viejo no tiene aviso. Mandá a G-10, Salchimelo y Café Aroma: *"Recarguen la página en cada
+equipo (Ctrl+Shift+R en el computador; en el celular, cerrar la pestaña y abrirla de
+nuevo)."* Desde acá, el aviso lo hace la app sola.
+
+**1.6 — Prueba en Café Aroma:**
+1. **Antes** del release, dejá una pestaña de Café Aroma abierta en el escritorio.
+2. Cuando el deploy esté *Ready*, abrí otra pestaña y entrá: abajo a la izquierda, debajo
+   del menú, tiene que decir `v<los 7 caracteres del release>`.
+3. Volvé a la pestaña vieja (cambiá de pestaña y regresá). La pestaña vieja **no tiene** el
+   aviso (es anterior a esta versión): recargala a mano. Desde el próximo release, el aviso
+   tiene que aparecer solo.
+4. En el SQL Editor (**Q-VERSIONES**):
+   ```sql
+   select org.name as organizacion, p.full_name as usuario, v.version,
+          (v.ultima_vez at time zone 'America/Bogota')::timestamp(0) as ultima_vez_bogota,
+          left(v.equipo, 8) as equipo, left(v.user_agent, 60) as navegador
+     from public.app_versiones v
+     join public.profiles p on p.id = v.user_id
+     left join public.restaurants r on r.id = v.restaurant_id
+     left join public.organizations org on org.id = r.organization_id
+    order by v.ultima_vez desc;
+   ```
+   Esperado: una fila de Café Aroma con tu usuario y la versión del release.
+
+**1.7 — Reversa:**
+1. Frontend: *Cómo se hace el rollback* (vuelve a `04273f3`, "release: cierre de turno en el servidor…").
+2. Después, el SQL: `app-version-revertir.sql` (raíz), md5 **`8a4d128d593702ec0a253f7c4a7faa5a`**.
+   Esperado: una fila `antes | <filas>` y al final `revertido`. Re-aplicarla falla sin
+   cambiar nada (probado en Docker).
+
+---
+
+## Paso 1b — El aviso también cuando falla un módulo diferido
+
+- **Depende de:** Paso 1 (es un cambio sobre el aviso).
+- **Qué lleva:** solo frontend, rama `fix/version-modulo` (`b2d4e79`). **Sin SQL.**
+- **Horario:** el del Paso 0, **otro día o al menos 1 hora después del Paso 1** (así el
+  rollback de Hobby vuelve al Paso 1 y no más atrás). **Q-AHORA** antes.
+
+**1b.1 — Merge** (lo hago yo): `fix/version-modulo` → `develop`, suite completa, te paso el commit.
+
+**1b.2 — Release**, con estos datos:
+- `git diff --stat origin/main develop` → **2 archivos**: `src/hooks/useVersionCheck.ts` y
+  `tests/aviso-version.spec.ts`.
+- Título: `release: aviso de versión también si falla la carga de un módulo`
+
+**1b.3 — Verificación:** `/version.json` con la versión nueva. Es el primer release con
+aviso: **las pestañas abiertas desde el Paso 1 tienen que mostrar "Hay una versión nueva —
+Recargar"** al volver a primer plano (o dentro de 5 minutos).
+
+**1b.4 — Prueba en Café Aroma:**
+1. Antes del release, dejá una pestaña de Café Aroma abierta.
+2. Después del release, volvé a esa pestaña: aparece **"Hay una versión nueva"** con
+   **Recargar**. Tocalo: el aviso se va y la versión de abajo a la izquierda cambia.
+3. Reportes → **Exportar Excel**: tiene que descargar el archivo.
+
+**1b.5 — Reversa:** solo el frontend (*Cómo se hace el rollback*). No hay SQL.
+
+---
+
+## Paso 2 — SQL del paso 2 (`pos-sale-lotes.sql`)
+
+- **Depende de:** Paso 1 (no técnicamente, pero así cada release queda aislado).
+- **Qué lleva:** solo SQL. **Es compatible con el frontend que está en producción** (medido
+  en Docker: las llamadas viejas de 2 argumentos caen en la función nueva; 77/77 specs del
+  frontend viejo en verde).
+- **Horario:** el del Paso 0. **Q-AHORA** antes.
+
+**2.1 — ANTES** (¿es la versión de prod que conozco?):
+
+```sql
+select p.oid::regprocedure as funcion,
+       md5(regexp_replace(regexp_replace(pg_get_functiondef(p.oid), E'\r','','g'), E'[ \t]+\n', E'\n','g')) as md5
+  from pg_proc p
+ where p.pronamespace = 'public'::regnamespace
+   and p.proname in ('add_order_items_with_extras', 'register_pos_sale')
+ order by 1;
+```
+
+Esperado: **una sola fila**, `add_order_items_with_extras(uuid,jsonb)` con md5
+**`5a7f25c53fc38a2326dd5f6ca455588a`**.
+- Si el md5 es otro: **pará**. La reversa vuelve a ese texto exacto, así que no devolvería prod
+  a como está.
+- Si ya aparece `register_pos_sale`: ya está aplicado. No lo apliques; ir a 2.3.
+
+**2.2 — Aplicar:**
+
+```bash
+git show e91c850:supabase/pos-sale-lotes.sql > /c/Users/Alejandro/Documents/Proyectos/gvento-despliegue/p2-pos-sale-lotes.sql
+md5sum /c/Users/Alejandro/Documents/Proyectos/gvento-despliegue/p2-pos-sale-lotes.sql
+```
+
+md5 esperado: **`ac43ad79bc637799fc194f7ebaff839b`**. Pegarlo y correrlo. Tiene que terminar
+sin error.
+
+**2.3 — Verificación:** **Q-FUNCIONES**. Esperado, **exacto**, 2 filas:
+
+| funcion | md5 | anon_ejecuta | auth_ejecuta |
+|---|---|---|---|
+| `add_order_items_with_extras(uuid,jsonb,uuid)` | `e2e6ec81b743d9afc900c793b9910ff3` | f | t |
+| `register_pos_sale(uuid,jsonb,jsonb,jsonb)` | `23e946e81c11f9486b04f9d53432e933` | f | t |
+
+🔴 **Si aparece además `add_order_items_with_extras(uuid,jsonb)`**, quedaron las dos
+versiones y el frontend actual falla (`PGRST203`). Pegame la salida.
+
+Y la tabla de tandas:
+
+```sql
+select (select relrowsecurity from pg_class where oid = 'public.order_item_lotes'::regclass) as rls,
+       (select count(*) from pg_policies where schemaname = 'public' and tablename = 'order_item_lotes') as policies,
+       has_table_privilege('authenticated', 'public.order_item_lotes', 'select') as auth_lee,
+       has_table_privilege('anon', 'public.order_item_lotes', 'select') as anon_lee;
+```
+
+Esperado: `t | 0 | f | f`.
+
+**2.4 — Prueba en Café Aroma** (con el frontend de producción, que todavía es el viejo):
+1. Abrí turno si no hay.
+2. POS: una venta en efectivo con 2 productos. Tiene que salir con número.
+3. Mesas: abrí una mesa, agregá 2 productos, después 1 más (dos tandas), y cobrala.
+4. Comprobación (**Q-CAFE-MESA**):
+   ```sql
+   select o.order_number, o.status::text as estado, o.total,
+          coalesce((select sum(i.qty * i.unit_price) from public.order_items i where i.order_id = o.id), 0)
+        + coalesce((select sum(e.qty * e.unit_price) from public.order_item_extras e join public.order_items i on i.id = e.order_item_id where i.order_id = o.id), 0)
+        - coalesce(o.discount_amount, 0) as total_de_las_lineas,
+          (select count(*) from public.order_item_lotes l where l.order_id = o.id) as tandas_con_clave
+     from public.orders o
+     join public.restaurants r on r.id = o.restaurant_id
+     join public.organizations g on g.id = r.organization_id
+    where g.name = 'Café Aroma' and o.table_id is not null and o.created_at > now() - interval '2 hours'
+    order by o.created_at desc
+    limit 5;
+   ```
+   Esperado para la mesa de la prueba: `total = total_de_las_lineas` y `tandas_con_clave = 0`.
+   El frontend viejo no manda clave de tanda; que sea 0 es lo correcto en este paso.
+
+**2.5 — Reversa** (solo mientras el frontend de producción sea ANTERIOR al Paso 3):
+`pos-sale-lotes-revertir.sql` (raíz), md5 **`da7da00c364c2b6df3dda5fc63565043`**.
+Deja `add_order_items_with_extras(uuid,jsonb)` con el md5 de prod `5a7f25c5…`; si no da, hace
+rollback solo. Muestra cuántas tandas se pierden: son claves, no plata. Si el Paso 3 ya está
+en producción: **primero** el rollback del frontend, **después** este archivo.
+
+---
+
+## Paso 3 — Frontend del paso 2
+
+- **Depende de:** Paso 2 aplicado y verificado (el frontend llama a `register_pos_sale`).
+- **Qué lleva:** solo frontend: `feat/pos-sale-lotes` (`e91c850`) → `develop`.
+- **Horario:** el del Paso 0. **Q-AHORA** antes. Otro día o ≥ 1 h después del último release.
+
+**3.1 — Merge** (lo hago yo): `feat/pos-sale-lotes` → `develop`, suite completa, te paso el commit.
+
+**3.2 — Release**, con estos datos:
+- `git diff --stat origin/main develop` → **15 archivos**, entre ellos
+  `src/hooks/useSaleCheckout.ts`, `src/hooks/useAgregarTanda.ts`, `src/pages/POSPage.tsx`,
+  `src/pages/TablesPage.tsx`, `src/lib/uuid.ts`, `supabase/pos-sale-lotes.sql` (ya aplicado en
+  el Paso 2: **no se vuelve a correr**) y `tests/pos-sale-lotes.spec.ts`. Nada de `movil` ni
+  `restaurant-config`.
+- Título: `release: venta del POS en una transacción y tandas de Mesas sin duplicar`
+
+**3.3 — Verificación:** `/version.json` nuevo y **Q-FUNCIONES** igual que en 2.3 (el release
+no toca la base).
+
+**3.4 — Prueba en Café Aroma** (después de tocar **Recargar** en el aviso):
+1. POS: una venta en efectivo y una en Nequi.
+2. **Q-CAFE-POS**:
+   ```sql
+   select o.order_number, (o.created_at at time zone 'America/Bogota')::timestamp(0) as hora_bogota,
+          o.total, sum(p.amount) as pagado,
+          bool_and(p.created_at = o.created_at) as orden_y_pago_en_la_misma_transaccion
+     from public.orders o
+     join public.restaurants r on r.id = o.restaurant_id
+     join public.organizations g on g.id = r.organization_id
+     join public.payments p on p.order_id = o.id
+    where g.name = 'Café Aroma' and o.table_id is null and o.created_at > now() - interval '2 hours'
+    group by o.id
+    order by o.created_at desc
+    limit 5;
+   ```
+   Esperado: las 2 ventas nuevas con `orden_y_pago_en_la_misma_transaccion = t`. Eso solo pasa
+   con `register_pos_sale`; las ventas del Paso 2, hechas con el frontend viejo, dan `f`. Medido
+   en Docker: 345 `t` con el camino nuevo y 2 `f` con llamadas separadas.
+3. Mesas: abrí una mesa, agregá 1 producto, después 2 más, y cobrala. En **Q-CAFE-MESA**:
+   `total = total_de_las_lineas` y `tandas_con_clave = 2`.
+
+**3.5 — Reversa:** el rollback del frontend (vuelve al Paso 1b). El SQL del Paso 2 **se
+queda**: el frontend anterior funciona con él.
+
+---
+
+## Paso 4 — SQL de la config (`restaurant-config-rpc.sql`)
+
+- **Depende de:** nada técnico (la función es nueva y nadie la llama todavía). Va antes del
+  Paso 4b (la vista previa la usa) y del Paso 5.
+- **Qué lleva:** solo SQL. Compatible con el frontend de producción, que no la llama.
+- **Horario:** el del Paso 0. **Q-AHORA** antes.
+
+**4.1 — ANTES, a quién le cambia el permiso de guardar la configuración.** Hasta ahora
+decidía la RLS (rol viejo `admin` o permiso `sedes.gestionar`); con la función, decide el
+permiso `config.acceder`.
+
+```sql
+select org.name as organizacion, p.full_name, p.role as rol_viejo, r.name as rol,
+       (p.role = 'admin' or r.permissions ? 'sedes.gestionar' or r.permissions ? '*') as podia_antes,
+       (r.permissions ? 'config.acceder' or r.permissions ? '*')                      as puede_ahora
+  from public.profiles p
+  join public.organizations org on org.id = p.organization_id
+  left join public.roles r on r.id = p.role_id
+ where p.is_active
+   and (p.role = 'admin' or r.permissions ? 'sedes.gestionar' or r.permissions ? '*')
+    is distinct from (r.permissions ? 'config.acceder' or r.permissions ? '*')
+ order by 1, 2;
+```
+
+- **0 filas:** no le cambia a nadie. Seguí.
+- **Con filas:** pará y pegámelas. `podia_antes = t, puede_ahora = f` es alguien que hoy guarda
+  la config y dejaría de poder. `f / t` es alguien que pasaría a poder.
+
+**4.2 — Línea base de "config pisada"** (antes de cambiar nada): correr
+`config-pisado-senales.sql` (raíz), md5 **`55d559f62d20efe0834b0f08a31a62e3`**, y guardar la
+salida. Bloque 1: `🔴` = hubo un QR y la config lo perdió. Bloque 2: lo que tiene hoy cada sede.
+
+**4.3 — ANTES:**
+
+```sql
+select to_regprocedure('public.update_restaurant_config(jsonb)') as funcion;
+```
+
+Esperado: `null`. Si no es null, ya está aplicado: no lo apliques; ir a 4.5.
+
+**4.4 — Aplicar:**
+
+```bash
+git show 11c14b2:supabase/restaurant-config-rpc.sql > /c/Users/Alejandro/Documents/Proyectos/gvento-despliegue/p4-restaurant-config-rpc.sql
+md5sum /c/Users/Alejandro/Documents/Proyectos/gvento-despliegue/p4-restaurant-config-rpc.sql
+```
+
+md5 esperado: **`5e5e32cbece43c5269d8f878249f5299`**. Pegarlo y correrlo.
+
+**4.5 — Verificación:** **Q-FUNCIONES**. Esperado: las 2 filas del Paso 2 **más**
+`update_restaurant_config(jsonb)` con md5 **`63be67138bff54b73ffa1cd9d21b31c2`**, `f`, `t`.
+
+**4.6 — Prueba en Café Aroma** (con el frontend del Paso 3, que todavía NO usa la función):
+Configuración → **Caja** → **Guardar**: tiene que decir "Cambios guardados". Comprueba que el
+camino viejo sigue andando.
+
+**4.7 — Reversa:** `config-rpc-revertir.sql` (raíz), md5 **`e63444b6cd6e040aad254bf1fdd7d412`**.
+Solo mientras el frontend de producción sea ANTERIOR al Paso 5; si no, primero el rollback del
+frontend. No toca ninguna config.
+
+---
+
+## Paso 4b — Prueba en equipos reales con la vista previa de M1
+
+- **Depende de:** Pasos 2 y 4 aplicados en producción. La vista previa vende con
+  `register_pos_sale` y guarda la config con `update_restaurant_config`.
+- **Con:** Café Aroma (la demo). Lista completa: `docs/m1-verificacion-equipos.md`.
+
+**4b.1 — ¿La vista previa usa la base de producción?** Vercel → proyecto → **Settings** →
+**Environment Variables**: `VITE_GVENTO_SUPABASE_URL` y `VITE_GVENTO_SUPABASE_ANON_KEY`
+tienen que tener marcado **Preview**, con los **mismos valores** que Production. Si solo
+tienen Production, la vista previa se construye sin base y no deja entrar. Para arreglarlo:
+editar cada una, marcar Preview, guardar, y en Deployments → la vista previa de
+`feat/m1-pos-movil` → ⋮ → **Redeploy**.
+
+**4b.2 — Qué versión es la vista previa:**
+
+```bash
+cd /c/Users/Alejandro/Documents/Proyectos/gvento
+git fetch origin
+git rev-parse --short=7 origin/feat/m1-pos-movil
+```
+
+**4b.3 — Comprobar contra la base que escribe en producción:** entrá a la vista previa con
+el usuario de Café Aroma y corré:
+
+```sql
+select p.full_name, v.version, (v.ultima_vez at time zone 'America/Bogota')::timestamp(0) as ultima_vez_bogota,
+       left(v.user_agent, 60) as navegador
+  from public.app_versiones v join public.profiles p on p.id = v.user_id
+ where v.version = '<los 7 caracteres de 4b.2>';
+```
+
+Esperado: tu fila. Si no aparece, la vista previa **no** está escribiendo en producción
+(revisá 4b.1).
+
+**4b.4 — Si pide iniciar sesión en Vercel** (protección de vistas previas, activada por
+defecto):
+- **Lo simple:** iniciar sesión en Vercel en el navegador de ese teléfono.
+- **Sin cuenta en el teléfono:** Vercel → Deployments → la vista previa → **Share** →
+  **Anyone with the link** → copiar el enlace y abrirlo en el teléfono. En Hobby hay **un
+  solo** enlace compartible por cuenta. Al terminar: **Share** → **Only people with access**.
+- 🔴 **iPhone, app instalada:** la app agregada a la pantalla de inicio tiene **sus propias
+  cookies**, separadas de Safari. Aunque Safari ya haya pasado la protección, la app
+  instalada puede volver a pedir el inicio de sesión de Vercel. No está medido; anotarlo en
+  el punto 3 de la lista. Si bloquea la prueba de instalación: Vercel → Settings →
+  **Deployment Protection** → desactivar **Vercel Authentication**, probar, y **volver a
+  activarla**. Mientras esté desactivada, la URL de la vista previa es pública, aunque igual
+  hay que iniciar sesión en G-Vento.
+
+**4b.5 — Antes de vender:** el usuario de Café Aroma tiene que ser de caja o dueño en el rol
+viejo:
+
+```sql
+select p.full_name, p.role::text as rol_viejo
+  from public.profiles p join public.organizations g on g.id = p.organization_id
+ where g.name = 'Café Aroma' and p.is_active;
+```
+
+`rol_viejo` = `cashier` o `admin`. Y **el turno se abre antes**, desde el escritorio (o en el
+teléfono: Menú → Versión completa → Ventas → abrir turno). `/m` no abre turnos.
+
+**4b.6 — Resultado:** la lista de `docs/m1-verificacion-equipos.md`, un iPhone y un Android.
+Pasame lo que falle (número de punto, modelo, versión de iOS/Android, captura). **El Paso 5 no
+se hace hasta que la lista pase.**
+
+---
+
+## Paso 5 — M1 + frontend de la config
+
+- **Depende de:** Paso 3 en producción, Paso 4 aplicado y Paso 4b aprobado.
+- **Qué lleva:** solo frontend: `feat/m1-pos-movil` → `develop`. El paso 2 ya está en
+  `develop` (Paso 3), así que entra solo lo de M1 y la config.
+- **Horario:** el del Paso 0. **Q-AHORA** antes. Otro día o ≥ 1 h después del último release.
+
+**5.1 — Merge** (lo hago yo): `feat/m1-pos-movil` → `develop`, suite completa (escritorio,
+`m-android` y `m-iphone`) con `PLAYWRIGHT_EXIT=0` leído del archivo. Un exit 1 es rojo, aunque
+diga "N passed" (DEUDAS → *"el proceso de WebKit a veces no termina"*). Te paso el commit.
+
+**5.2 — Release**, con estos datos:
+- `git diff --stat origin/main develop` → unos **38 archivos** (los de M1 y la config, más
+  `package.json` y `pnpm-lock.yaml` por Playwright 1.63.0). Nada de `pos-sale-lotes.sql` (ya
+  entró en el Paso 3). `supabase/restaurant-config-rpc.sql` aparece porque ya está aplicado
+  desde el Paso 4: **no se vuelve a correr**.
+- **Lo que este release cambia en el ESCRITORIO** (si algo del escritorio falla después del
+  Paso 5, está acá):
+  - `src/components/ProtectedRoute.tsx`: en un **celular**, el dueño y el cajero van a `/m`. En
+    computador y tablet no cambia nada.
+  - `src/hooks/useRestaurantConfig.ts`: **todo** guardado de Configuración pasa por
+    `update_restaurant_config`.
+  - `src/components/pos/ItemConfigModal.tsx`: el modal de extras usa la lógica compartida
+    (`useConfigExtras`); se ve igual.
+  - `src/hooks/useSaleCheckout.ts` y `src/hooks/useAgregarTanda.ts`: el usuario entra en la
+    clave del reintento.
+  - `src/pages/ConfigPage.tsx`: la sección nueva **POS móvil**.
+  - `index.html`: `viewport-fit=cover` y el manifest propio de `/m`.
+- Título: `release: POS móvil (/m) y configuración fusionada en el servidor`
+
+**5.3 — Verificación:** `/version.json` nuevo y **Q-FUNCIONES** igual que en 4.5. El service
+worker (`public/sw.js`) va primero a la red en todo lo del mismo origen: con **Recargar**,
+cada equipo toma la versión nueva, también la app instalada.
+
+**5.4 — Prueba en Café Aroma:**
+1. Escritorio: Configuración → **POS móvil** → fijar 2 productos → **Guardar**.
+   **Q-CAFE-CONFIG**:
+   ```sql
+   select r.name as sede, r.config -> 'pos_movil' as pos_movil, r.config ->> 'nequi_qr_url' as qr,
+          r.config -> 'payment_methods' as metodos,
+          (r.updated_at at time zone 'America/Bogota')::timestamp(0) as modificada_bogota
+     from public.restaurants r
+     join public.organizations g on g.id = r.organization_id
+    where g.name = 'Café Aroma';
+   ```
+   Esperado: `pos_movil` con los 2 ids en orden. `qr` y `metodos` **iguales** a antes de guardar
+   (no se pisan).
+2. Configuración → **Caja** → Guardar → "Cambios guardados".
+3. Celular: entrar con el usuario de caja → cae en **Vender**; los 2 fijados arriba con
+   estrella; una venta en efectivo y una en Nequi; **Mis ventas** las muestra.
+4. **Q-CAFE-POS**: las ventas del celular con `orden_y_pago_en_la_misma_transaccion = t`.
+
+**5.5 — Reversa:** el rollback del frontend (vuelve al Paso 3). Los SQL de los Pasos 2 y 4 **se
+quedan**: el frontend del Paso 3 funciona con los dos.
+
+---
+
+## Paso 6 — Fase 2 de D (cerrar el UPDATE directo de `cash_shifts`)
+
+- **Depende de:** Paso 1 (para ver qué versión tiene cada equipo) y de que **G-10 cierre por el
+  servidor**. No depende de los Pasos 2 a 5.
+- **Qué lleva:** solo SQL.
+- **Horario:** el del Paso 0, con **ningún turno abierto en G-10 ni en Salchimelo** (columna
+  `turnos_abiertos` de **Q-AHORA** = 0 para las dos). Si alguien cierra con un equipo viejo
+  justo después, no podría cerrar hasta recargar.
+
+**6.1 — Precheck:** `fase2-precheck.sql` (raíz), md5 **`2bfbb69b524de2bc4dc648c81a309d1f`**.
+- **Control** (léelo primero): bloque 1, todo cierre "antes del release" = `camino viejo`. Si
+  no, la consulta no sirve: pará.
+- **Condición para seguir:** en el bloque 2, **todos los cierres de G-10 posteriores al release
+  del Paso 1** salen `servidor`. Si hay alguno `camino viejo` posterior al Paso 1, la columna
+  `cerro` dice quién: ese equipo tiene el JS viejo. Que recargue; repetir otro día.
+
+**6.2 — Versiones de G-10** (por UUID de la organización):
+
+```sql
+select p.full_name as usuario, p.role::text as rol, v.version,
+       (v.ultima_vez at time zone 'America/Bogota')::timestamp(0) as ultima_vez_bogota, left(v.equipo, 8) as equipo
+  from public.profiles p
+  left join public.app_versiones v on v.user_id = p.id
+ where p.organization_id = '12b53bae-a4f7-4076-80f9-8f9288bd0567' and p.is_active
+ order by p.full_name, v.ultima_vez desc;
+```
+
+Esperado: **cada** usuario que cierra turno (en particular **valeria sanchez**) con al menos un
+equipo con versión del Paso 1 o posterior, visto después de ese release. Un usuario con
+`version` vacía no cargó ninguna versión con aviso: su equipo puede seguir con el JS viejo.
+
+**6.3 — ANTES:**
+
+```sql
+select (select count(*) from information_schema.role_table_grants
+         where table_schema = 'public' and table_name = 'cash_shifts'
+           and grantee in ('anon', 'authenticated') and privilege_type = 'UPDATE') as grants_update,
+       exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'cash_shifts'
+                and policyname = 'cash_shifts: cajero/admin cierra turno') as policy_cierre;
+```
+
+Esperado: `2 | t`. Si da `0 | f`, ya está aplicada: no la apliques.
+
+**6.4 — Aplicar:** `fase2-aplicar.sql` (raíz), md5 **`d66e82313f1e7abfa428cdb22e10ccdd`**.
+
+**6.5 — Verificación:** la consulta de 6.3. Esperado: **`0 | f`**.
+
+**6.6 — Prueba en Café Aroma:** abrir turno → una venta en efectivo → **cerrar turno**. Tiene
+que cerrar sin error. Si dice "Error al cerrar el turno": recargar (Ctrl+Shift+R) y volver a
+cerrar. Si sigue, reversa.
+
+**6.7 — Reversa:** `fase2-revertir.sql` (raíz), md5 **`034ec0a4a314d3294951a710255a9431`**. No hay
+frontend involucrado. Reabre el UPDATE directo (el camino viejo): es para una emergencia con un
+equipo que no puede recargar, no para un "Error al cerrar", que se arregla recargando.
+Esperado: verifica la policy contra el hash de prod y hace rollback si no da; después,
+6.3 da `2 | t`.
+
+---
+
+## Resumen
+
+| paso | qué | SQL | frontend | reversa |
+|---|---|---|---|---|
+| 0 | elegir horario | — | — | — |
+| 1 | aviso de versión | `app-version.sql` @ `3fb4471` (`f86eecbe…`) | develop `3fb4471` | rollback + `app-version-revertir.sql` (`8a4d128d…`) |
+| 1b | aviso si falla un módulo | — | `fix/version-modulo` | rollback |
+| 2 | SQL del paso 2 | `pos-sale-lotes.sql` @ `e91c850` (`ac43ad79…`) | — | `pos-sale-lotes-revertir.sql` (`da7da00c…`), solo antes del 3 |
+| 3 | frontend del paso 2 | — | `feat/pos-sale-lotes` | rollback |
+| 4 | SQL de la config | `restaurant-config-rpc.sql` @ `11c14b2` (`5e5e32cb…`) | — | `config-rpc-revertir.sql` (`e63444b6…`), solo antes del 5 |
+| 4b | equipos reales | — | vista previa de `feat/m1-pos-movil` | — |
+| 5 | M1 + config | — | `feat/m1-pos-movil` | rollback |
+| 6 | fase 2 de D | `fase2-aplicar.sql` (`d66e8231…`) | — | `fase2-revertir.sql` (`034ec0a4…`) |
