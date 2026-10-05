@@ -18,7 +18,21 @@ const INTERVALO_MS = 5 * 60 * 1000
  */
 export function useVersionCheck(): { hayNueva: boolean; publicada: string | null } {
   const [publicada, setPublicada] = useState<string | null>(null)
-  const hayNueva = publicada !== null && publicada !== __APP_VERSION__
+  const [moduloFallido, setModuloFallido] = useState(false)
+  const hayNueva = moduloFallido || (publicada !== null && publicada !== __APP_VERSION__)
+
+  // Un import() diferido que falla (hoy: exceljs en Reportes) es casi siempre una
+  // pestaña VIEJA pidiendo un archivo que el deploy nuevo ya no tiene: Vercel
+  // responde index.html (la rewrite de vercel.json) y el navegador rechaza el
+  // módulo. Vite emite `vite:preloadError` también cuando falla el import en sí
+  // (5.4: `baseModule().catch(handlePreloadError)`). NO se llama a
+  // preventDefault: el error sigue llegando al catch de quien importó (su toast),
+  // y además se muestra el aviso para recargar.
+  useEffect(() => {
+    const alFallar = () => setModuloFallido(true)
+    window.addEventListener('vite:preloadError', alFallar)
+    return () => window.removeEventListener('vite:preloadError', alFallar)
+  }, [])
 
   useEffect(() => {
     if (hayNueva) return

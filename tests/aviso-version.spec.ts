@@ -55,6 +55,20 @@ test('un deploy NUEVO se detecta al volver a primer plano, sin recargar', async 
   await expect(page.getByTestId(BANNER)).toBeVisible()
 })
 
+// En el dev server no hay import() envuelto por Vite (el envoltorio que emite
+// vite:preloadError solo existe en el BUILD), así que acá se prueba el LISTENER
+// disparando el evento. Que Vite lo emita de verdad se midió aparte contra
+// `vite build` + `vite preview` con el chunk de exceljs respondiendo index.html
+// (lo que hace Vercel con un archivo que el deploy nuevo ya no tiene).
+test('un módulo diferido que no carga (vite:preloadError) → aviso, aunque version.json no cambió', async ({ page }) => {
+  await loginAsOwner(page)
+  await expect(page.getByTestId('app-version')).toHaveText('vdev')
+  await expect(page.getByTestId(BANNER)).toHaveCount(0)        // contraste: misma versión, sin aviso
+  await page.evaluate(() => window.dispatchEvent(new Event('vite:preloadError')))
+  await expect(page.getByTestId(BANNER)).toBeVisible()
+  await expect(page.getByTestId('version-recargar')).toBeVisible()
+})
+
 test('version.json con error → SIN aviso (un fallo de red no es una versión nueva)', async ({ page }) => {
   await page.route('**/version.json', (r) => r.fulfill({ status: 503, body: 'no' }))
   const consultada = page.waitForResponse('**/version.json')

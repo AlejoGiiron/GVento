@@ -186,8 +186,13 @@ cancele y libere la mesa. No "reintentar el segundo request".
 
 ### 🔴 `register_sale_payment` acepta cobros SIN turno abierto — medido; el cambio va sin aviso a clientes (2026-09-30)
 
-**🟡 RESUELTO EN RAMA `feat/cobro-turno` (2026-09-30) — pendiente de aplicar en prod, DESPUÉS de
-la fase 1 de D** (`supabase/cobro-turno.sql` parte del texto de las funciones con el protocolo).
+**✅ DESPLEGADO EL 2026-10-01** (lo reportó el usuario): release `main = 04273f3` a las ~11:45 y,
+justo después, `cobro-turno.sql` en prod. La verificación del encabezado dio 3 filas `t t t t f`.
+Pruebas en Café Aroma con el frontend nuevo: abono en efectivo sin turno → aviso amarillo y botón
+deshabilitado; abono por transferencia sin turno → OK. Con el frontend viejo, antes de que Vercel
+terminara, el efectivo sin turno dio el error genérico y no registró nada, como se había medido.
+Reversa preparada (fuera de git): `cobro-revertir.sql`. *(Historia del arreglo, abajo.)*
+`supabase/cobro-turno.sql` parte del texto de las funciones con el protocolo.
 Cobro: turno obligatorio con cualquier método (FOR SHARE, primer lock) + orden FOR UPDATE.
 Abonos (decidido 2026-09-30): **el EFECTIVO exige turno**; los otros métodos no. Motivo, medido
 en prod con `supabase/diag/abonos-efectivo-fuera-de-turno.sql`: Salchimelo, 2 abonos en efectivo
@@ -294,6 +299,124 @@ cobro: No hay un turno de caja abierto…". Queda la orden en `pending` / `paid`
 - **D, despliegue:** la RPC es nueva, así que el SQL va **ANTES** del frontend que la llama.
   Las RPC actuales no cambian (Mesas las sigue usando) y una pestaña vieja sigue funcionando.
 
+### 🔴 El navegador ejecuta DOS VECES escrituras que el usuario hizo una vez (reenvío de Chromium) — medido 2026-10-01/04
+
+**El mecanismo (reproducido en Docker, `Chromium ─ proxy TCP ─ Supabase local`):** si una conexión
+keep-alive **reutilizada** se corta después de que el servidor procesó un POST, Chromium reenvía
+el POST solo, por una conexión nueva, y le entrega al código la respuesta del SEGUNDO envío.
+
+| corte | POST que llegan | qué ve el código | en la base |
+|---|---|---|---|
+| inmediato, RST o cierre ordenado (FIN) | 2 | **HTTP 204, éxito** | **2 veces** |
+| conexión colgada **19 s** y después RST o FIN | 2, **a 19 s** | **HTTP 204, éxito** | **2 veces, a 19 s** |
+| en conexión NUEVA (no reutilizada) | 1 | **error** ("Failed to fetch") | **1 vez: guardado** |
+
+Ni postgrest-js (solo reintenta GET, HEAD y OPTIONS) ni nuestro código reenvían: es la capa de
+red del navegador, y la app no puede enterarse. Medido sobre HTTP/1.1 (lo que hay en local); prod
+va por HTTPS y ahí no se midió el protocolo exacto.
+
+**Evidencia en prod (60 días, hasta 2026-10-04):**
+- **#2945 de G-10:** `add_order_items_with_extras` ejecutado dos veces, a **19,5 s**: Σ ítems 48.000
+  contra total y pago de 24.000. **No se limpia** (decisión 2026-10-04, ver la entrada siguiente).
+- **#2908 de G-10:** `createOrder` reenviado a 533 ms; la gemela 7784e3fa quedó huérfana, sin ítems.
+- **Turno 95ecc259 de G-10 (23/09):** egreso manual de 45.000 duplicado a 1,997 s. El arqueo no se
+  corrige. **No se agregó la nota** (decisión 2026-10-04, ver la entrada siguiente).
+- **994601b1 de G-10 (09/08):** los ítems se guardaron, la app recibió un error y no cobró (el caso
+  de "conexión nueva"); rehecha como #1332. **No se limpia** (decisión 2026-10-04, ver la entrada siguiente).
+- **Salchimelo, mesa #1193 (23/08):** tanda "SALCHIDOBLEAA PERSONAL" duplicada a 35 ms; Σ ítems
+  36.000 contra total y pagos de 12.000. **No se toca (decisión 2026-10-04).** En mesas el total lo
+  suma el cliente una vez por tanda, así que se cobró bien; el reenvío infló el reporte de productos
+  y, si tiene receta, descontó stock de más.
+- Abonos gemelos: **ninguno**.
+
+**Para detectarlo:** `supabase/diag/duplicados-reenvio-detector.sql`. POS: una orden con ítems de
+más de un `created_at` (toda venta POS inserta sus ítems en una llamada), a cualquier distancia.
+Mesas: la misma tanda repetida con hasta 60 s.
+
+**Prevención, en este orden (decidido 2026-10-04):**
+1. **`register_pos_sale`**: cubre el reenvío de `createOrder`, de los ítems y del pago. La segunda
+   ejecución con el mismo `p_sale_id` devuelve la venta ya hecha, con éxito. El test cubre los
+   cuatro modos de la tabla, más el reintento manual después del error en conexión nueva.
+2. **Movimientos de caja manuales**: id generado por el cliente + insert que ignora duplicados.
+   Es chico y va con `register_pos_sale`.
+3. **Clave por tanda en Mesas** (`add_order_items_with_extras(..., p_lote)`): va con M2.
+4. **Abonos**: sin casos en prod; queda acá. Si aparecen, clave por abono.
+
+### ✅ DECIDIDO (2026-10-04): los datos históricos del reenvío y del cobro en dos pasos NO se limpian
+
+**Si un diagnóstico encuentra alguno de estos casos, NO es un hallazgo nuevo:** están medidos,
+explicados y la decisión es dejarlos como están. Lo que se arregla es el mecanismo (la entrada
+anterior, "Prevención"), no los datos.
+
+**Única excepción admitida:** cancelar huérfanas que se ven en **Cocina** (status `pending`,
+`preparing` o `ready`), si molestan al operar. Cancelar no devuelve stock ni toca ítems.
+
+**Los casos (prod, ventana de 60 días medida el 2026-10-01/04):**
+
+| caso | qué es | estado al 2026-10-04 | qué afecta |
+|---|---|---|---|
+| **15 huérfanas sin ítems** de G-10 (POS) | cobro en dos pasos: la orden se creó, la carga de ítems no se guardó, la app no cobró; todas con reintento exitoso, todas de "valeria sanchez", 10 el 27/09 (8 entre 18:07 y 23:32) | `pending`, sin ítems, pagos, número ni stock | **se ven en Cocina** (candidatas a la excepción); no inflan ventas ni historial |
+| **7784e3fa** (una de las 15) | `createOrder` reenviado por el navegador a 533 ms; la gemela es la #2908 | idem | idem |
+| **#2945** de G-10 (`c1a79e70…`) | `add_order_items_with_extras` ejecutado dos veces, a 19,5 s; líneas `5656898f…` (original) y `6204a166…` (reenvío) | Σ ítems 48.000; total = pago = 24.000 | infla el reporte de productos en 2 Explosion 12onz / 24.000; ventas no |
+| **994601b1** de G-10 (09/08, 43.000) | huérfana CON ítems: se guardaron, la app recibió un error y no cobró; rehecha como #1332 | `pending`, 3 ítems, 2 movimientos de stock, sin pago ni número | **se ve en Cocina** (candidata a la excepción); infla el reporte de productos |
+| **turno 95ecc259** de G-10 (23/09 18:56) | egreso manual de 45.000 "cocteles came y sebas se desconto" duplicado a 1,997 s | arqueo cerrado, sin nota | el esperado congelado puede mostrar un sobrante aparente de 45.000 |
+| **mesa #1193** de Salchimelo (23/08) | tanda "SALCHIDOBLEAA PERSONAL" duplicada a 35 ms | Σ ítems 36.000; total = pagos = 12.000 | se cobró bien; infla el reporte de productos y, si tiene receta, el stock |
+
+Las 15, por si hay que identificarlas: `c7dc1724`, `fde49aa8`, `2c31c598`, `f02987cd`, `00d31d5a`,
+`3b4e4c18`, `e02fefd1`, `7784e3fa`, `4f3ab8bc`, `a3fb0240`, `67b9027d`, `a0238998`, `d6f4f710`,
+`8aaebb37`, `1e491b0e` (prefijos de UUID; G-10 = `12b53bae-a4f7-4076-80f9-8f9288bd0567`).
+
+**Qué los reproduce (todo de solo lectura, en `supabase/diag/`):**
+
+| query | qué devuelve de la lista |
+|---|---|
+| `pos-total-formula.sql` | por organización: ventas POS que no cuadran (la #2945) y `sin_items` (las 15) |
+| `b1-detalle.sql` | el detalle de la que no cuadra y de cada sin ítems, con dónde aparece y su reintento |
+| `duplicados-reenvio-detector.sql` | POS con ítems de más de una llamada (#2945) y tandas de mesa repetidas (#1193) |
+| `duplicados-reenvio.sql` | bloque 3: órdenes gemelas (7784e3fa / #2908); 5: movimientos gemelos (turno 95ecc259); 7: huérfanas con ítems (994601b1) |
+
+🔴 **Todas usan una ventana de 60 días** (`params.desde`). Estos casos van saliendo de la ventana:
+la #1193 deja de aparecer hacia el 22/10 y la 994601b1 ya está cerca del borde. **Para
+reconocerlos después, la tabla de arriba es la referencia, no el resultado del detector;** y para
+volver a verlos con la query, ampliar `desde`.
+
+**Los scripts para aplicar la excepción ya existen, fuera de git** (en la raíz del repo de
+Alejandro, probados en Docker con los UUID de prod el 2026-10-04):
+- huérfanas: `limpieza-00-respaldo.sql` → `limpieza-01-huerfanas.sql` → `limpieza-03-verificar.sql`, con reversa;
+- fantasma: `limpieza-04-fantasma-respaldo.sql` → `limpieza-04-fantasma.sql`, con reversa.
+
+`limpieza-02-2945.sql` y `turno-95ecc259-nota.sql` también existen, pero **quedan fuera de la
+decisión**: tocan datos que no se ven en Cocina.
+
+### "Regalado en vales" cuenta órdenes anuladas y huérfanas (anotado 2026-10-04)
+
+`getVouchersTotal` (Reportes) suma `discount_amount` de toda orden con `discount_kind = 'vale'`
+sin mirar el estado ni los pagos. Una venta anulada con vale, o una huérfana con vale, sigue
+sumando. El vale del cierre (`close_cash_shift`) sí exige pago. No se arregló: se anota porque
+las limpiezas de huérfanas no la sacan de ese número.
+
+### UX del cierre: un abono de fiado en efectivo aparece como "Ingresos manuales" (anotado 2026-10-01)
+
+La cuenta está bien: el abono en efectivo crea un `cash_movement` de tipo `in` ("Abono de
+<cliente>"), y el arqueo lo suma como cualquier ingreso. Pero el modal de cierre lo rotula
+**"Ingresos manuales"**, y el dueño va a preguntar qué ingreso manual hizo. Visto en Café Aroma
+en la prueba del 2026-10-01.
+
+**Propuesta, sin construir:** una línea aparte, **"Abonos de fiado"**, separada de "Ingresos
+manuales".
+- **Cómo distinguirlos:** por el vínculo `debt_payments.cash_movement_id`, que es la definición
+  de "este ingreso es un abono". **NO por el texto** "Abono de…" del `reason` (R2: el texto es
+  una descripción, no una identidad).
+- **Lados a tocar en la misma pasada (R1):**
+  - `close_cash_shift`, que hoy devuelve un solo `movements_in`: sumar `abonos_fiado`;
+  - `CloseShiftModal` (vista previa);
+  - `ShiftDetailModal` (historial);
+  - `printer.ts`, que en el ticket imprime "Ingresos";
+  - `MovementsModal`.
+- **La fórmula del arqueo NO cambia** (contrato R1 #6): ingresos totales = manuales + abonos. Es
+  solo presentación, así que el invariante de `cierre-turno-servidor.spec.ts` no se toca. Sí
+  hay que agregar un test que separe las dos líneas.
+
 ### Precio del POS: ¿se valida `unit_price` contra `products.price`? — NO por ahora (B2, 2026-10-01)
 
 `register_pos_sale` va a validar el TOTAL contra las líneas (B1), pero el `unit_price` de cada
@@ -317,6 +440,23 @@ Salió del punto C del diseño de `register_pos_sale`, que pedía marcar el vale
 la misma transacción; eso no se puede hacer porque no hay qué marcar. Si hace falta, es una
 decisión de producto (vales con código y un solo uso), no un arreglo técnico. **Se habla con el
 cliente antes.**
+
+**Quién puede aplicar un descuento o un vale (código al 2026-10-01, develop `806d8a0`):**
+- **POS:** solo con `pos.descuento`. La sección de descuento está dentro de
+  `{can('pos.descuento') && (` en `POSPage.tsx` (bloque comentado "Discount — requiere permiso
+  pos.descuento"). Lo tienen owner (`*`), admin y cajero; el mozo no (`SYSTEM_ROLES` en
+  `src/lib/permissions.ts`).
+- **Mesas:** **sin permiso.** El checkout de mesa muestra la sección "Descuento / vale — aplica
+  antes del pago…" de `TablesPage.tsx` sin ningún `can(...)`, y la aplica con `applyOrderDiscount`
+  (UPDATE directo a `orders`). Cualquiera que llegue a cobrar una mesa puede descontar.
+- **Base:** **nada lo controla.** Ninguna función ni policy consulta `pos.descuento`
+  (`select proname from pg_proc where prosrc ilike '%pos.descuento%'` devuelve solo
+  `seed_system_roles`, que lo CONCEDE). Las policies "orders: staff crea" y "orders: staff
+  actualiza" aceptan `discount_*` de cualquier miembro del staff.
+  ⇒ `pos.descuento` es un control **solo de pantalla y solo en el POS**: misma clase que
+  "concedible pero inerte" (más abajo), con la diferencia de que acá sí gatea algo, pero en un
+  único lugar. La salida es la misma que para el total (B1 de `register_pos_sale`): validarlo en
+  el servidor. Para Mesas, con el cobro de mesa en una RPC (`close_table_sale`).
 
 ### 🔴 Re-aplicar una migración vieja revierte en silencio las funciones que redefinió una posterior (medido 2026-09-30)
 
@@ -566,7 +706,12 @@ select tablename, policyname, cmd, roles from pg_policies
 
 ### 🔴 Registrar un movimiento y cerrar turno EN SEGUIDA puede persistir un esperado sin ese movimiento (hallado 2026-09-07)
 
-**🟡 RESUELTO EN RAMA `feat/close-cash-shift` (2026-09-30) — pendiente de aplicar en prod.**
+**✅ FASE 1 DESPLEGADA EL 2026-10-01** (lo reportó el usuario): `close-cash-shift.sql` de `3339978`
+a las 10:40, con las 4 verificaciones OK; frontend que cierra por `close_cash_shift` a las ~11:45.
+Cierre de prueba en Café Aroma con el frontend nuevo: congelado = recalculado (63.500).
+**FASE 2 (`close-cash-shift-revoke.sql`): queda para el 2026-10-02**, después de correr
+`fase2-precheck.sql` (fuera de git), que distingue por qué camino cerró cada turno.
+*(Historia del arreglo, abajo.)*
 `supabase/close-cash-shift.sql`: cierre en el servidor (`close_cash_shift`), UPDATE revocado a
 authenticated y anon sobre `cash_shifts` (una pestaña vieja recibe 42501: toast "Error al cerrar
 el turno", el turno sigue abierto — medido), trigger que rechaza movimientos en turnos cerrados, y
