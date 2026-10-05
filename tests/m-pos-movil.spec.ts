@@ -104,6 +104,34 @@ test('en el celular, quien cobra entra directo a /m; "Versión completa" lo deja
   await expect(page).toHaveURL(/\/mesas$/)
 })
 
+test('"Versión completa" se recuerda POR EQUIPO (otra pestaña) y se puede volver a /m', async ({ context }) => {
+  const a = await context.newPage()
+  await entrar(a, cashierCreds())
+  await a.getByTestId('m-nav-menu').click()
+  await a.getByTestId('m-version-completa').click()
+  await expect(a).toHaveURL(/\/ventas$/)
+  await a.close()
+
+  // MISMO equipo (mismo contexto = mismo almacenamiento y la sesión sigue abierta, como
+  // al volver a abrir la app en el celular): pestaña nueva, queda en escritorio.
+  const b = await context.newPage()
+  await b.goto('/ventas')
+  await expect(b).toHaveURL(/\/ventas$/)
+  await b.goto('/mesas')
+  await expect(b).toHaveURL(/\/mesas$/)
+
+  // Volver a elegir: desde el escritorio, "Usar la versión para celular".
+  await b.getByTestId('app-usar-movil').click()
+  await expect(b).toHaveURL(/\/m$/)
+  await b.close()
+
+  // Y queda elegido /m para el equipo: una pestaña nueva vuelve a caer en /m.
+  const c = await context.newPage()
+  await c.goto('/ventas')
+  await expect(c).toHaveURL(/\/m$/)
+  await expect(c.getByTestId('m-shell')).toBeVisible()
+})
+
 test('un mozo en el celular NO va a /m (no puede cobrar); si entra a /m, se le dice', async ({ page }) => {
   test.skip(!hasWaiterCreds(), 'sin credenciales de mozo en local.config')
   await entrar(page, waiterCreds(), /\/ventas$/)

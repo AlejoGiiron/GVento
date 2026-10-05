@@ -40,6 +40,16 @@ async function fijar(page: Page, nombre: string) {
 
 test('fijar, ordenar y guardar: queda pos_movil por id y en orden; el resto de la config no se toca', async ({ page }) => {
   const restoAntes = resto()
+  // Pasa por la RPC con SOLO la clave pos_movil, y ningún PATCH a restaurants lleva config.
+  const rpc: string[][] = []
+  let patchConConfig = false
+  page.on('request', (r) => {
+    if (r.method() === 'POST' && r.url().includes('/rest/v1/rpc/update_restaurant_config')) {
+      rpc.push(Object.keys((r.postDataJSON() as { p_cambios: Record<string, unknown> }).p_cambios))
+    }
+    if (r.method() === 'PATCH' && r.url().includes('/rest/v1/restaurants')
+        && 'config' in ((r.postDataJSON() ?? {}) as Record<string, unknown>)) patchConConfig = true
+  })
   await abrir(page)
   await fijar(page, 'Lab Coctel')
   await fijar(page, 'Lab Agua')
@@ -51,6 +61,8 @@ test('fijar, ordenar y guardar: queda pos_movil por id y en orden; el resto de l
   await page.getByTestId('cfg-pos-movil-guardar').click()
   await expect(page.getByText('Cambios guardados').first()).toBeVisible()
 
+  expect(rpc).toEqual([['pos_movil']])
+  expect(patchConConfig).toBe(false)
   expect(JSON.parse(posMovil())).toEqual({ fijados: [prod('Lab Agua'), prod('Lab Coctel')], mas_vendidos: { cantidad: 4, dias: 7 } })
   expect(resto(), 'guardar POS móvil tocó otras claves').toBe(restoAntes)
 

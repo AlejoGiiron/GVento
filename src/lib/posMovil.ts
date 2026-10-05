@@ -82,17 +82,37 @@ export function estaInstalada(): boolean {
 /** /m y sus subrutas. OJO: '/mesas' también empieza con '/m'. */
 export const esRutaMovil = (path: string): boolean => path === '/m' || path.startsWith('/m/')
 
-// "Versión completa" vale para ESTA pestaña (sessionStorage): el dueño puede ir a
-// Reportes desde el celular sin que la próxima navegación lo devuelva a /m.
+// "Versión completa": preferencia POR EQUIPO. Un dueño o cajero que en el celular
+// trabaja con Mesas o Reportes la elige UNA vez y queda (antes valía solo para la
+// pestaña). Se vuelve a /m desde el escritorio ("Usar la versión para celular").
+// Guardado: localStorage → si no anda (bloqueado, modo privado viejo), sessionStorage
+// → si tampoco, memoria de la pestaña. Si todo falla, el equipo vuelve a caer en /m:
+// molesta, pero no rompe nada y se puede volver a elegir.
 const CLAVE_COMPLETA = 'gvento.versionCompleta'
+let enMemoria = false
+const almacenes = (): Storage[] => {
+  const lista: Storage[] = []
+  try { lista.push(localStorage) } catch { /* sin localStorage */ }
+  try { lista.push(sessionStorage) } catch { /* sin sessionStorage */ }
+  return lista
+}
 export function pidioVersionCompleta(): boolean {
-  try { return sessionStorage.getItem(CLAVE_COMPLETA) === '1' } catch { return false }
+  for (const a of almacenes()) {
+    try { if (a.getItem(CLAVE_COMPLETA) === '1') return true } catch { /* siguiente */ }
+  }
+  return enMemoria
 }
 export function pedirVersionCompleta(si: boolean): void {
-  try {
-    if (si) sessionStorage.setItem(CLAVE_COMPLETA, '1')
-    else sessionStorage.removeItem(CLAVE_COMPLETA)
-  } catch { /* sin storage: la redirección vuelve a aplicar, no rompe nada */ }
+  enMemoria = si
+  let guardado = false
+  for (const a of almacenes()) {
+    try {
+      // Al GUARDAR se escribe en el primero que ande; al BORRAR, en todos (si no,
+      // un '1' viejo en otro almacén seguiría ganando).
+      if (si && !guardado) { a.setItem(CLAVE_COMPLETA, '1'); guardado = true }
+      else if (!si) a.removeItem(CLAVE_COMPLETA)
+    } catch { /* siguiente */ }
+  }
 }
 
 // ── Identidad instalable de /m ──────────────────────────────────────────────

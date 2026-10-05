@@ -18,6 +18,7 @@ import {
   Banknote,
   ChevronDown,
   X,
+  Smartphone,
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { useAuth } from '@/hooks/useAuth'
@@ -31,6 +32,7 @@ import { OpenShiftModal } from '@/components/shift/OpenShiftModal'
 import { StoreSelector } from '@/components/layout/StoreSelector'
 import { SubscriptionBanner } from '@/components/layout/SubscriptionBanner'
 import type { Enums } from '@/types/database.types'
+import { pidioVersionCompleta, pedirVersionCompleta } from '@/lib/posMovil'
 
 type UserRole = Enums<'user_role'>
 
@@ -225,6 +227,19 @@ export function AppLayout() {
         </nav>
 
         <div className="p-2 border-t border-slate-700/60">
+          {/* Solo si ESTE equipo eligió "Versión completa" desde el POS móvil (/m):
+              la vuelta a /m. Depende de la preferencia guardada, no de detectar
+              el dispositivo (el escritorio no se ramifica con isMobile). */}
+          {pidioVersionCompleta() && (
+            <button
+              data-testid="app-usar-movil"
+              onClick={() => { pedirVersionCompleta(false); navigate('/m') }}
+              className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium text-emerald-400 hover:bg-slate-800 transition-colors"
+            >
+              <Smartphone className="w-4 h-4 flex-shrink-0" />
+              Usar la versión para celular
+            </button>
+          )}
           <button
             onClick={handleSignOut}
             className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium text-slate-400 hover:bg-slate-800 hover:text-slate-100 transition-colors"

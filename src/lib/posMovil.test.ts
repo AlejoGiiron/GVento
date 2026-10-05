@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { leerPosMovil, POS_MOVIL_DEFAULT, esRutaMovil, puedeCobrar, debeIrAMovil, traerTodo, diaBogota } from './posMovil'
+import { leerPosMovil, POS_MOVIL_DEFAULT, esRutaMovil, puedeCobrar, debeIrAMovil, traerTodo, diaBogota, pidioVersionCompleta, pedirVersionCompleta } from './posMovil'
 
 const COCTEL = '3f1c2a9e-0b7d-4c55-9a21-6c0f8d2e4b17'
 
@@ -41,12 +41,24 @@ describe('puedeCobrar (mismo criterio que register_pos_sale)', () => {
   })
 })
 
+/** Un Storage en memoria; `roto` = tira en cada acceso (bloqueado / modo privado). */
+const almacen = (roto = false, inicial: [string, string][] = []) => {
+  const m = new Map<string, string>(inicial)
+  const tirar = () => { throw new Error('SecurityError') }
+  return {
+    m,
+    s: roto
+      ? { getItem: tirar, setItem: tirar, removeItem: tirar }
+      : { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => { m.set(k, v) }, removeItem: (k: string) => { m.delete(k) } },
+  }
+}
+
 describe('debeIrAMovil', () => {
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => { vi.unstubAllGlobals(); pedirVersionCompleta(false) })
   const equipo = (tactil: boolean, ancho: number, alto: number, completa = false) => {
-    const store = new Map<string, string>(completa ? [['gvento.versionCompleta', '1']] : [])
     vi.stubGlobal('window', { matchMedia: () => ({ matches: tactil }), screen: { width: ancho, height: alto } })
-    vi.stubGlobal('sessionStorage', { getItem: (k: string) => store.get(k) ?? null })
+    vi.stubGlobal('localStorage', almacen(false, completa ? [['gvento.versionCompleta', '1']] : []).s)
+    vi.stubGlobal('sessionStorage', almacen().s)
   }
 
   it('celular + cajero + fuera de /m → sí', () => {
@@ -71,9 +83,41 @@ describe('debeIrAMovil', () => {
     expect(debeIrAMovil('cashier', '/m/ventas')).toBe(false)
     expect(debeIrAMovil('cashier', '/mesas')).toBe(true)
   })
-  it('pidió "Versión completa" en esta pestaña → no', () => {
+  it('eligió "Versión completa" en este EQUIPO → no', () => {
     equipo(true, 390, 844, true)
     expect(debeIrAMovil('cashier', '/ventas')).toBe(false)
+  })
+})
+
+describe('"Versión completa" se recuerda POR EQUIPO, con respaldo', () => {
+  afterEach(() => { vi.unstubAllGlobals(); pedirVersionCompleta(false) })
+
+  it('se guarda en localStorage (sobrevive a cerrar la pestaña)', () => {
+    const local = almacen(); const sesion = almacen()
+    vi.stubGlobal('localStorage', local.s); vi.stubGlobal('sessionStorage', sesion.s)
+    pedirVersionCompleta(true)
+    expect(local.m.get('gvento.versionCompleta')).toBe('1')
+    expect(sesion.m.size).toBe(0)
+    expect(pidioVersionCompleta()).toBe(true)
+  })
+  it('sin localStorage → sessionStorage', () => {
+    const sesion = almacen()
+    vi.stubGlobal('localStorage', almacen(true).s); vi.stubGlobal('sessionStorage', sesion.s)
+    pedirVersionCompleta(true)
+    expect(sesion.m.get('gvento.versionCompleta')).toBe('1')
+    expect(pidioVersionCompleta()).toBe(true)
+  })
+  it('sin ningún almacén → memoria de la pestaña (no rompe)', () => {
+    vi.stubGlobal('localStorage', almacen(true).s); vi.stubGlobal('sessionStorage', almacen(true).s)
+    expect(() => pedirVersionCompleta(true)).not.toThrow()
+    expect(pidioVersionCompleta()).toBe(true)
+  })
+  it('volver a elegir /m borra en TODOS los almacenes (un "1" viejo no sigue ganando)', () => {
+    const local = almacen(false, [['gvento.versionCompleta', '1']]); const sesion = almacen(false, [['gvento.versionCompleta', '1']])
+    vi.stubGlobal('localStorage', local.s); vi.stubGlobal('sessionStorage', sesion.s)
+    pedirVersionCompleta(false)
+    expect(local.m.size + sesion.m.size).toBe(0)
+    expect(pidioVersionCompleta()).toBe(false)
   })
 })
 
