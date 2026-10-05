@@ -219,6 +219,30 @@ test('los botones de cobro quedan DENTRO de la pantalla (no bajo la barra de ini
   expect(c!.y + c!.height).toBeLessThanOrEqual(alto)
 })
 
+test('producto con EXTRAS: hoja propia dentro de la pantalla, subtotal, y el extra llega a la venta', async ({ page }) => {
+  await turnoAbierto()
+  await entrar(page, cashierCreds())
+  await page.getByTestId('m-buscar').fill('Lab Coctel')
+  await page.getByTestId('m-productos').getByTestId('m-producto').filter({ hasText: 'Lab Coctel' }).first().click()
+  await expect(page.getByTestId('m-extras')).toBeVisible()
+  await expect(page.getByTestId('item-config-modal')).toHaveCount(0)        // no el modal del escritorio
+  await expect(page.getByTestId('m-extras-subtotal')).toContainText('18.000')
+  await page.getByTestId('m-extra-mas').first().click()
+  await expect(page.getByTestId('m-extra-qty').first()).toHaveText('1')
+  await expect(page.getByTestId('m-extras-subtotal')).toContainText('24.000')
+  const alto = page.viewportSize()!.height
+  const b = await page.getByTestId('m-extras-confirmar').boundingBox()
+  expect(b!.y + b!.height, 'el botón de agregar queda dentro de la pantalla').toBeLessThanOrEqual(alto)
+  await page.getByTestId('m-extras-confirmar').click()
+  await expect(page.getByTestId('m-extras')).toHaveCount(0)
+  await expect(page.getByTestId('m-carrito-total')).toContainText('24.000')
+  const numero = await cobrar(page, 'cash')
+  expect(psql(`select string_agg(e.name || ' x' || ie.qty || ' @' || ie.unit_price, ', ')
+                 from public.orders o join public.order_items i on i.order_id = o.id
+                 join public.order_item_extras ie on ie.order_item_id = i.id join public.extras e on e.id = ie.extra_id
+                where o.restaurant_id = '${SEDE}' and o.order_number = ${numero};`)).toBe('Lab Doble x1 @6000.00')
+})
+
 // ── Más vendidos y fijados ─────────────────────────────────────────────────
 
 test('FIJADOS arriba de todo, con estrella; un id inválido se ignora sin romper', async ({ page }) => {

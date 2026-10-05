@@ -250,8 +250,34 @@ SECURITY DEFINER. Las policies y grants salen de `pg_policies` y
 | `products` | stock por `add_order_items_with_extras`, `adjust_stock`, `register_purchase`, anulación | `stock_qty` = 0/null al crear o al apagar el seguimiento (modal de producto) | INSERT · UPDATE · DELETE admin | dejar. `updateProductStock` no tiene llamadores, pero el modal escribe `stock_qty` y una restricción por columna lo rompería. |
 | `stock_movements`, `store_sequences`, `purchase_invoice_items` | solo RPC | — | **ninguna** ✅ | ya está bien: es el modelo a copiar. |
 | `cash_shifts` | `close_cash_shift` (U) | INSERT (abrir turno) | INSERT | UPDATE ya revocado en la fase 2 de D. |
+| `restaurants.config` | `update_restaurant_config` (fusiona clave por clave; `restaurant-config-rpc.sql`, rama `feat/m1-pos-movil`, 2026-10-04) | **ninguna** desde ese frontend (`updateRestaurant` ya no acepta `config` por tipo). El frontend anterior escribe el objeto ENTERO y puede pisar claves | UPDATE "admin actualiza" (rol viejo `admin`) y "editar sede con permiso" (`sedes.gestionar`), sobre toda la fila | **después de M1:** restringir el UPDATE directo a las columnas que la app escribe (nombre, dirección, teléfono, logo, `uses_kitchen`) y dejar `config` solo por la RPC. Señales de que ya se pisó algo en prod: `config-pisado-senales.sql` (raíz, fuera de git). |
 
 `anon` tiene grants I/U/D en todas (deuda aparte, más abajo); lo frena la RLS, no el grant.
+
+### Mesas: H2 y H3 van DESPUÉS de M1, con M2 (decidido 2026-10-04)
+
+Salió de `mesas-total-anomalias.sql` corrido en prod el 2026-10-04 (60 días, mesas cerradas):
+
+| organización | mesas | cuadran | total 0 sin pagos | total 0 con pagos | total < líneas | total > líneas | pagos ≠ total |
+|---|---|---|---|---|---|---|---|
+| G-10 | 383 | 381 | 4 | 0 | 2 | 0 | 0 |
+| Salchimelo | 1756 | 1748 | 48 | 2 | 5 | 1 | 2 |
+
+Los "total 0 sin pagos" son **cortesías y gastos internos, a propósito** (lo confirmó el dueño). No
+se tocan. Es la misma familia que *"Mesas abiertas de larga duración = FLUJO INTENCIONAL"* en
+CLAUDE.md.
+
+| caso | qué es | estado |
+|---|---|---|
+| Salchimelo #1878 | 6 tandas (20.000 + 5.000 + 4 × 4.000) y total = pagos = 24.000: el total escrito desde el cliente perdió tandas (**H1**) | lo cierra el paso 2 (`pos-sale-lotes.sql`: total desde las líneas, con la orden bloqueada) |
+| Salchimelo #2401 (03/10) | pago 62.000 a las 23:21, delivered 23:33, descuento fijo 62.000, total 0: el cobro reintentado puso un descuento por el total (**H2**). Además, 4 movimientos de stock de COCA COLA para 2 líneas | **H2** → M2. Lo del stock: `mesas-2401-stock.sql` (raíz) distingue H3 (líneas quitadas sin devolver stock) de un reenvío; resultado pendiente |
+| Salchimelo #1342 | dos tandas idénticas a 27 s, descuento fijo 34.000, sin pagos: cortesía con una **tanda duplicada** (reenvío), no H2 | la duplicación la cierra la clave por tanda del paso 2 |
+
+**Qué va con M2:**
+- **H2:** `close_table_sale`, el cobro de mesa en una transacción: descuento, pago, número, delivered y mesa libre. Reemplaza los pasos sueltos de `TablesPage`, donde el descuento se escribe ANTES del pago y un reintento a medias deja total 0 con la plata ya entrada.
+- **H3 (el 3.5 del plan):** una RPC para quitar un ítem que devuelva el stock (movimiento `return`) y recalcule el total. `handleRemoveItem` hoy borra la línea directo (ver la fila de `order_items` arriba).
+
+Para ver si siguen apareciendo, se re-corre el bloque 2 de `mesas-total-anomalias.sql`.
 
 ### 🔴 POS: si el cobro falla DESPUÉS de crear la orden, queda una orden huérfana con stock descontado (medido 2026-09-30)
 
@@ -544,6 +570,29 @@ Paso D (`close_cash_shift`):
   hook viejo da `Received: 0`.
 - El residuo de mesas era real pero de otra causa: limpiezas al final de un `describe.serial` y
   sin aserción. Ahora mesa fija por spec + `afterAll` con aserción (`tests/helpers/lab.ts`).
+
+### 🔴 Suite: el proceso de WebKit (`m-iphone`) a veces no termina al cerrarse → exit 1 con todo verde (medido 2026-10-04)
+
+**Síntoma:** al final de la corrida, `Error: worker-N process did not exit within 300000ms after
+stop, force-killed it` y `PLAYWRIGHT_EXIT=1`, con **todos los tests pasados** ("329 passed"). Tarda
+5 minutos más. Lo emite Playwright 1.60 desde el PR microsoft/playwright#40637: antes un proceso
+así quedaba colgado sin avisar (issue #39753, "Playwright randomly not exiting").
+
+**Medido (Windows, Playwright 1.60.0, WebKit 2287):**
+- **2 de 9** corridas del proyecto `m-iphone` completo, más 1 en la suite completa. Siempre al
+  detener el proceso de WebKit, después del último test.
+- **0 de 8** con `DEBUG=pw:browser*`: el registro cambia los tiempos y lo esconde.
+- **0 de 8** corriendo por mitades (`--grep reintento` y el resto). No se pudo atribuir a un test.
+- **`m-android` (Chromium), con el mismo spec, nunca.**
+
+**Cómo leerlo sin engañarse (R9):** exit 1 con "N passed" **y** solo estos dos errores = este
+problema; los tests pasaron. Cualquier otro error fuera de los tests NO es esto.
+`PWTEST_CHILD_PROCESS_TIMEOUT=60000` lo hace fallar en 1 minuto en vez de 5, pero no lo arregla.
+
+**Salidas, a decidir:**
+- (a) subir Playwright (hay 1.61 a 1.63 estables) y re-medir. Toca toda la suite.
+- (b) correr `m-iphone` en un paso aparte, para que no tape el exit de la suite de escritorio.
+- (c) aceptarlo así, documentado.
 
 ### `anon` tiene privilegios de escritura en TODAS las tablas de `public` (default de Supabase) — medido, NO barrido (2026-09-30)
 

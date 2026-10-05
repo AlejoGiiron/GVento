@@ -97,6 +97,7 @@ const ORDEN = [
   'cobro-turno.sql',                    // cambio (1): turno obligatorio para cobrar y para abonos en efectivo + lock de la orden
   'app-version.sql',                    // cada equipo reporta su versión de la app (aviso de versión nueva)
   'pos-sale-lotes.sql',                 // paso 2: register_pos_sale + clave por tanda y total desde las líneas en add_order_items_with_extras
+  'restaurant-config-rpc.sql',          // M1: restaurants.config se fusiona en el servidor, clave por clave (update_restaurant_config)
 ]
 
 // ── QUIÉN GANA cuando una función está definida en más de un .sql ─────────────

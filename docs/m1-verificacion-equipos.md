@@ -7,12 +7,23 @@ separado** en un iPhone (Safari) y en un Android (Chrome).
 ## Antes de empezar
 
 - **Tiene que ser https.** Wake Lock, "Instalar" y el service worker no funcionan por
-  `http://<ip-del-pc>`. Opción práctica: la vista previa de Vercel de la rama.
-- La vista previa usa la base de la **nube**: necesita `supabase/pos-sale-lotes.sql`
-  aplicado ahí, y conviene entrar con el usuario de caja de **LAB** (no con uno de un
-  cliente). Cada prueba son ventas reales en LAB.
-- Tener un turno abierto en la sede de LAB (desde el escritorio) y, para el punto 6,
-  el QR de Nequi subido en Configuración.
+  `http://<ip-del-pc>`. Se usa la vista previa de Vercel de la rama.
+- La vista previa usa la base que digan las variables de entorno de **Preview** en
+  Vercel. Si son las de producción, necesita aplicados ahí:
+  - `supabase/pos-sale-lotes.sql` → para cobrar en `/m`;
+  - `supabase/restaurant-config-rpc.sql` → para **guardar cualquier cosa en
+    Configuración** (incluidos los fijados y el QR). Sin él, `/m` vende igual, pero
+    guardar en Configuración desde la vista previa falla.
+- Se prueba con **Café Aroma** (la demo). El usuario tiene que ser de caja o dueño en el
+  rol viejo (`profiles.role` = `cashier` o `admin`); un mozo no entra a `/m`.
+- **El turno se abre antes**, desde el escritorio (o desde el celular: Menú → Versión
+  completa → Ventas → abrir turno). `/m` no abre ni cierra turnos; sin turno muestra
+  "Sin turno" y no deja cobrar. El turno es de la sede: lo comparten todos los teléfonos.
+- Para el punto 7, el QR de Nequi subido en Configuración.
+- **iPhone instalado y la protección de Vercel:** en iPhone, la app agregada a la
+  pantalla de inicio tiene sus PROPIAS cookies, separadas de Safari. Si la vista previa
+  pide iniciar sesión en Vercel, puede volver a pedirlo dentro de la app instalada. Si
+  pasa, anotarlo en el punto 3 (no es un fallo de G-Vento).
 
 ## Lista (marcar en cada teléfono)
 
@@ -30,6 +41,7 @@ separado** en un iPhone (Safari) y en un Android (Chrome).
 | 10 | Modo avión justo al tocar **Cobrar**, volver a conectar y tocar de nuevo | Una sola venta (si la primera había entrado, dice "ya se había registrado") | ☐ | ☐ |
 | 11 | Girar el teléfono | Sigue usable (el manifest pide vertical en la app instalada) | ☐ | ☐ |
 | 12 | Menú → **Versión completa** | Abre el escritorio y no vuelve solo a Vender en esa pestaña | ☐ | ☐ |
+| 13 | Tocar un producto con **extras** | Sube una hoja oscura desde abajo; los + / − se aciertan con el pulgar; **Agregar** queda arriba de la barra de inicio; el extra aparece en el carrito, y después en la venta (Historial, desde el escritorio) | ☐ | ☐ |
 
 **Anotar por teléfono:** modelo, versión de iOS/Android y del navegador. Si algo falla,
 una captura y el número de punto.

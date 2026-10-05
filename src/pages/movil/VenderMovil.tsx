@@ -11,7 +11,7 @@ import { useSaleCheckout } from '@/hooks/useSaleCheckout'
 import { useMasVendidos } from '@/hooks/usePosMovil'
 import { useTecladoTapa } from '@/hooks/useDispositivoMovil'
 import { useCartStore, cartItemTotal, type ProductWithCategory } from '@/stores/cartStore'
-import { ItemConfigModal } from '@/components/pos/ItemConfigModal'
+import { ExtrasMovil } from '@/components/movil/ExtrasMovil'
 import { M, botonGrande, formatCOP } from '@/components/movil/estilo'
 import { leerPosMovil } from '@/lib/posMovil'
 import { cashQuickAmounts } from '@/lib/cashRounding'
@@ -151,7 +151,7 @@ export function VenderMovil() {
       {hoja !== null && <HojaCobro paso={hoja} setPaso={setHoja} />}
 
       {configurando && (
-        <ItemConfigModal
+        <ExtrasMovil
           product={configurando}
           onConfirm={(extras) => { addItem(configurando, extras); setConfigurando(null) }}
           onClose={() => setConfigurando(null)}
