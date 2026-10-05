@@ -585,14 +585,20 @@ así quedaba colgado sin avisar (issue #39753, "Playwright randomly not exiting"
 - **0 de 8** corriendo por mitades (`--grep reintento` y el resto). No se pudo atribuir a un test.
 - **`m-android` (Chromium), con el mismo spec, nunca.**
 
-**Cómo leerlo sin engañarse (R9):** exit 1 con "N passed" **y** solo estos dos errores = este
-problema; los tests pasaron. Cualquier otro error fuera de los tests NO es esto.
 `PWTEST_CHILD_PROCESS_TIMEOUT=60000` lo hace fallar en 1 minuto en vez de 5, pero no lo arregla.
 
-**Salidas, a decidir:**
-- (a) subir Playwright (hay 1.61 a 1.63 estables) y re-medir. Toca toda la suite.
-- (b) correr `m-iphone` en un paso aparte, para que no tape el exit de la suite de escritorio.
-- (c) aceptarlo así, documentado.
+**Decidido (2026-10-04): (a) primero, (b) solo si sigue, (c) NO.** Un exit 1 es rojo, aunque
+diga "N passed".
+- **(a) HECHO:** Playwright fijo en **1.63.0** (`package.json` sin `^`; WebKit 2359, Chromium 1243).
+  **Medido: 0 de 10** corridas de `m-iphone` con cuelgue (`PLAYWRIGHT_EXIT=0` leído en el archivo
+  de cada una, 17 pasados en las 10). Con la 1.60 eran ~1 de cada 4. Diez limpias no prueban que
+  no vuelva (con 1 de 4, la chance de 10 limpias por azar es ~6%), pero alcanzan para no
+  construir (b) todavía.
+- **(b), SI VUELVE A APARECER:** `m-iphone` en un paso aparte que cuenta como verde **SOLO** si
+  0 tests fallaron, 0 sin correr, **y** el único error fuera de los tests es el cierre colgado,
+  identificado por su mensaje **exacto** (`worker-N process did not exit within Nms after stop,
+  force-killed it`). Cualquier otra cosa es rojo. Se documenta en CLAUDE.md (R9) y en
+  `tests/README.md` al construirlo, no antes.
 
 ### `anon` tiene privilegios de escritura en TODAS las tablas de `public` (default de Supabase) — medido, NO barrido (2026-09-30)
 
