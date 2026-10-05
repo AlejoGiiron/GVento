@@ -9,6 +9,19 @@ verificación.**
 - **Quién hace qué.** Los merges a `develop` y la suite los hago yo (Claude Code) y te aviso
   el commit. Los **releases** (`main`) y **todo el SQL** de producción los hacés vos. Yo no
   toco producción.
+- **`develop` no se toca antes del Paso 1:** tiene que estar exactamente en `3fb4471`. Las ramas
+  de documentación (`docs/post-release-1-10` y `docs/plan-despliegue-m1`) entran con el merge del
+  **Paso 1b**, no antes.
+- **Organizaciones, por UUID (R2), nunca por nombre:**
+  - Café Aroma = `992420af-4484-4b69-8fbb-547a69c137af`
+  - G-10 = `12b53bae-a4f7-4076-80f9-8f9288bd0567`
+
+  Para confirmarlos una vez:
+  ```sql
+  select id, name from public.organizations
+   where id in ('992420af-4484-4b69-8fbb-547a69c137af', '12b53bae-a4f7-4076-80f9-8f9288bd0567');
+  ```
+  Esperado: 2 filas, `Café Aroma` y `G-10`. Si no, pará.
 - **Horario:** fuera del horario de G-10 y Salchimelo. Se decide con datos (Paso 0) y se
   confirma **justo antes** de cada paso con la consulta **Q-AHORA**.
 - **SQL y frontend: el SQL va ANTES del frontend que lo necesita.** En la reversa es al
@@ -229,11 +242,18 @@ nuevo)."* Desde acá, el aviso lo hace la app sola.
 - **Horario:** el del Paso 0, **otro día o al menos 1 hora después del Paso 1** (así el
   rollback de Hobby vuelve al Paso 1 y no más atrás). **Q-AHORA** antes.
 
-**1b.1 — Merge** (lo hago yo): `fix/version-modulo` → `develop`, suite completa, te paso el commit.
+**1b.1 — Merges** (los hago yo), en este orden: `fix/version-modulo`, `docs/post-release-1-10`
+y `docs/plan-despliegue-m1` → `develop`. Suite completa y te paso el commit. Simulado el
+2026-10-04: los tres entran sin conflictos.
 
 **1b.2 — Release**, con estos datos:
-- `git diff --stat origin/main develop` → **2 archivos**: `src/hooks/useVersionCheck.ts` y
-  `tests/aviso-version.spec.ts`.
+- `git diff --stat origin/main develop` → **10 archivos**:
+  - código: `src/hooks/useVersionCheck.ts` y `tests/aviso-version.spec.ts`;
+  - documentación: `docs/DEUDAS.md`, `docs/gvento-plan-cierre.md` y `docs/plan-despliegue-m1.md`;
+  - `supabase/close-cash-shift.sql`: **solo comentarios del encabezado** (líneas 26–45, fuera de
+    las funciones). Ya está aplicada: **no se vuelve a correr**, y las funciones de prod no
+    cambian;
+  - `supabase/diag/` (4 consultas de diagnóstico de solo lectura): **no se aplican**.
 - Título: `release: aviso de versión también si falla la carga de un módulo`
 
 **1b.3 — Verificación:** `/version.json` con la versión nueva. Es el primer release con
@@ -319,8 +339,7 @@ Esperado: `t | 0 | f | f`.
           (select count(*) from public.order_item_lotes l where l.order_id = o.id) as tandas_con_clave
      from public.orders o
      join public.restaurants r on r.id = o.restaurant_id
-     join public.organizations g on g.id = r.organization_id
-    where g.name = 'Café Aroma' and o.table_id is not null and o.created_at > now() - interval '2 hours'
+    where r.organization_id = '992420af-4484-4b69-8fbb-547a69c137af' and o.table_id is not null and o.created_at > now() - interval '2 hours'
     order by o.created_at desc
     limit 5;
    ```
@@ -342,6 +361,8 @@ en producción: **primero** el rollback del frontend, **después** este archivo.
 - **Horario:** el del Paso 0. **Q-AHORA** antes. Otro día o ≥ 1 h después del último release.
 
 **3.1 — Merge** (lo hago yo): `feat/pos-sale-lotes` → `develop`, suite completa, te paso el commit.
+Hay **un conflicto esperado en `docs/DEUDAS.md`** (simulado: un bloque, dos entradas nuevas en el
+mismo lugar). Se resuelve conservando las dos. Ningún archivo de código entra en conflicto.
 
 **3.2 — Release**, con estos datos:
 - `git diff --stat origin/main develop` → **15 archivos**, entre ellos
@@ -363,9 +384,8 @@ no toca la base).
           bool_and(p.created_at = o.created_at) as orden_y_pago_en_la_misma_transaccion
      from public.orders o
      join public.restaurants r on r.id = o.restaurant_id
-     join public.organizations g on g.id = r.organization_id
      join public.payments p on p.order_id = o.id
-    where g.name = 'Café Aroma' and o.table_id is null and o.created_at > now() - interval '2 hours'
+    where r.organization_id = '992420af-4484-4b69-8fbb-547a69c137af' and o.table_id is null and o.created_at > now() - interval '2 hours'
     group by o.id
     order by o.created_at desc
     limit 5;
@@ -433,6 +453,24 @@ md5 esperado: **`5e5e32cbece43c5269d8f878249f5299`**. Pegarlo y correrlo.
 **4.5 — Verificación:** **Q-FUNCIONES**. Esperado: las 2 filas del Paso 2 **más**
 `update_restaurant_config(jsonb)` con md5 **`63be67138bff54b73ffa1cd9d21b31c2`**, `f`, `t`.
 
+**Las claves que la función acepta** (lista cerrada; cualquier otra se rechaza sin guardar
+nada). Cada pantalla tiene un E2E que guarda **por la función**: verifica el POST con
+exactamente esas claves, que ningún PATCH a `restaurants` lleve `config`, y el valor en la base.
+
+| clave | pantalla | test |
+|---|---|---|
+| `slug` | Configuración → Restaurante | `config-guardar.spec.ts` › *Restaurante: el slug se guarda por la RPC (el nombre va por columnas, sin config)* |
+| `nequi_qr_url` | Configuración → Caja → QR de Nequi | `config-guardar.spec.ts` › *QR de Nequi: subir el archivo guarda nequi_qr_url por la RPC* |
+| `cash_out_reasons`, `payment_methods` | Configuración → Caja | `config-guardar.spec.ts` › *Caja: motivos y métodos se guardan por la RPC* |
+| `kitchen_pin`, `kitchen_stations`, `kds_timers` | Configuración → Cocina | `config-guardar.spec.ts` › *Cocina: PIN, estaciones y semáforo se guardan por la RPC* |
+| `default_delivery_time` | Configuración → Delivery | `config-guardar.spec.ts` › *Delivery: el tiempo por defecto se guarda por la RPC* |
+| `notifications` | Configuración → Notificaciones | `config-guardar.spec.ts` › *Notificaciones: los sonidos se guardan por la RPC* |
+| `pos_movil` | Configuración → POS móvil | `config-pos-movil.spec.ts` › *fijar, ordenar y guardar: queda pos_movil por id y en orden; el resto de la config no se toca* |
+
+Que la lista del SQL y la del código (`CLAVES_CONFIG`) sean la misma lo vigila
+`config-merge.spec.ts` › *CONTRATO: cada clave de CLAVES_CONFIG (TS) la acepta la RPC (allowlist
+del SQL)*. Una clave que esté en el tipo y no en la lista ni siquiera compila.
+
 **4.6 — Prueba en Café Aroma** (con el frontend del Paso 3, que todavía NO usa la función):
 Configuración → **Caja** → **Guardar**: tiene que decir "Cambios guardados". Comprueba que el
 camino viejo sigue andando.
@@ -440,6 +478,47 @@ camino viejo sigue andando.
 **4.7 — Reversa:** `config-rpc-revertir.sql` (raíz), md5 **`e63444b6cd6e040aad254bf1fdd7d412`**.
 Solo mientras el frontend de producción sea ANTERIOR al Paso 5; si no, primero el rollback del
 frontend. No toca ninguna config.
+
+---
+
+## Paso 4c — Avisar a quien usa G-Vento desde un celular (antes del Paso 5)
+
+- **Depende de:** Paso 1. `app_versiones` registra cada equipo desde ese release. **Correr lo
+  más cerca posible del Paso 5:** un equipo que no abrió la app desde el Paso 1 no aparece.
+- **Por qué:** desde el Paso 5, un dueño o cajero que abre G-Vento en un celular cae en
+  **Vender** (`/m`). Si trabaja con Mesas o Reportes desde el celular, tiene que elegir
+  **Versión completa** una vez en ese teléfono.
+
+```sql
+select org.name as organizacion, p.full_name as usuario, p.role::text as rol_viejo,
+       count(*) as equipos_celular,
+       max((v.ultima_vez at time zone 'America/Bogota')::timestamp(0)) as ultima_vez_bogota,
+       max(left(v.user_agent, 70)) as un_navegador
+  from public.app_versiones v
+  join public.profiles p on p.id = v.user_id
+  join public.organizations org on org.id = p.organization_id
+ where p.is_active
+   and p.role in ('admin', 'cashier')
+   and v.user_agent ~ '(iPhone|iPod|Android.*Mobile)'
+ group by org.name, p.full_name, p.role
+ order by 1, 2;
+```
+
+**Cómo leerlo:** cada fila es un dueño (`admin`) o cajero (`cashier`) que abrió G-Vento desde un
+celular. Los mozos no aparecen: a ellos no se les cambia nada. Probado en Docker: aparecen el
+cajero y el dueño vistos desde iPhone y Android, y quedan afuera el mozo y el Chrome de
+escritorio.
+
+**Ojo, no es exactamente el mismo criterio que la app.** La consulta mira el navegador
+(`user_agent`); la app mira la pantalla (táctil y lado corto < 600 px). Coinciden en celulares
+comunes. Dos casos a saber:
+- un plegable **abierto** dice "Android … Mobile", pero la app lo trata como tablet;
+- un iPad se presenta como Mac: no aparece, y la app tampoco lo manda a `/m`.
+
+**Qué hacer con cada fila:** avisarle antes del Paso 5, por ejemplo así: *"Desde el <fecha>,
+G-Vento en el celular abre directo la pantalla de vender. Si usás Mesas o Reportes desde el
+celular, tocá Menú → Versión completa: queda elegido en ese teléfono. Para volver a la pantalla
+de vender, en el menú de la izquierda: Usar la versión para celular."*
 
 ---
 
@@ -496,8 +575,8 @@ viejo:
 
 ```sql
 select p.full_name, p.role::text as rol_viejo
-  from public.profiles p join public.organizations g on g.id = p.organization_id
- where g.name = 'Café Aroma' and p.is_active;
+  from public.profiles p
+ where p.organization_id = '992420af-4484-4b69-8fbb-547a69c137af' and p.is_active;
 ```
 
 `rol_viejo` = `cashier` o `admin`. Y **el turno se abre antes**, desde el escritorio (o en el
@@ -519,6 +598,8 @@ se hace hasta que la lista pase.**
 **5.1 — Merge** (lo hago yo): `feat/m1-pos-movil` → `develop`, suite completa (escritorio,
 `m-android` y `m-iphone`) con `PLAYWRIGHT_EXIT=0` leído del archivo. Un exit 1 es rojo, aunque
 diga "N passed" (DEUDAS → *"el proceso de WebKit a veces no termina"*). Te paso el commit.
+Mismo conflicto esperado que en 3.1, solo en `docs/DEUDAS.md`, resuelto conservando las dos
+entradas.
 
 **5.2 — Release**, con estos datos:
 - `git diff --stat origin/main develop` → unos **38 archivos** (los de M1 y la config, más
@@ -528,7 +609,9 @@ diga "N passed" (DEUDAS → *"el proceso de WebKit a veces no termina"*). Te pas
 - **Lo que este release cambia en el ESCRITORIO** (si algo del escritorio falla después del
   Paso 5, está acá):
   - `src/components/ProtectedRoute.tsx`: en un **celular**, el dueño y el cajero van a `/m`. En
-    computador y tablet no cambia nada.
+    computador y tablet no cambia nada. "Versión completa" se recuerda **por equipo**.
+  - `src/components/layout/AppLayout.tsx`: el botón **Usar la versión para celular**, abajo en el
+    menú lateral. Aparece **solo** en un equipo que eligió "Versión completa".
   - `src/hooks/useRestaurantConfig.ts`: **todo** guardado de Configuración pasa por
     `update_restaurant_config`.
   - `src/components/pos/ItemConfigModal.tsx`: el modal de extras usa la lógica compartida
@@ -551,8 +634,7 @@ cada equipo toma la versión nueva, también la app instalada.
           r.config -> 'payment_methods' as metodos,
           (r.updated_at at time zone 'America/Bogota')::timestamp(0) as modificada_bogota
      from public.restaurants r
-     join public.organizations g on g.id = r.organization_id
-    where g.name = 'Café Aroma';
+    where r.organization_id = '992420af-4484-4b69-8fbb-547a69c137af';
    ```
    Esperado: `pos_movil` con los 2 ids en orden. `qr` y `metodos` **iguales** a antes de guardar
    (no se pisan).
@@ -560,6 +642,9 @@ cada equipo toma la versión nueva, también la app instalada.
 3. Celular: entrar con el usuario de caja → cae en **Vender**; los 2 fijados arriba con
    estrella; una venta en efectivo y una en Nequi; **Mis ventas** las muestra.
 4. **Q-CAFE-POS**: las ventas del celular con `orden_y_pago_en_la_misma_transaccion = t`.
+5. Celular: Menú → **Versión completa** → cae en el escritorio. Cerrar la pestaña y abrir G-Vento
+   de nuevo en ese teléfono: **sigue en el escritorio**. En el menú lateral, **Usar la versión
+   para celular** → vuelve a Vender, y al reabrir sigue en Vender.
 
 **5.5 — Reversa:** el rollback del frontend (vuelve al Paso 3). Los SQL de los Pasos 2 y 4 **se
 quedan**: el frontend del Paso 3 funciona con los dos.
@@ -631,10 +716,11 @@ Esperado: verifica la policy contra el hash de prod y hace rollback si no da; de
 |---|---|---|---|---|
 | 0 | elegir horario | — | — | — |
 | 1 | aviso de versión | `app-version.sql` @ `3fb4471` (`f86eecbe…`) | develop `3fb4471` | rollback + `app-version-revertir.sql` (`8a4d128d…`) |
-| 1b | aviso si falla un módulo | — | `fix/version-modulo` | rollback |
+| 1b | aviso si falla un módulo + docs | — | `fix/version-modulo`, `docs/post-release-1-10`, `docs/plan-despliegue-m1` | rollback |
 | 2 | SQL del paso 2 | `pos-sale-lotes.sql` @ `e91c850` (`ac43ad79…`) | — | `pos-sale-lotes-revertir.sql` (`da7da00c…`), solo antes del 3 |
 | 3 | frontend del paso 2 | — | `feat/pos-sale-lotes` | rollback |
 | 4 | SQL de la config | `restaurant-config-rpc.sql` @ `11c14b2` (`5e5e32cb…`) | — | `config-rpc-revertir.sql` (`e63444b6…`), solo antes del 5 |
+| 4c | avisar a quien usa celular | — (consulta) | — | — |
 | 4b | equipos reales | — | vista previa de `feat/m1-pos-movil` | — |
 | 5 | M1 + config | — | `feat/m1-pos-movil` | rollback |
 | 6 | fase 2 de D | `fase2-aplicar.sql` (`d66e8231…`) | — | `fase2-revertir.sql` (`034ec0a4…`) |
