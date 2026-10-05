@@ -25,7 +25,7 @@ Fuera de este plan, a propósito: DIAN, app nativa e ideas de producto (margen, 
 | 0 — Limpiar el mapa | 🟢 4 de 6 cerrados; quedan dos de minutos (0.2, 0.3) |
 | 1 — Cerrar lo que engaña | 🟡 1.3 hecho; 1.1 y 1.2 pendientes |
 | 2 — Usuarios | 🔴 sin empezar |
-| 3 — Dinero | 🟡 3.6 construido, se despliega esta semana; resto pendiente |
+| 3 — Dinero | 🟡 3.6 **desplegado el 1/10** (falta la fase 2, el 2/10); resto pendiente |
 | 4 — Confianza | 🔴 sin empezar |
 | 5 — Higiene | 🟡 5.10 cerrado, 5.6 desbloqueado |
 | **Fuera del plan** | 🟢 mucho cerrado en el camino (ver sección propia) |
@@ -82,7 +82,7 @@ Fuera de este plan, a propósito: DIAN, app nativa e ideas de producto (margen, 
 | 3.3 | **Abonos invisibles en el tab Financiero** | Pendiente. **Bloqueado por tu decisión** (ver abajo). |
 | 3.4 | **`payment_status DEFAULT 'paid'`** | Pendiente. Medio, con cuidado. |
 | 3.5 | **Borrar un ítem de mesa no devuelve stock** | 🔴 **Ubicado (01/10)** por el inventario de escrituras directas: `handleRemoveItem` en `TablesPage` borra la línea con `removeOrderItem` (DELETE directo en `order_items`) y ajusta el total, **sin devolver el stock** que `add_order_items_with_extras` descontó al agregarla. El TODO está en el propio handler. Salida: una RPC que devuelva el stock antes de borrar (DEUDAS → fila de `order_items`). Va con el endurecimiento, después de M1. |
-| 3.6 | **Carrera en el cierre de turno** | 🟡 **Construido (`feat/close-cash-shift`, `97b328e`, 238/238). Se despliega en fases esta semana.** Ver detalle abajo. |
+| 3.6 | **Carrera en el cierre de turno** | ✅ **Desplegado el 1/10:** fase 1 (`3339978`) a las 10:40 y frontend a las ~11:45 (`main = 04273f3`). Cierre de prueba en Café Aroma: congelado = recalculado (63.500). 🟡 **Falta la fase 2 (revoke), el 2/10.** Ver detalle abajo. |
 
 #### 3.6 en detalle (D)
 
@@ -102,11 +102,11 @@ Fuera de este plan, a propósito: DIAN, app nativa e ideas de producto (margen, 
 
 | cuándo | qué | quién |
 |---|---|---|
-| 1/10, temprano | Release de `develop` → `main` (lo de hoy + product-images, **sin D**) y mensaje a clientes | Alejandro |
-| 1/10, antes de que abra G-10 | Fase 1: `close-cash-shift.sql` **del commit `3339978`** (rama `feat/close-cash-shift`: guard contra el re-apply, y el trigger de `cash_movements` cubre DELETE y el turno viejo; suite 240/240 el 30/09) + consultas de verificación | Alejandro |
-| 2/10, temprano | Si la fase 1 anduvo un día sin problemas: merge de D + (1), suite, release, mensaje de "recarguen la página"; **justo después del release, `cobro-turno.sql`** | Claude Code merge, Alejandro release y SQL |
-| 3/10 | Fase 2: `close-cash-shift-revoke.sql` + verificación (0 filas de UPDATE) | Alejandro |
-| después del release | Prueba real en Café Aroma: abrir turno, venta en efectivo, gasto, cerrar | Alejandro |
+| 1/10, temprano | ✅ Release de `develop` → `main` (lo de hoy + product-images, **sin D**) y mensaje a clientes | Alejandro |
+| 1/10, 10:40 | ✅ Fase 1: `close-cash-shift.sql` **del commit `3339978`** (rama `feat/close-cash-shift`: guard contra el re-apply, y el trigger de `cash_movements` cubre DELETE y el turno viejo; suite 240/240 el 30/09) + consultas de verificación | Alejandro |
+| 1/10, ~11:45 (adelantado del 2/10) | ✅ Merge de D + (1) + plan (suite 254/254), release (`main = 04273f3`) y, justo después, `cobro-turno.sql` (verificado `t t t t f`). Pruebas en Café Aroma OK | Claude Code merge, Alejandro release y SQL |
+| **2/10** | **Fase 2:** primero `fase2-precheck.sql` (¿alguien cerró anoche por el camino viejo?). Si todo dio `servidor`, `fase2-aplicar.sql` = `close-cash-shift-revoke.sql` + verificación (0 filas de UPDATE). Reversa: `fase2-revertir.sql`. Todo fuera de git, con md5 | Alejandro |
+| después del release | ✅ Prueba real en Café Aroma: abrir turno, venta en efectivo, gasto, cerrar; abono en efectivo sin turno (aviso), abono por transferencia sin turno (pasa) | Alejandro |
 
 **Si una pestaña vieja intenta cerrar después de la fase 2:** "Error al cerrar el turno", el turno sigue abierto y no se congela nada equivocado. Se arregla recargando.
 
@@ -160,7 +160,7 @@ Lo que apareció en el camino y se cerró. Va acá para que no se pierda.
 
 | Qué | Cuándo se hace |
 |---|---|
-| **Cambio (1) en `register_sale_payment`**: turno obligatorio con `for share`, lock de la orden. Exigir turno también en **abonos en efectivo**, avisándolo en el modal **antes** de recibir la plata. Abono de una sola venta con lock de la orden (dos abonos simultáneos pueden pasarse del saldo). | ✅ **Construido, se despliega el 2/10** (rama `feat/cobro-turno`; `cobro-turno.sql` justo después del release). Prerequisito de M1. |
+| **Cambio (1) en `register_sale_payment`**: turno obligatorio con `for share`, lock de la orden. Exigir turno también en **abonos en efectivo**, avisándolo en el modal **antes** de recibir la plata. Abono de una sola venta con lock de la orden (dos abonos simultáneos pueden pasarse del saldo). | ✅ **Desplegado el 1/10** (release ~11:45 + `cobro-turno.sql`, verificado). Prerequisito de M1. |
 | **Número de orden único** (`order-number-unique.sql`) junto con el arreglo de `next_order_number`. Sin ese arreglo, "Reintentar" no corrige nunca una venta sin número. | Después de D. No es urgente: 0 duplicados en toda la historia. |
 | **Una mesa que tuvo ventas no se puede borrar nunca** (confirmado en prod). La pantalla deja intentarlo. Salida: archivar (`archived_at`), no cascade ni relajar el check. | Con M2. |
 | **"Cerrar mesa sin consumo"**: dos escrituras no atómicas desde el cliente. Salida: RPC. | Precondición de M2. |
@@ -178,7 +178,7 @@ Lo que apareció en el camino y se cerró. Va acá para que no se pierda.
 
 | Fase | Qué | Estado |
 |---|---|---|
-| Prerequisitos | Cambio (1) en el cobro · **query de B1 en prod** (`supabase/diag/pos-total-formula.sql`) · **`register_pos_sale` + `useSaleCheckout`**: la venta del POS en UNA transacción, idempotente, con la orden, los ítems, el pago y el número. Ya no es "sin cambio de comportamiento". **Despliegue: el SQL ANTES del frontend que la llama** (RPC nueva; las actuales no cambian) · compresión de fotos en el cliente | (1) ✅ construido, se despliega el 2/10 · `register_pos_sale`: diseño aprobado (01/10) |
+| Prerequisitos | Cambio (1) en el cobro · **query de B1 en prod** (`supabase/diag/pos-total-formula.sql`) · **`register_pos_sale` + `useSaleCheckout`**: la venta del POS en UNA transacción, idempotente, con la orden, los ítems, el pago y el número. Ya no es "sin cambio de comportamiento". **Despliegue: el SQL ANTES del frontend que la llama** (RPC nueva; las actuales no cambian) · compresión de fotos en el cliente | (1) ✅ desplegado el 1/10 · `register_pos_sale`: diseño aprobado (01/10) |
 | **M1 — Barra** | Ruta `/m` con `MobileShell` · manifest e íconos propios (192, 512, maskable, apple-touch 180) · `viewport-fit=cover` · más vendidos (automáticos desde `product_performance` + fijados en `restaurants.config`) · **sin "Cerrar turno" en `/m` hasta que D esté en prod** | No empezado |
 | Demo | Café Aroma. Hacer una venta real 5 minutos antes; no cerrar turno en vivo | Después de M1 |
 | **M2 — Mesas** | Necesita: la decisión sobre si los meseros cobran, archivar mesas, cerrar mesa sin consumo como RPC | Bloqueado por decisión |

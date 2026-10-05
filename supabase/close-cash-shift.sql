@@ -23,9 +23,26 @@
 --      movimientos. Los cuatro van en begin/commit, así que fallan enteros
 --      (rollback), sin dejar nada a medias. Localmente no pasa: preparar-local
 --      resetea antes de sembrar. Para un reset DELIBERADO en el SQL Editor,
---      dentro de la transacción del reset:
---        set local session_replication_role = replica;   -- solo superusuario
---      Eso apaga los triggers solo en esa transacción; la app no puede hacerlo.
+--      apagar SOLO este trigger, y SOLO dentro de la transacción del reset:
+--        begin;
+--        alter table public.cash_movements disable trigger trg_cash_movements_turno_abierto;
+--        -- ... el reset ...
+--        alter table public.cash_movements enable trigger trg_cash_movements_turno_abierto;
+--        commit;
+--      Medido en Docker el 2026-10-01:
+--      · 🔴 NO es local a la transacción. Si se confirma SIN el ENABLE, el
+--        trigger queda apagado PARA TODOS (tgenabled = 'D'). Un rollback lo deja
+--        encendido. Después de un reset, verificar:
+--          select tgenabled from pg_trigger
+--           where tgname = 'trg_cash_movements_turno_abierto';   -- 'O' = encendido
+--      · Toma ShareRowExclusiveLock sobre cash_movements: las LECTURAS siguen,
+--        pero todo INSERT/UPDATE/DELETE de movimientos (de cualquier sede)
+--        espera hasta el commit. Que la transacción sea corta.
+--      · Exige ser dueño de la tabla: un usuario de la app recibe "must be
+--        owner of table cash_movements".
+--      (Cambio de COMENTARIO del 2026-10-01, con el archivo ya aplicado: el SQL
+--      no cambió. Antes decía session_replication_role = replica, que apaga
+--      TODOS los triggers de la sesión, no solo este.)
 --   4. register_debt_payment, register_debt_payments_batch y register_sale_void
 --      toman el turno con FOR SHARE (ver el protocolo).
 --
