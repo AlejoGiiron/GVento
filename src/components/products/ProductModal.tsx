@@ -106,8 +106,14 @@ export function ProductModal({ product, categories, onClose }: ProductModalProps
     setImageUrl(URL.createObjectURL(file))
   }
 
-  const handleImageRemove = async () => {
-    if (product?.image_url) await removeImage(product.image_url)
+  // Quitar la foto solo cambia el FORMULARIO. El archivo se borra recién después
+  // de guardar el producto sin foto (handleSubmit). Antes se borraba acá, en el
+  // momento: un "Guardar" tocado mientras el borrado estaba en curso guardaba el
+  // producto con la URL vieja apuntando a un archivo ya borrado (medido en la
+  // suite: DELETE 200 y después el upsert con la URL vieja), y "Cancelar" dejaba
+  // el archivo borrado con el producto apuntándolo. Un efecto irreversible no va
+  // antes de confirmar.
+  const handleImageRemove = () => {
     setImageUrl(null)
     setPendingFile(null)
   }
@@ -162,6 +168,12 @@ export function ProductModal({ product, categories, onClose }: ProductModalProps
 
       // El producto en sí: si esto falla no hay nada que sincronizar → propaga.
       await saveProduct.mutateAsync(payload)
+
+      // Recién ahora, con el producto ya guardado SIN foto, se borra el archivo.
+      // Si este borrado falla, queda un archivo huérfano en Storage, no una foto rota.
+      if (finalImageUrl === null && product?.image_url) {
+        await removeImage(product.image_url)
+      }
 
       // Pasos post-guardado AISLADOS: un fallo en uno NO debe saltar el otro
       // en silencio (antes: un hipo en extras dejaba el compuesto SIN receta,

@@ -30,6 +30,10 @@ self.addEventListener('fetch', (e) => {
   // pasaría en producción el día que la API se sirva desde un dominio propio.
   const url = new URL(e.request.url)
   if (e.request.method !== 'GET' || url.origin !== self.location.origin) return
+  // /version.json NUNCA desde la caché: es lo que la app consulta para saber si
+  // hay una versión nueva. Si sin red se sirviera una copia vieja guardada, la app
+  // vería una versión DISTINTA de la suya y avisaría "versión nueva" al revés.
+  if (url.pathname === '/version.json') return
 
   // Network-first: serve fresh content, fall back to cache when offline
   e.respondWith(
