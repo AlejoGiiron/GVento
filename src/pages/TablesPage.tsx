@@ -15,9 +15,10 @@ import { useTables } from '@/hooks/useTables'
 import { useProducts } from '@/hooks/useProducts'
 import { useCategories } from '@/hooks/useCategories'
 import { useProductsWithExtras } from '@/hooks/useProductsWithExtras'
+import { useAgregarTanda } from '@/hooks/useAgregarTanda'
 import {
   createTable, updateTable, deleteTable,
-  updateTableStatus, createOrder, addOrderItemsWithExtras,
+  updateTableStatus, createOrder,
   updateOrderTotal, updateOrderStatus, registerSalePayment,
   getTableActiveOrderCount, removeOrderItem, markItemsSentToKitchen,
   assignOrderNumber, retryOrderNumber, setOrderFiado, applyOrderDiscount,
@@ -322,12 +323,10 @@ type PickerItem = { product: ProductWithCategory; qty: number; note: string; ext
 
 function ProductPickerModal({
   orderId,
-  currentTotal,
   onClose,
   onAdded,
 }: {
   orderId: string
-  currentTotal: number
   onClose: () => void
   onAdded: () => void
 }) {
@@ -338,6 +337,7 @@ function ProductPickerModal({
   const [submitting, setSubmitting] = useState(false)
   const [configProduct, setConfigProduct] = useState<ProductWithCategory | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+  const { agregar } = useAgregarTanda()
 
   const { data: categories = [] } = useCategories()
   const { data: products = [] } = useProducts()
@@ -399,7 +399,9 @@ function ProductPickerModal({
     if (selection.length === 0) return
     setSubmitting(true)
     try {
-      const { error: itemsErr } = await addOrderItemsWithExtras(
+      // Ítems + stock + total de la orden, en una transacción y con clave por
+      // tanda (ver useAgregarTanda). El total ya no se escribe desde acá.
+      await agregar(
         orderId,
         selection.map((x) => ({
           product_id: x.product.id,
@@ -409,10 +411,6 @@ function ProductPickerModal({
           extras: x.extras.map((ex) => ({ extra_id: ex.extra_id, qty: ex.qty })),
         })),
       )
-      if (itemsErr) throw itemsErr
-
-      const { error: totalErr } = await updateOrderTotal(orderId, currentTotal + addedTotal)
-      if (totalErr) throw totalErr
 
       toast.success('Ítems agregados')
       onAdded()
@@ -1390,7 +1388,7 @@ function TableSidePanel({
     setDeletingItemId(item.id)
     try {
       // TODO (inventario, pasada aparte): este ítem YA descontó stock al
-      // agregarse (addOrderItemsWithExtras descuenta producto/receta/extras al
+      // agregarse (add_order_items_with_extras descuenta producto/receta/extras al
       // insertar la línea). Al borrarlo aquí NO se devuelve ese stock, así que
       // el inventario queda subestimado por la cantidad del ítem.
       // Pendiente: función SECURITY DEFINER return_stock_for_order_item(p_id)
@@ -1853,7 +1851,6 @@ export function TablesPage() {
       {showProductPicker && selectedOrder && (
         <ProductPickerModal
           orderId={selectedOrder.id}
-          currentTotal={selectedOrder.total}
           onClose={() => setShowProductPicker(false)}
           onAdded={handleItemsAdded}
         />

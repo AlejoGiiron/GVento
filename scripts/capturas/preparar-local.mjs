@@ -96,6 +96,7 @@ const ORDEN = [
   'close-cash-shift-revoke.sql',        // FASE 2: sin UPDATE directo sobre cash_shifts (después del deploy del frontend)
   'cobro-turno.sql',                    // cambio (1): turno obligatorio para cobrar y para abonos en efectivo + lock de la orden
   'app-version.sql',                    // cada equipo reporta su versión de la app (aviso de versión nueva)
+  'pos-sale-lotes.sql',                 // paso 2: register_pos_sale + clave por tanda y total desde las líneas en add_order_items_with_extras
 ]
 
 // ── QUIÉN GANA cuando una función está definida en más de un .sql ─────────────
@@ -120,7 +121,8 @@ const ORDEN = [
 // la verificación real de que la base local es igual a producción es la deriva
 // (supabase/diag/deriva-esquema.sql + scripts/deriva-comparar.mjs).
 const GANA = {
-  'function add_order_items_with_extras': 'order-items-stock-recipes.sql',
+  // pos-sale-lotes.sql la redefine con (p_order_id, p_items, p_lote) y BORRA la de 2 argumentos:
+  'function add_order_items_with_extras': 'pos-sale-lotes.sql',
   'function register_purchase':           'compra-no-toca-caja.sql',
   'function enforce_profile_organization':'fix-enforce-profile-organization-definer.sql',
   'function get_my_organization_id':      'profiles-is-active-enforced.sql',
