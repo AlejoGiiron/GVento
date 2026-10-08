@@ -1002,7 +1002,13 @@ archivo. Es una pasada propia, no un arrastre de otra tarea.
 de defecto que va a volver cada vez que se agregue un permiso, y porque su modo de fallo es
 el opuesto —y peor— que el de `ventas.anular`.
 
-**Los 6, medidos:** `pos.vender`, `caja.abrir`, `mesas.cobrar`, `productos.ver`,
+**Actualizado con A (2026-10-08): quedan 4.** `pos.vender` y `mesas.cobrar` dejaron de ser
+inertes: los exigen `register_pos_sale` / `register_sale_payment` (`supabase/permisos-cobro.sql`) y
+la pantalla (`can()` en `/m`, el POS y Mesas). Siguen inertes `caja.abrir`, `productos.ver`,
+`reportes.stock` y `reportes.consolidado`. El comando de abajo lo reconfirma (las dos de cobro ya
+dan usos reales).
+
+**Los 6, medidos el 2026-08-31:** `pos.vender`, `caja.abrir`, `mesas.cobrar`, `productos.ver`,
 `reportes.stock`, `reportes.consolidado`. Están en `PERMISSION_GROUPS` —o sea, la matriz de
 Roles les dibuja su checkbox— y **no aparecen en un solo `can()` ni `has_permission()` del
 repo**: solo en seeds y en comentarios de catálogo. Para reconfirmar la lista:

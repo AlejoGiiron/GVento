@@ -249,9 +249,11 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
      `set permissions = <canónica>`: eso pisa los ajustes del cliente.
    - **`multi-tenant-rbac.sql` está aplicada ⇒ es registro histórico, no fuente.** Su lista
      inline está desactualizada a propósito. No editar (R5).
-   - **6 permisos son concedibles y no gatean nada.** Falla **abierto** y en silencio. Entrada
-     propia en [`docs/DEUDAS.md`](docs/DEUDAS.md) → *"concedible pero inerte"*. Que una clave
-     esté en el catálogo NO es evidencia de que algo esté protegido. Para reconfirmarlo:
+   - **4 permisos son concedibles y no gatean nada** (`caja.abrir`, `productos.ver`,
+     `reportes.stock`, `reportes.consolidado`; eran 6 hasta A, que hizo gatear `pos.vender` y
+     `mesas.cobrar`). Falla **abierto** y en silencio. Entrada propia en
+     [`docs/DEUDAS.md`](docs/DEUDAS.md) → *"concedible pero inerte"*. Que una clave esté en el
+     catálogo NO es evidencia de que algo esté protegido. Para reconfirmarlo:
      `grep -rl "'<clave>'" src/ | grep -v permissions.ts`.
 
    🔴 **Por qué existe el generador (historia, no estado):** `ventas.historial` y
@@ -328,10 +330,17 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    clave de la lista por la RPC (una que falte en el SQL pone el test rojo). **Una clave nueva =
    el tipo, la lista y el SQL (archivo NUEVO, R5) en la misma pasada.**
 
-8. **Quién puede cobrar — 2 lados (agregado 2026-10-04).** `get_my_role() in ('admin','cashier')`
-   en `register_pos_sale` / `register_sale_payment` y `ROLES_QUE_COBRAN` en `src/lib/posMovil.ts`,
-   que decide quién va a `/m` en un celular. Si divergen, se manda a `/m` a alguien que el
-   servidor rechaza, o se deja afuera a alguien que podría vender.
+8. **Quién puede cobrar — 2 lados (agregado 2026-10-04; rehecho con A, 2026-10-08).** Lo decide
+   el PERMISO, igual en los dos lados: en el servidor, `has_permission('pos.vender')` en
+   `register_pos_sale` y, en `register_sale_payment`, según el tipo de orden (allowlist: `dine_in` →
+   `mesas.cobrar`; `takeaway`/`delivery` → `pos.vender`; otro → rechazo), en
+   `supabase/permisos-cobro.sql`; en la pantalla, `can('pos.vender')` en `/m` (`MobileShell`) y en
+   el botón Cobrar del POS, y `can('mesas.cobrar')` en el de Mesas. Si divergen, la pantalla ofrece
+   cobrar y el servidor rechaza, o al revés. Lo vigilan `tests/permisos-cobro.spec.ts` (escritorio)
+   y `tests/m-permisos.spec.ts` (celular), que comparan, rol por rol, lo que se ve con lo que el
+   servidor acepta. **El rol viejo queda solo para la redirección automática a `/m`**
+   (`ROLES_QUE_SE_REDIRIGEN` en `src/lib/posMovil.ts`: dueño, admin y cajero, y además
+   `pos.vender`), **transitoria hasta M2**.
 
 9. **Qué documento (y qué manifest) recibe cada ruta — 2 lados (rehecho 2026-10-05).**
    `identidadDeRuta` en `src/lib/identidadRutas.ts` (lo usa el plugin de `vite.config.ts` en dev
