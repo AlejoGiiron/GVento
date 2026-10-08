@@ -611,10 +611,11 @@ git log -1 --format='%h %s' develop   # el commit de prep/paso-5 que te paso
 ```
 
 **5.2 — Release**, con estos datos:
-- `git diff --stat origin/main develop` → **56 archivos** (28 nuevos, 28 modificados):
+- `git diff --stat origin/main develop` → **59 archivos** (31 nuevos, 28 modificados):
   - **M1 (`/m`):** `src/pages/movil/` (2), `src/components/movil/` (5), `src/hooks/usePosMovil.ts`,
     `src/hooks/useDispositivoMovil.ts`, `src/hooks/useConfigExtras.ts`, `src/lib/posMovil.ts` (+ test),
-    `public/movil/` (manifest y 4 íconos marcador).
+    `public/movil/` (manifest con nombre "G-Vento", `icono.svg` fuente y los 4 PNG que genera
+    `scripts/iconos-movil.mjs`; los vigila `src/lib/iconosMovil.test.ts`).
   - **Identidad por ruta:** `src/lib/identidadRutas.ts` (+ test), `vite.config.ts` (genera
     `movil.html` y `cocina.html` en el build: **no están en el repo**, por eso no aparecen),
     `vercel.json` (rewrites `/m` y `/m/*` → `movil.html`, `/cocina` → `cocina.html`, el resto →

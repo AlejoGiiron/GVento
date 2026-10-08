@@ -36,7 +36,7 @@ describe('htmlConIdentidad', () => {
     const h = htmlConIdentidad(base, 'movil')
     expect(manifests(h)).toEqual(['/movil/manifest.webmanifest'])
     expect(h).toContain('apple-touch-icon')
-    expect(h).toContain('content="Vender"')
+    expect(h).toContain('content="G-Vento"')
   })
   it('/cocina: SOLO el del KDS', () => {
     expect(manifests(htmlConIdentidad(base, 'cocina'))).toEqual(['/manifest.json'])

@@ -29,7 +29,7 @@ export const IDENTIDADES: Record<'movil' | 'cocina', Identidad> = {
     head: [
       '<link rel="manifest" href="/movil/manifest.webmanifest" />',
       '<link rel="apple-touch-icon" href="/movil/apple-touch-icon-180.png" />',
-      '<meta name="apple-mobile-web-app-title" content="Vender" />',
+      '<meta name="apple-mobile-web-app-title" content="G-Vento" />',
     ].join('\n    '),
   },
   // Cocina (KDS): SOLO el suyo.

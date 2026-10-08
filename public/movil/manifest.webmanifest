@@ -1,7 +1,7 @@
 {
   "id": "/m",
-  "name": "G-Vento Vender",
-  "short_name": "Vender",
+  "name": "G-Vento",
+  "short_name": "G-Vento",
   "description": "POS móvil de G-Vento para vender desde el celular",
   "start_url": "/m",
   "scope": "/m",
