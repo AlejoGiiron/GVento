@@ -334,7 +334,7 @@ function HojaCobro({ paso, setPaso }: { paso: Paso; setPaso: (p: Paso | null) =>
               />
             ) : (
               <div data-testid="m-nequi-sin-qr" style={{ color: M.suave, padding: 24 }}>
-                No hay QR de Nequi configurado. Cobrá al número del local y confirmá cuando llegue el pago.
+                No hay QR de Nequi configurado. Cobra al número del local y confirma cuando llegue el pago.
               </div>
             )}
             <div style={{ fontSize: 34, fontWeight: 800, fontFamily: 'monospace' }}>{formatCOP(total)}</div>
@@ -343,7 +343,7 @@ function HojaCobro({ paso, setPaso }: { paso: Paso; setPaso: (p: Paso | null) =>
 
         {paso === 'pagar' && (metodo === 'card' || metodo === 'transfer') && (
           <div style={{ color: M.suave, padding: 24, textAlign: 'center', fontSize: 16 }}>
-            Cobrá {formatCOP(total)} con {NOMBRE_METODO[metodo].toLowerCase()} y confirmá.
+            Cobra {formatCOP(total)} con {NOMBRE_METODO[metodo].toLowerCase()} y confirma.
           </div>
         )}
 
@@ -369,7 +369,7 @@ function HojaCobro({ paso, setPaso }: { paso: Paso; setPaso: (p: Paso | null) =>
       <div style={{ padding: 12, paddingBottom: tapa > 0 ? 12 : 'calc(env(safe-area-inset-bottom) + 12px)', borderTop: `1px solid ${M.borde}`, display: 'grid', gap: 10 }}>
         {paso !== 'exito' && !isOpen && (
           <div data-testid="m-sin-turno" style={{ color: '#fca5a5', fontSize: 14, textAlign: 'center' }}>
-            No hay turno abierto. Pedile al encargado que abra la caja para poder cobrar.
+            No hay turno abierto. Pídele al encargado que abra la caja para poder cobrar.
           </div>
         )}
 

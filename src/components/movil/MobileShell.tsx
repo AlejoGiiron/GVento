@@ -103,7 +103,7 @@ export function MobileShell() {
       )}
       {sinCapas && instalacion.puedeInstalar && (
         <div data-testid="m-aviso-instalar" style={avisoFranja}>
-          <span style={{ flex: 1 }}>Instalá Vender en la pantalla de inicio.</span>
+          <span style={{ flex: 1 }}>Instala G-Vento en la pantalla de inicio.</span>
           <button type="button" data-testid="m-instalar" onClick={() => void instalacion.instalar()} style={botonChico}>
             <Download size={15} /> Instalar
           </button>

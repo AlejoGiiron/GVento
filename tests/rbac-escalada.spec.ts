@@ -300,7 +300,7 @@ test('el desactivado NO entra: la sesión se corta con mensaje', async ({ page }
     // El login de auth SÍ funciona (auth.users está intacto: el baneo sigue
     // pendiente). Lo que corta es AuthContext al leer el profile inactivo.
     await expect(
-      page.getByText('Tu usuario está desactivado. Contactá al administrador.'),
+      page.getByText('Tu usuario está desactivado. Contacta al administrador.'),
     ).toBeVisible({ timeout: 15_000 })
 
     // Y no queda dentro de la app.

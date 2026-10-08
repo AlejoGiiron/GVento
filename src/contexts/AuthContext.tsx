@@ -90,7 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfile(null)
       setUser(null)
       clearSentryUserContext()
-      toast.error('Tu usuario está desactivado. Contactá al administrador.')
+      toast.error('Tu usuario está desactivado. Contacta al administrador.')
       return
     }
 
