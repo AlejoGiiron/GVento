@@ -611,7 +611,7 @@ git log -1 --format='%h %s' develop   # el commit de prep/paso-5 que te paso
 ```
 
 **5.2 — Release**, con estos datos:
-- `git diff --stat origin/main develop` → **59 archivos** (31 nuevos, 28 modificados):
+- `git diff --stat origin/main develop` → **60 archivos** (31 nuevos, 29 modificados):
   - **M1 (`/m`):** `src/pages/movil/` (2), `src/components/movil/` (5), `src/hooks/usePosMovil.ts`,
     `src/hooks/useDispositivoMovil.ts`, `src/hooks/useConfigExtras.ts`, `src/lib/posMovil.ts` (+ test),
     `public/movil/` (manifest con nombre "G-Vento", `icono.svg` fuente y los 4 PNG que genera
@@ -625,7 +625,7 @@ git log -1 --format='%h %s' develop   # el commit de prep/paso-5 que te paso
     correr**), `src/lib/restaurantConfig.ts`, `src/hooks/useRestaurantConfig.ts`,
     `src/components/config/SeccionPosMovil.tsx`, `src/pages/ConfigPage.tsx`,
     `src/types/database.types.ts`.
-  - **Resto del escritorio:** `src/components/ProtectedRoute.tsx`,
+  - **Resto del escritorio:** `src/components/ProtectedRoute.tsx`, `src/contexts/AuthContext.tsx`,
     `src/components/layout/AppLayout.tsx`, `src/components/layout/VersionBanner.tsx`,
     `src/components/pos/ItemConfigModal.tsx`, `src/hooks/useSaleCheckout.ts`,
     `src/hooks/useAgregarTanda.ts`.
@@ -651,6 +651,9 @@ git log -1 --format='%h %s' develop   # el commit de prep/paso-5 que te paso
   - **`index.html` sin manifest:** desde una página del escritorio el navegador ya **no** ofrece
     "Instalar G-Vento Cocina KDS" (antes lo ofrecía en cualquier página, por error). Ver 5.6.
   - **Aviso de versión:** igual en el escritorio; en `/m` lo muestra el caparazón.
+  - **Textos en "tú", sin voseo** (2026-10-08): en el escritorio solo cambia el aviso de usuario
+    desactivado al iniciar sesión: "Contacta al administrador" (decía "Contactá"). Los demás
+    cambios de texto son de `/m`.
 - Título: `release: POS móvil (/m), login en el celular y configuración fusionada en el servidor`
 
 **5.3 — Verificación:** `/version.json` nuevo y **Q-FUNCIONES** igual que en 4.5. El service

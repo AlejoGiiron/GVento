@@ -19,7 +19,7 @@ export function MisVentasMovil() {
 
   if (isLoadingShift) return <Centro>Cargando…</Centro>
   if (!isOpen) return <Centro testid="m-mis-ventas-sin-turno">No hay turno abierto. Tus ventas aparecen cuando se abre la caja.</Centro>
-  if (isError) return <Centro>No se pudieron cargar tus ventas. Revisá la conexión.</Centro>
+  if (isError) return <Centro>No se pudieron cargar tus ventas. Revisa la conexión.</Centro>
   // Mientras carga NO se muestran ceros: un "$0" que en realidad es "todavía no
   // sé" es un dato falso (DEUDAS → "Ausencias y ceros que la UI muestra mientras carga").
   if (isLoading || !data) return <Centro>Cargando tus ventas…</Centro>
