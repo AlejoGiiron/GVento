@@ -1,4 +1,6 @@
 import { RefreshCw } from 'lucide-react'
+import { useLocation } from 'react-router-dom'
+import { esRutaMovil } from '@/lib/posMovil'
 import { useVersionCheck } from '@/hooks/useVersionCheck'
 import { useMarcarVersion } from '@/hooks/useMarcarVersion'
 
@@ -9,9 +11,13 @@ import { useMarcarVersion } from '@/hooks/useMarcarVersion'
  */
 export function VersionBanner() {
   const { hayNueva } = useVersionCheck()
+  // En el POS móvil el aviso lo muestra el caparazón (MobileShell), como una franja
+  // EN EL FLUJO que se oculta mientras hay una capa abierta: flotando, tapaba
+  // "Cobrar", la barra inferior o el "Volver" de la hoja de cobro.
+  const enMovil = esRutaMovil(useLocation().pathname)
   // Y reporta a la base qué versión tiene este equipo (supabase/app-version.sql).
   useMarcarVersion()
-  if (!hayNueva) return null
+  if (!hayNueva || enMovil) return null
 
   return (
     <div

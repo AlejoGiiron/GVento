@@ -5,7 +5,7 @@ test.describe('Auth', () => {
   test('login con credenciales incorrectas muestra error', async ({ page }) => {
     const { email } = ownerCreds()
     await page.goto('/login')
-    await page.locator('input[autocomplete="email"]').fill(email)
+    await page.locator('input[type="email"]').fill(email)
     await page.locator('input[autocomplete="current-password"]').fill('password-incorrecto-zzz')
     await page.getByRole('button', { name: 'Ingresar' }).click()
 

@@ -1,6 +1,5 @@
-import { useMemo, useState } from 'react'
 import { X, Plus, Minus, ShoppingCart, Package } from 'lucide-react'
-import { useProductExtras } from '@/hooks/useProductExtras'
+import { useConfigExtras } from '@/hooks/useConfigExtras'
 import type { CartExtra, ProductWithCategory } from '@/stores/cartStore'
 
 const formatCOP = (n: number) =>
@@ -13,6 +12,7 @@ const formatCOP = (n: number) =>
  * Modal de configuración de un ítem: selección de extras (qty por unidad) para
  * un producto. Reutilizado por POS y Mesas. `initial` precarga la selección al
  * editar un ítem ya en el carrito. La qty de cada extra es POR UNIDAD del producto.
+ * La lógica vive en useConfigExtras (compartida con la hoja del POS móvil).
  */
 export function ItemConfigModal({
   product,
@@ -27,42 +27,9 @@ export function ItemConfigModal({
   onConfirm: (extras: CartExtra[]) => void
   onClose: () => void
 }) {
-  const { productExtras, isLoading } = useProductExtras(product.id)
-
-  // Extras activos disponibles para este producto.
-  const available = useMemo(
-    () =>
-      productExtras
-        .map((r) => r.extras)
-        .filter((e): e is NonNullable<typeof e> => !!e && e.is_active),
-    [productExtras],
-  )
-
-  // qty por extra_id (por unidad del producto).
-  const [qtys, setQtys] = useState<Record<string, number>>(() => {
-    const map: Record<string, number> = {}
-    for (const e of initial) map[e.extra_id] = e.qty
-    return map
-  })
-
-  const setQty = (id: string, qty: number) =>
-    setQtys((prev) => ({ ...prev, [id]: Math.max(0, qty) }))
-
-  const extrasUnit = available.reduce((a, e) => a + Number(e.price) * (qtys[e.id] ?? 0), 0)
-  const unitSubtotal = product.price + extrasUnit
-
-  const handleConfirm = () => {
-    const extras: CartExtra[] = available
-      .filter((e) => (qtys[e.id] ?? 0) > 0)
-      .map((e) => ({
-        extra_id: e.id,
-        name: e.name,
-        price: Number(e.price),
-        qty: qtys[e.id],
-        linked_product_id: e.linked_product_id,
-      }))
-    onConfirm(extras)
-  }
+  const { disponibles: available, isLoading, cantidad, setCantidad: setQty, subtotalUnidad: unitSubtotal, elegidos } =
+    useConfigExtras(product, initial)
+  const handleConfirm = () => onConfirm(elegidos())
 
   return (
     <div
@@ -102,7 +69,7 @@ export function ItemConfigModal({
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {available.map((e) => {
-                const qty = qtys[e.id] ?? 0
+                const qty = cantidad(e.id)
                 return (
                   <div
                     key={e.id}

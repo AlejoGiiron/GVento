@@ -4,10 +4,10 @@ import { loginAsOwner } from './helpers/auth'
 const SUFFIX = Date.now().toString().slice(-6)
 const ROLE = `Rol E2E ${SUFFIX}`
 
-// Secciones visibles para owner (6 base + Sedes + Roles + Extras).
+// Secciones visibles para owner (7 base + Sedes + Roles + Extras).
 const SECTIONS = [
   'Restaurante', 'Usuarios', 'Sedes', 'Roles y permisos', 'Extras',
-  'Caja', 'Cocina', 'Delivery', 'Notificaciones',
+  'Caja', 'Cocina', 'Delivery', 'Notificaciones', 'POS móvil',
 ]
 
 test.describe('Configuración', () => {

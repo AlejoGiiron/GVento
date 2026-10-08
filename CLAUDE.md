@@ -300,6 +300,29 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    encontraba (R2, caso #15). El comando está en DEUDAS → *"`payments` y `debt_payments`
    aceptan escritura DIRECTA"*.
 
+7. **Claves de `restaurants.config` — 2 lados (agregado 2026-10-04).** La allowlist de
+   `update_restaurant_config` (`supabase/restaurant-config-rpc.sql`) y `CLAVES_CONFIG` en
+   `src/lib/restaurantConfig.ts`. El compilador ata `CLAVES_CONFIG` al tipo `RestaurantConfig`
+   (una clave en el tipo y no en la lista no compila), y `tests/config-merge.spec.ts` escribe cada
+   clave de la lista por la RPC (una que falte en el SQL pone el test rojo). **Una clave nueva =
+   el tipo, la lista y el SQL (archivo NUEVO, R5) en la misma pasada.**
+
+8. **Quién puede cobrar — 2 lados (agregado 2026-10-04).** `get_my_role() in ('admin','cashier')`
+   en `register_pos_sale` / `register_sale_payment` y `ROLES_QUE_COBRAN` en `src/lib/posMovil.ts`,
+   que decide quién va a `/m` en un celular. Si divergen, se manda a `/m` a alguien que el
+   servidor rechaza, o se deja afuera a alguien que podría vender.
+
+9. **Qué documento (y qué manifest) recibe cada ruta — 2 lados (rehecho 2026-10-05).**
+   `identidadDeRuta` en `src/lib/identidadRutas.ts` (lo usa el plugin de `vite.config.ts` en dev
+   y en el build, que genera `movil.html` y `cocina.html` desde el ÚNICO `index.html`) y las
+   `rewrites` de `vercel.json` (producción). Lo vigila `src/lib/identidadRutas.test.ts`, que emula
+   las rewrites de `vercel.json` y las compara con la regla.
+   🔴 **Por qué un HTML por identidad y no JS:** Safari de iPhone toma el manifest del DOCUMENTO
+   al "Agregar a inicio". Cambiar el `<link>` por JS no alcanzó: medido en un iPhone 16 Pro Max el
+   2026-10-05, el ícono agregado desde `/m` abría Cocina. Por la misma razón, entrar y salir de
+   `/m` es una carga completa de página (`cargarDocumento` en `src/lib/posMovil.ts`), nunca
+   `navigate`.
+
 → **Evidencia:** [`docs/BITACORA.md`](docs/BITACORA.md) → *"FASE 1 — estado de suscripción"*
 (el aviso a G-Centro) · el hallazgo del onboarding está en el inventario de arriba · el caso de
 `shift-reprint` está en el commit `fix(test): arqueo.spec buscaba shift-reprint en la fila`.

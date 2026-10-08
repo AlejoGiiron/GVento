@@ -1,6 +1,7 @@
 import { useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { nuevoUuid } from '@/lib/uuid'
+import { useAuth } from '@/hooks/useAuth'
 import type { Json } from '@/types/database.types'
 import type { OrderItemPayload, SalePaymentPart } from '@/lib/supabase-helpers'
 import type { DiscountType, DiscountKind } from '@/stores/cartStore'
@@ -50,9 +51,14 @@ export type VentaRegistrada = {
 let pendiente: { id: string; huella: string } | null = null
 
 export function useSaleCheckout() {
+  const { user } = useAuth()
+  const usuario = user?.id ?? null
   const cobrar = useCallback(async (venta: VentaPOS): Promise<VentaRegistrada> => {
     const { items, payments, ...orden } = venta
-    const huella = JSON.stringify({ orden, items })
+    // El USUARIO es parte de la huella: si A falla, cierra sesión y B entra en la
+    // misma pestaña con el mismo carrito, B no puede recibir la venta de A
+    // (ya_existia) — sería una venta cobrada por B atribuida a A.
+    const huella = JSON.stringify({ usuario, orden, items })
     if (pendiente?.huella !== huella) pendiente = { id: nuevoUuid(), huella }
     const { data, error } = await supabase.rpc('register_pos_sale', {
       p_sale_id: pendiente.id,
@@ -63,7 +69,7 @@ export function useSaleCheckout() {
     if (error) throw error
     pendiente = null
     return data as unknown as VentaRegistrada
-  }, [])
+  }, [usuario])
 
   return { cobrar }
 }

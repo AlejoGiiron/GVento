@@ -24,9 +24,11 @@ import {
   Lock,
   Puzzle,
   Package,
+  Smartphone,
   type LucideIcon,
 } from 'lucide-react'
 import { useRestaurantConfig } from '@/hooks/useRestaurantConfig'
+import { SeccionPosMovil } from '@/components/config/SeccionPosMovil'
 import { useUsers } from '@/hooks/useUsers'
 import { useAuth } from '@/hooks/useAuth'
 import { usePermissions } from '@/hooks/usePermissions'
@@ -49,7 +51,7 @@ import type { Tables } from '@/types/database.types'
 
 // ─── Constants ────────────────────────────────────────────────────
 
-type SectionId = 'restaurante' | 'usuarios' | 'sedes' | 'roles' | 'extras' | 'caja' | 'cocina' | 'delivery' | 'notificaciones'
+type SectionId = 'restaurante' | 'usuarios' | 'sedes' | 'roles' | 'extras' | 'caja' | 'cocina' | 'delivery' | 'notificaciones' | 'pos_movil'
 
 const SECTIONS: { id: SectionId; label: string; icon: LucideIcon; permission?: string }[] = [
   { id: 'restaurante', label: 'Restaurante', icon: Building2 },
@@ -61,6 +63,7 @@ const SECTIONS: { id: SectionId; label: string; icon: LucideIcon; permission?: s
   { id: 'cocina', label: 'Cocina', icon: ChefHat },
   { id: 'delivery', label: 'Delivery', icon: Truck },
   { id: 'notificaciones', label: 'Notificaciones', icon: Bell },
+  { id: 'pos_movil', label: 'POS móvil', icon: Smartphone },
 ]
 
 const DEFAULT_CASH_OUT_REASONS = ['Mercado', 'Domicilio', 'Servicios', 'Otro']
@@ -1908,6 +1911,7 @@ export function ConfigPage() {
     cocina: <SectionCocina />,
     delivery: <SectionDelivery />,
     notificaciones: <SectionNotificaciones />,
+    pos_movil: <SeccionPosMovil />,
   }
 
   return (

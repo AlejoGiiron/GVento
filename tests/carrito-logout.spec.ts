@@ -30,7 +30,7 @@ test('carrito y ventas en espera se limpian al cerrar sesión (mismo tab, sin re
 
   // Entrar de nuevo SIN reload: rellenar el formulario que ya está montado.
   const { email, password } = ownerCreds()
-  await page.locator('input[autocomplete="email"]').fill(email)
+  await page.locator('input[type="email"]').fill(email)
   await page.locator('input[autocomplete="current-password"]').fill(password)
   await page.getByRole('button', { name: 'Ingresar' }).click()
   await expect(page).toHaveURL(/\/ventas/, { timeout: 15_000 })
