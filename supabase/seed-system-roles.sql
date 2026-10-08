@@ -35,7 +35,7 @@
 --   owner    1 comodín "*" — hereda todo, presente y futuro
 --   admin   23 permisos
 --   cajero  10 permisos
---   mozo     3 permisos
+--   mozo     4 permisos
 --
 -- ⚠️ ESTA FUNCIÓN NO CORRIGE ORGANIZACIONES YA EXISTENTES. Nadie vuelve a correr un
 --    onboarding sobre una org que ya está vendiendo. Reconciliar las que nacieron
@@ -83,7 +83,7 @@ begin
       "caja.movimientos","mesas.cobrar","delivery.gestionar","fiado.gestionar",
       "ventas.historial"
     ]'::jsonb),
-    (p_org, 'mozo', true, '["pos.vender","mesas.gestionar","cocina.acceder"]'::jsonb)
+    (p_org, 'mozo', true, '["pos.vender","mesas.gestionar","mesas.cobrar","cocina.acceder"]'::jsonb)
   on conflict (organization_id, name)
     do update set permissions = excluded.permissions, is_system = true;
 end $fn$;
@@ -104,7 +104,7 @@ commit;
 --   owner   → 1
 --   admin   → 23
 --   cajero  → 10
---   mozo    → 3
+--   mozo    → 4
 --
 -- select o.name as org, r.name as rol,
 --        jsonb_array_length(r.permissions) as n,

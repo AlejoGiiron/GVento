@@ -1051,6 +1051,20 @@ cambia la próxima vez que una migración redefina esa función, no se redefine 
 pierde la tilde: "Pedile"), con regex Unicode — `grep` en esta máquina no trata la tilde como
 letra y devuelve vacío. Revisar a mano: también matchea futuros ("desactivará") y palabras como "está".
 
+### 🔴 Fiado en MESA: cualquier usuario de la sede puede pasar una orden a fiado (hallado 2026-10-08)
+
+El cobro de mesa a fiado no pasa por ninguna función: `setOrderFiado` (`src/lib/supabase-helpers.ts`)
+hace un UPDATE directo a `orders` (`payment_status = 'pending'`, `customer_id`, `customer_name`), y
+la política `orders: staff actualiza` solo pide `restaurant_id = get_my_restaurant_id()`. **No hay
+rol ni permiso en el servidor**: hoy lo frena solo la pantalla. Un usuario de la sede sin
+`fiado.gestionar` puede, con la API, dejar como deuda la orden de cualquier mesa.
+
+**No lo cubre A** (A cambia quién COBRA: `register_pos_sale` y `register_sale_payment`). Va en el
+paquete Mesas: `close_table_sale` con el parámetro de fiado (decidido 2026-10-07) exige
+`fiado.gestionar` en el servidor, y entonces el UPDATE directo se puede cerrar. Para
+reconfirmarlo: `select policyname, qual, with_check from pg_policies where tablename = 'orders'
+and cmd = 'UPDATE';` y `grep -rn "setOrderFiado" src/`.
+
 ### 🔴 A (permisos de cobro): `profiles.role` y `profiles.role_id` pueden divergir (anotado 2026-10-07)
 
 **La clase.** Dos columnas deciden cosas distintas del mismo usuario y nada en el servidor las
