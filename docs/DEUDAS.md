@@ -1034,6 +1034,20 @@ catálogo es la promesa; el `can()` es la cosa real. Es R4 —verificar contra l
 contra el proxy— aplicada al RBAC: que la clave figure en `PERMISSION_GROUPS` es exactamente
 el tipo de proxy que dice OK sin que nada funcione.
 
+### Textos en voseo que quedan FUERA de `/m` y del login (anotado 2026-10-08)
+
+La regla: todo texto que ve el usuario va en español neutro con "tú"/"usted". El 2026-10-08
+se barrieron `/m`, el login y el aviso de instalación (y en B, la pantalla de fiado y dos
+mensajes de `register_pos_sale`). **Queda voseo en el escritorio** (Configuración, Reportes,
+cierre y apertura de turno, abonos en lote, Mesas, POS…) y en UN mensaje del servidor:
+`register_sale_payment` → "Abrí el turno antes de cobrar" (`supabase/cobro-turno.sql`; se
+cambia la próxima vez que una migración redefina esa función, no se redefine solo por esto).
+
+**Para listarlos:** `node scripts/buscar-voseo.mjs src` (o una carpeta). Busca por FORMA
+(terminaciones -á/-é/-í con o sin pronombre, -ás/-és/-ís, y el imperativo con pronombre que
+pierde la tilde: "Pedile"), con regex Unicode — `grep` en esta máquina no trata la tilde como
+letra y devuelve vacío. Revisar a mano: también matchea futuros ("desactivará") y palabras como "está".
+
 ### 🔴 A (permisos de cobro): `profiles.role` y `profiles.role_id` pueden divergir (anotado 2026-10-07)
 
 **La clase.** Dos columnas deciden cosas distintas del mismo usuario y nada en el servidor las

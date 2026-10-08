@@ -791,7 +791,7 @@ cada paso se escriben cuando el paso esté construido y probado en Docker.
 | 9 | Quitar ítem de mesa devolviendo stock (cierra H3 y el 3.5) + cerrar mesa sin consumo en una RPC. | SQL | 8 |
 | 9b | Mesas usa las dos RPC. | frontend | 9 |
 | 10 | Archivar mesas (`archived_at` + RPC de eliminar). | SQL + frontend | 9b |
-| 11 | Fiado en `/m` (M1.1, B), en la rama `feat/m1-fiado`. Sin SQL: usa `register_pos_sale` con `fiado` y la RLS de `customers` que ya existen. Trae además el arreglo del cambio de rol en Configuración → Usuarios (`role` y `role_id` juntos; rol personalizado → `waiter`). Se release-a DESPUÉS del Paso 5, como paso propio. | frontend | 5 |
+| 11 | Fiado en `/m` (M1.1, B), en la rama `feat/m1-fiado`. Trae además: el cambio de rol en Configuración → Usuarios (`role` y `role_id` juntos; rol personalizado → `waiter`); UN id de venta por carrito aunque cambie el método en el reintento (también a fiado), con el método REAL en el aviso, en `/m` y en el escritorio; y el login que distingue "sin conexión" de "credenciales incorrectas". **SQL:** `supabase/pos-sale-metodo-real.sql` (md5 con finales LF `8568598b85d05c542f82613b3ef091df`; deja `register_pos_sale` en `5c0e0d9e…` con Q-FUNCIONES; reversa fuera de git `pos-sale-metodo-revertir.sql`, md5 `07e82409e7d3191ad39bb780fca8e5f3`). Compatible con el frontend en producción: se aplica ANTES. Se release-a DESPUÉS del Paso 5, como paso propio. | SQL + frontend | 5 |
 
 ## Resumen
 
