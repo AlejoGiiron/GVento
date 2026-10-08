@@ -590,28 +590,76 @@ se hace hasta que la lista pase.**
 
 ---
 
-## Paso 5 — M1 + frontend de la config
+## Paso 5 — M1 + fiado en `/m` (B) + frontend de la config
 
 - **Depende de:** Paso 3 en producción, Paso 4 aplicado y Paso 4b aprobado.
-- **Qué lleva:** solo frontend: `feat/m1-pos-movil` → `develop`. El paso 2 ya está en
-  `develop` (Paso 3), así que entra solo lo de M1 y la config.
+- **Qué lleva** (decidido el 2026-10-08: sale **con B incluido**, para que G-10 lo vea completo
+  y dé su opinión antes de crear los usuarios de los bartenders): `feat/m1-fiado` → `develop`.
+  `feat/m1-fiado` contiene `prep/paso-5` (M1 + config + textos en "tú") y encima B: fiado en
+  `/m`, cambio de rol en Usuarios, un id de venta por carrito con el método real en el aviso, y
+  el login que distingue "sin conexión" (con tope de 15 s). **Un SQL, primero y solo: 5.0.**
 - **Horario:** el del Paso 0. **Q-AHORA** antes. Otro día o ≥ 1 h después del último release.
 
-**5.1 — Merge** (lo hago yo): ya está **preparado** en la rama `prep/paso-5` = `develop` del
-Paso 3 (`9731272`) + `feat/m1-pos-movil` (`d4958d5`, el probado en equipos) + esta
-actualización del plan, con la suite completa corrida. Se simuló el 2026-10-07: el merge entra
-**limpio** (el conflicto de `docs/DEUDAS.md` quedó resuelto en el Paso 3). Después del release
-del Paso 3, `develop` avanza a esa rama sin merge nuevo (fast-forward):
+**5.0 — SQL: `supabase/pos-sale-metodo-real.sql`. Va PRIMERO, SOLO, y se verifica ANTES del
+frontend.** Hace que `register_pos_sale` devuelva el método real de la venta (también cuando ya
+existía) con la función nueva `_venta_pos_respuesta`, y pasa dos de sus mensajes a "tú". Es
+compatible con el frontend en producción (lee solo las claves de siempre), así que si algo sale
+mal aquí, se revierte sin tocar el frontend.
+- **Archivo:** el de `feat/m1-fiado`. md5 con finales LF: **`8568598b85d05c542f82613b3ef091df`**
+  (`tr -d '\r' < supabase/pos-sale-metodo-real.sql | md5sum`).
+- **Antes de correrlo — Q-METODO:**
+  ```sql
+  select p.oid::regprocedure as funcion,
+         md5(regexp_replace(regexp_replace(pg_get_functiondef(p.oid), E'\r','','g'), E'[ \t]+\n', E'\n','g')) as md5,
+         has_function_privilege('anon', p.oid, 'execute') as anon_ejecuta,
+         has_function_privilege('authenticated', p.oid, 'execute') as auth_ejecuta
+    from pg_proc p
+   where p.pronamespace = 'public'::regnamespace
+     and p.proname in ('register_pos_sale', '_venta_pos_respuesta')
+   order by 1;
+  ```
+  Esperado, **exacto**, 1 fila: `register_pos_sale(uuid,jsonb,jsonb,jsonb)` ·
+  `23e946e81c11f9486b04f9d53432e933` · f · t. 🔴 **Si el md5 es otro, NO lo corras:** en
+  producción hay otra versión y el archivo la pisaría. Pégame la salida.
+- **Correr** el archivo completo en el SQL Editor (trae su `begin`/`commit`).
+- **Después — Q-METODO otra vez.** Esperado, **exacto**, 2 filas:
+
+  | funcion | md5 | anon_ejecuta | auth_ejecuta |
+  |---|---|---|---|
+  | `_venta_pos_respuesta(uuid,boolean)` | `e4fb984b02c176d6f877d5fbdf2f1c9d` | f | **f** |
+  | `register_pos_sale(uuid,jsonb,jsonb,jsonb)` | `5c0e0d9eee8b2ad8fb5ecba549ab9d32` | f | t |
+
+  `auth_ejecuta = f` en `_venta_pos_respuesta` es a propósito: la app no la llama, solo
+  `register_pos_sale`. (Medido en Docker el 2026-10-08; el "antes" se midió cargando la reversa
+  dentro de un `rollback` y dio el `23e946e8…` de producción.)
+- **Reversa:** `pos-sale-metodo-revertir.sql` (fuera de git, en la raíz; md5
+  **`07e82409e7d3191ad39bb780fca8e5f3`**). Deja `register_pos_sale` en `23e946e8…` y borra
+  `_venta_pos_respuesta`. El frontend del Paso 3 y el de este paso funcionan con o sin ella (sin
+  ella, el aviso de "ya quedó registrada" no nombra el método).
+- 🔴 **No re-aplicar `pos-sale-lotes.sql` después:** devolvería `register_pos_sale` a la versión
+  sin método real (R5). Si pasara, se arregla corriendo otra vez `pos-sale-metodo-real.sql`.
+
+**5.1 — Merge** (lo hago yo): la rama del release es **`feat/m1-fiado`** (contiene
+`prep/paso-5`). Es fast-forward desde `origin/develop` = `9731272`, así que `develop` avanza sin
+merge nuevo:
 
 ```bash
+git fetch origin
 git checkout develop
-git log -1 --format='%h' develop      # tiene que ser 9731272 (si no, avisame: hay algo más en develop)
-git merge --ff-only prep/paso-5
-git log -1 --format='%h %s' develop   # el commit de prep/paso-5 que te paso
+git log -1 --format='%h' develop                          # tiene que ser 9731272 (si no, avísame)
+git merge-base --is-ancestor develop origin/feat/m1-fiado && echo FF   # tiene que decir FF
+git merge --ff-only origin/feat/m1-fiado
+git log -1 --format='%h %s' develop                       # el commit de feat/m1-fiado que te paso
 ```
 
 **5.2 — Release**, con estos datos:
-- `git diff --stat origin/main develop` → **60 archivos** (31 nuevos, 29 modificados):
+- `git diff --stat origin/main develop` → **77 archivos** (45 nuevos, 32 modificados): los 60 de
+  `prep/paso-5` y lo que agrega B (30 archivos, de los que 14 son nuevos y 3 entran recién al
+  release: `src/pages/POSPage.tsx`, `src/hooks/useUsers.ts`, `tests/helpers/proxy-reenvio.ts`).
+  **SQL en el diff:** `supabase/pos-sale-metodo-real.sql` (se corre en el 5.0) y
+  `supabase/restaurant-config-rpc.sql` (ya aplicado en el Paso 4: **no se vuelve a correr**).
+  `supabase/pos-sale-lotes.sql` **no cambia** (`git diff --quiet origin/develop develop --
+  supabase/pos-sale-lotes.sql && echo sin cambios`).
   - **M1 (`/m`):** `src/pages/movil/` (2), `src/components/movil/` (5), `src/hooks/usePosMovil.ts`,
     `src/hooks/useDispositivoMovil.ts`, `src/hooks/useConfigExtras.ts`, `src/lib/posMovil.ts` (+ test),
     `public/movil/` (manifest con nombre "G-Vento", `icono.svg` fuente y los 4 PNG que genera
@@ -633,6 +681,12 @@ git log -1 --format='%h %s' develop   # el commit de prep/paso-5 que te paso
     1.63.0), 11 specs/helpers, `scripts/capturas/preparar-local.mjs`.
   - **Docs:** `CLAUDE.md`, `docs/DEUDAS.md`, `docs/m1-verificacion-equipos.md`,
     `docs/plan-despliegue-m1.md`.
+  - **B (fiado en `/m` y lo que vino con él):** `src/components/movil/ClienteFiadoMovil.tsx`,
+    `src/lib/clientesFiado.ts`, `src/lib/metodoVenta.ts`, `src/lib/falloLogin.ts`,
+    `src/lib/rolLegacy.ts` (cada uno con su test), `src/hooks/useUsers.ts`, `src/pages/POSPage.tsx`,
+    `supabase/pos-sale-metodo-real.sql`, `scripts/buscar-voseo.mjs`, y los specs
+    `m-fiado`, `usuarios-cambio-rol`, `login-sin-conexion` (+ `pos-sale-lotes`, `m-pos-movil`,
+    `helpers/proxy-reenvio`).
   - Nada de `pos-sale-lotes.sql` (entró en el Paso 3).
 - **Lo que este release cambia en el ESCRITORIO** (si algo del escritorio falla después del
   Paso 5, está acá):
@@ -654,9 +708,19 @@ git log -1 --format='%h %s' develop   # el commit de prep/paso-5 que te paso
   - **Textos en "tú", sin voseo** (2026-10-08): en el escritorio solo cambia el aviso de usuario
     desactivado al iniciar sesión: "Contacta al administrador" (decía "Contactá"). Los demás
     cambios de texto son de `/m`.
-- Título: `release: POS móvil (/m), login en el celular y configuración fusionada en el servidor`
+  - **Login, errores (B):** "Credenciales incorrectas" solo si el servidor lo dice; sin red, 5xx o
+    sin respuesta en **15 s**: "No hay conexión con el servidor. Revisa el wifi e intenta de
+    nuevo." y el botón vuelve a quedar disponible; otro rechazo: "No se pudo iniciar sesión".
+  - **POS, reintento (B):** cambiar el método en el reintento (también a fiado) ya no crea otra
+    venta; si la primera había entrado, el aviso dice **"Esta venta ya quedó registrada como
+    <método>. No se cobró dos veces."** con el método real, y el detalle de la venta también.
+  - **Configuración → Usuarios (B):** cambiar el rol escribe el rol nuevo y el viejo juntos, y la
+    fila muestra el rol guardado al instante. Un rol personalizado da `waiter` (no cobra).
+- Título: `release: POS móvil (/m) con fiado, login en el celular y configuración fusionada en el servidor`
 
-**5.3 — Verificación:** `/version.json` nuevo y **Q-FUNCIONES** igual que en 4.5. El service
+**5.3 — Verificación:** `/version.json` nuevo y **Q-FUNCIONES** igual que en 4.5, **salvo**
+`register_pos_sale`, que después del 5.0 tiene md5 **`5c0e0d9eee8b2ad8fb5ecba549ab9d32`** (y Q-METODO
+del 5.0, sin cambios: 2 filas). El service
 worker (`public/sw.js`) va primero a la red en todo lo del mismo origen: con **Recargar**,
 cada equipo toma la versión nueva, también la app instalada.
 
@@ -696,8 +760,32 @@ Esperado, **exacto**:
    de nuevo en ese teléfono: **sigue en el escritorio**. En el menú lateral, **Usar la versión
    para celular** → vuelve a Vender, y al reabrir sigue en Vender.
 
+**5.4b — Venta fiada desde `/m` con `demo@demo.com`** (el usuario de las pruebas de B):
+1. Celular: entrar a `/m` con `demo@demo.com` → un producto → **Cobrar** → **Fiado** → buscar o
+   crear un cliente de prueba → **Fiar $… a …**. La venta exitosa dice "Fiado a …"; en **Mis
+   ventas** aparece en amarillo "Fiado · cliente" y **no** suma al efectivo.
+2. **Q-FIADO-DEMO** (solo lectura):
+   ```sql
+   select o.order_number, o.type, o.total, o.payment_status,
+          coalesce(c.name, o.customer_name) as cliente,
+          (select count(*) from public.payments p where p.order_id = o.id) as pagos,
+          (o.created_at at time zone 'America/Bogota')::timestamp(0) as hora_bogota
+     from public.orders o
+     join auth.users u on u.id = o.created_by
+     left join public.customers c on c.id = o.customer_id
+    where u.email = 'demo@demo.com' and o.customer_id is not null
+    order by o.created_at desc
+    limit 3;
+   ```
+   Esperado en la primera fila: la venta de recién, `type` = `takeaway`, `payment_status` =
+   `pending`, el cliente que elegiste y **`pagos` = 0** (la deuda es la orden; los abonos se
+   registran en el escritorio).
+3. Escritorio, con el dueño de esa organización: **Fiado** muestra la deuda de ese cliente.
+
 **5.5 — Reversa:** el rollback del frontend (vuelve al Paso 3). Los SQL de los Pasos 2 y 4 **se
-quedan**: el frontend del Paso 3 funciona con los dos. El rollback también devuelve el
+quedan**: el frontend del Paso 3 funciona con los dos. El del **5.0 también puede quedarse** (el
+frontend del Paso 3 lee solo las claves de siempre); se revierte con `pos-sale-metodo-revertir.sql`
+solo si el problema es el propio `register_pos_sale`. El rollback también devuelve el
 `vercel.json` anterior (todo a `index.html`).
 
 **5.6 — Apps ya instaladas: quién tiene que reinstalar**
@@ -778,7 +866,8 @@ Esperado: verifica la policy contra el hash de prod y hace rollback si no da; de
 ## Pasos 7 en adelante — "Mesas en el servidor" (ESQUEMA: se completa al construir cada uno)
 
 Orden decidido el 2026-10-07 (y ajustado ese día): fiado en `/m` (M1.1, B) → permisos de cobro
-(A) → Mesas en el servidor → diseño de cuentas abiertas. B va primero porque no lleva SQL. Mismas reglas: SQL antes del frontend, cada SQL compatible
+(A) → Mesas en el servidor → diseño de cuentas abiertas. El 2026-10-08 se decidió que **B sale
+dentro del Paso 5** (fila 11). Mismas reglas: SQL antes del frontend, cada SQL compatible
 con el frontend de producción, reversa con el mismo método. Los md5, verificaciones y pruebas de
 cada paso se escriben cuando el paso esté construido y probado en Docker.
 
@@ -791,7 +880,7 @@ cada paso se escriben cuando el paso esté construido y probado en Docker.
 | 9 | Quitar ítem de mesa devolviendo stock (cierra H3 y el 3.5) + cerrar mesa sin consumo en una RPC. | SQL | 8 |
 | 9b | Mesas usa las dos RPC. | frontend | 9 |
 | 10 | Archivar mesas (`archived_at` + RPC de eliminar). | SQL + frontend | 9b |
-| 11 | Fiado en `/m` (M1.1, B), en la rama `feat/m1-fiado`. Trae además: el cambio de rol en Configuración → Usuarios (`role` y `role_id` juntos; rol personalizado → `waiter`); UN id de venta por carrito aunque cambie el método en el reintento (también a fiado), con el método REAL en el aviso, en `/m` y en el escritorio; y el login que distingue "sin conexión" de "credenciales incorrectas". **SQL:** `supabase/pos-sale-metodo-real.sql` (md5 con finales LF `8568598b85d05c542f82613b3ef091df`; deja `register_pos_sale` en `5c0e0d9e…` con Q-FUNCIONES; reversa fuera de git `pos-sale-metodo-revertir.sql`, md5 `07e82409e7d3191ad39bb780fca8e5f3`). Compatible con el frontend en producción: se aplica ANTES. Se release-a DESPUÉS del Paso 5, como paso propio. | SQL + frontend | 5 |
+| 11 | ~~Fiado en `/m` (M1.1, B)~~ → **entra en el Paso 5** (decidido el 2026-10-08): ver 5.0 y 5.1. | — | — |
 
 ## Resumen
 
