@@ -1126,24 +1126,150 @@ Esperado: verifica la policy contra el hash de prod y hace rollback si no da; de
 
 ---
 
-## Pasos 7 en adelante — "Mesas en el servidor" (ESQUEMA: se completa al construir cada uno)
+## Paso 7 — SQL de A: cobrar por permiso
+
+- **Depende de:** Paso 5 en producción **y estable** (con el 5.0: `register_pos_sale` = `5c0e0d9e…`).
+- **Qué lleva:** solo SQL, de la rama `feat/a-permisos`: `supabase/permisos-cobro.sql` y, después,
+  `supabase/seed-system-roles.sql` regenerado. Nada de frontend (eso es el Paso 8).
+- **Qué cambia:** `register_pos_sale` exige `pos.vender`; `register_sale_payment` exige, según el
+  tipo de orden, `mesas.cobrar` (`dine_in`) o `pos.vender` (`takeaway`, `delivery`) y rechaza
+  cualquier otro tipo. Los roles de sistema de cada organización ganan, **por unión**, lo que les
+  falte (admin y cajero: `pos.vender` y `mesas.cobrar`; mozo: `mesas.cobrar`). Nadie pierde.
+- **Compatible con el frontend del Paso 5:** ese frontend sigue mostrando "Cobrar" a todos y
+  decidiendo `/m` por el rol viejo. Con PIERDE vacía nadie que hoy cobra queda afuera; quien GANA
+  (un mozo) puede cobrar desde el escritorio desde este momento. En producción, el pre-flight del
+  2026-10-08 dio: solo GANA `mozo.test` de LAB; todos los usuarios reales, IGUAL.
+
+**7.1 — Pre-flight, JUSTO ANTES** (el mismo rato, no el día anterior):
+`supabase/diag/permisos-cobro-preflight.sql`, cada consulta por separado.
+- **Consulta 1:** la lista **PIERDE tiene que salir vacía**. Si aparece alguien, **no se aplica**:
+  pégame la salida.
+- **Consulta 4:** las dos con `coincide = t` (`5c0e0d9e…` y `8fc041a9…`). Si no, la migración
+  abortaría en su precondición; pégame la salida.
+- **Consulta 3:** todos los tipos con `en_la_lista_de_A = t`.
+
+**7.2 — Correr `supabase/permisos-cobro.sql`** (md5 con finales LF **`55be33e4bc4545c92079ed83f525ce16`**;
+trae su `begin`/`commit`). Avisa: `permisos-cobro: N rol(es) actualizados, M clave(s) agregadas`.
+Si la precondición o la comprobación de la tabla fallan, **aborta sin cambiar nada**: pégame la
+salida.
+
+**7.3 — Verificación (Q-PERMISOS):**
+```sql
+select p.oid::regprocedure as funcion,
+       md5(regexp_replace(regexp_replace(pg_get_functiondef(p.oid), E'\r','','g'), E'[ \t]+\n', E'\n','g')) as md5,
+       has_function_privilege('authenticated', p.oid, 'execute') as auth_ejecuta
+  from pg_proc p where p.pronamespace = 'public'::regnamespace
+   and p.proname in ('register_pos_sale', 'register_sale_payment') order by 1;
+```
+Esperado, **exacto**: `register_pos_sale(uuid,jsonb,jsonb,jsonb)` · `062cf4849b66b71cc490d0e0d7b0d3db` · t
+y `register_sale_payment(uuid,jsonb)` · `3dbb2ea5b7810c6ec718fca9dc962a3d` · t.
+
+La tabla de lo agregado, encerrada (esperado **`t · 0 · f · f`**):
+```sql
+select c.relrowsecurity as rls,
+       (select count(*) from pg_policies where schemaname = 'public' and tablename = 'permisos_cobro_agregados') as policies,
+       has_table_privilege('anon', c.oid, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+         or has_any_column_privilege('anon', c.oid, 'SELECT,INSERT,UPDATE,REFERENCES') as anon_algun_privilegio,
+       has_table_privilege('authenticated', c.oid, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+         or has_any_column_privilege('authenticated', c.oid, 'SELECT,INSERT,UPDATE,REFERENCES') as auth_algun_privilegio
+  from pg_class c where c.oid = 'public.permisos_cobro_agregados'::regclass;
+```
+Y qué se agregó, por organización (tiene que coincidir con lo que el pre-flight predijo):
+```sql
+select o.name as organizacion, r.name as rol, g.clave
+  from public.permisos_cobro_agregados g
+  join public.roles r on r.id = g.role_id
+  join public.organizations o on o.id = r.organization_id
+ order by 1, 2, 3;
+```
+
+**7.4 — `supabase/seed-system-roles.sql` regenerado** (md5 con finales LF `83219f0efcf49122e0a0b421151e5a2b`):
+para que una organización **nueva** nazca con el mozo con `mesas.cobrar`. Solo redefine la función
+`seed_system_roles`: **no toca ningún rol existente** (la función pisa permisos solo cuando se la
+LLAMA sobre una organización, al crearla). Antes y después:
+```sql
+select md5(regexp_replace(regexp_replace(pg_get_functiondef('public.seed_system_roles(uuid)'::regprocedure), E'\r','','g'), E'[ \t]+\n', E'\n','g')) as md5,
+       pg_get_functiondef('public.seed_system_roles(uuid)'::regprocedure)
+         like '%"pos.vender","mesas.gestionar","mesas.cobrar","cocina.acceder"%' as mozo_con_mesas_cobrar;
+```
+Esperado **antes**: `e52b4b5620bc5fb8392880fdf7eb1701` · f (medido en Docker con el archivo de
+`fab23b0`; producción no está medida: si da otro md5, pégame la salida antes de correrlo).
+**Después**: `4e0f1e4b95ccf69c6bcc8c02fc9abc19` · t.
+
+**7.5 — Prueba en producción:** con un cajero (o `demo@demo.com`), una venta en efectivo desde el
+POS de escritorio, una desde `/m` y el cobro de una mesa: todo como antes.
+
+**7.6 — Reversa:** `permisos-cobro-revertir.sql` (fuera de git, en la raíz; md5
+`e5ac822d0fbeea0a57af2b19206a11c1`): devuelve las dos funciones a `5c0e0d9e…` y `8fc041a9…`, quita
+**exactamente** las claves anotadas en `permisos_cobro_agregados` y borra la tabla. El frontend del
+Paso 5 funciona con o sin A. (El seed regenerado del 7.4 puede quedarse: solo afecta a
+organizaciones nuevas.)
+🔴 **No re-aplicar después** `pos-sale-lotes.sql`, `pos-sale-metodo-real.sql` ni `cobro-turno.sql`:
+devolverían la función que redefinen a la versión por rol viejo, en silencio (R5).
+
+---
+
+## Paso 8 — frontend de A
+
+- **Depende de:** Paso 7 aplicado y verificado. **El orden importa:** este frontend decide por
+  `can('pos.vender')` / `can('mesas.cobrar')`; sin la unión del Paso 7, un cajero de una
+  organización cuyo rol no tuviera esas claves vería "Cobrar" deshabilitado.
+- **Qué lleva:** `feat/a-permisos` → `develop`. Después del Paso 5, `develop` = `fab23b0`, y
+  `feat/a-permisos` sale de ahí: **fast-forward**, sin merge nuevo:
+  ```bash
+  git fetch origin
+  git checkout develop
+  git log -1 --format='%h' develop                              # fab23b0 (si no, avísame)
+  git merge-base --is-ancestor develop feat/a-permisos && echo FF   # tiene que decir FF
+  git merge --ff-only feat/a-permisos
+  ```
+  **22 archivos** sobre `fab23b0` (6 nuevos, 16 modificados): el SQL del Paso 7 (ya aplicado),
+  el catálogo (`permissions.ts` + `seed-system-roles.sql`), `ProtectedRoute`, `MobileShell`,
+  `posMovil.ts`, `rolLegacy.ts`, `POSPage`, `TablesPage`, sus pruebas, `preparar-local.mjs`,
+  `CLAUDE.md`, `DEUDAS.md`, el hook de SQL y este plan.
+- **Lo que cambia en pantalla:**
+  - **POS de escritorio:** sin `pos.vender`, "Cobrar" deshabilitado y "Tu usuario no tiene permiso
+    para vender."
+  - **Mesas:** sin `mesas.cobrar`, "Cobrar" deshabilitado y "Tu usuario no tiene permiso para
+    cobrar mesas."
+  - **`/m`:** entra quien tiene `pos.vender` (el mozo, por URL); sin él, "Tu usuario no puede
+    vender" y el botón a la versión completa.
+  - **Celular, redirección automática:** dueño, admin y cajero **con** `pos.vender`. El mozo no
+    (hasta M2).
+- **Pruebas:** `tests/permisos-cobro.spec.ts` (escritorio) y `tests/m-permisos.spec.ts` (Android e
+  iPhone) comparan, rol por rol (dueño, cajero, mozo y dos roles sin permisos de cobro), lo que se
+  ve con lo que el servidor acepta, y "Versión completa" para todos.
+
+**8.1 — Release.** Título: `release: cobrar por permiso (pos.vender, mesas.cobrar)`.
+
+**8.2 — Verificación:** `/version.json` nuevo. En el celular: el dueño y un cajero caen en `/m`;
+Menú → **Versión completa** → escritorio, y al recargar se quedan. En el escritorio, con un
+cajero: "Cobrar" habilitado en el POS y en Mesas, y una venta de cada uno. Con `demo@demo.com`, lo
+mismo según su rol.
+
+**8.3 — Reversa:** rollback del frontend (vuelve al Paso 5). El SQL del Paso 7 se queda: el
+frontend del Paso 5 funciona con él.
+
+---
+
+## Pasos 9 en adelante — "Mesas en el servidor" (ESQUEMA: se completa al construir cada uno)
 
 Orden decidido el 2026-10-07 (y ajustado ese día): fiado en `/m` (M1.1, B) → permisos de cobro
 (A) → Mesas en el servidor → diseño de cuentas abiertas. El 2026-10-08 se decidió que **B sale
-dentro del Paso 5** (fila 11). Mismas reglas: SQL antes del frontend, cada SQL compatible
+dentro del Paso 5**, y que A son los **Pasos 7 (SQL) y 8 (frontend)**: 5.0 → Paso 5 → Paso 7 →
+Paso 8. Lo que sigue se numera desde el 9. Mismas reglas: SQL antes del frontend, cada SQL compatible
 con el frontend de producción, reversa con el mismo método. Los md5, verificaciones y pruebas de
 cada paso se escriben cuando el paso esté construido y probado en Docker.
 
 | paso | qué | tipo | depende de |
 |---|---|---|---|
-| 7 | **Permisos de cobro** (A): `pos.vender` y `mesas.cobrar` dejan de ser inertes; el servidor deja de mirar el rol viejo. Incluye la migración de unión para las organizaciones existentes, con pre-flight de quién gana y quién pierde (nadie pierde). | SQL (+ catálogo) | Paso 5 |
-| 7b | Frontend de permisos: quién va a `/m` pasa a ser `pos.vender`; rol de sistema "bartender". | frontend | 7 |
-| 8 | `close_table_sale` + quién cobró (el pago registra al usuario desde el servidor). Cierra H2. | SQL | 7 |
-| 8b | Mesas cobra con `close_table_sale`. | frontend | 8 |
-| 9 | Quitar ítem de mesa devolviendo stock (cierra H3 y el 3.5) + cerrar mesa sin consumo en una RPC. | SQL | 8 |
-| 9b | Mesas usa las dos RPC. | frontend | 9 |
-| 10 | Archivar mesas (`archived_at` + RPC de eliminar). | SQL + frontend | 9b |
-| 11 | ~~Fiado en `/m` (M1.1, B)~~ → **entra en el Paso 5** (decidido el 2026-10-08): ver 5.0 y 5.1. | — | — |
+| ~~7 / 7b~~ | ~~Permisos de cobro (A)~~ → **Pasos 7 y 8**, arriba, con su detalle. El rol "bartender" no se crea (igual al cajero). | — | — |
+| 9 | `close_table_sale` (con fiado: exige `fiado.gestionar`, y cierra el UPDATE directo de DEUDAS → *"Fiado en MESA"*) + quién cobró (el pago registra al usuario desde el servidor). Cierra H2. | SQL | 8 |
+| 9b | Mesas cobra con `close_table_sale`. | frontend | 9 |
+| 10 | "Enviado" = la tanda quedó confirmada, pase o no por cocina; y en el MISMO cambio, quitar ítem devolviendo stock (cierra H3 y el 3.5) + cerrar mesa sin consumo en una RPC. | SQL | 9 |
+| 10b | Mesas usa las dos RPC. | frontend | 10 |
+| 11 | Archivar mesas (`archived_at` + RPC de eliminar). | SQL + frontend | 10b |
+| — | ~~Fiado en `/m` (M1.1, B)~~ → **entró en el Paso 5** (decidido el 2026-10-08): ver 5.0 y 5.1. | — | — |
 
 ## Calendario de releases (actualizado el 2026-10-13)
 
@@ -1170,9 +1296,12 @@ Los martes G-10 y Salchimelo no abren: los pasos con SQL van ese día.
 | 4 | SQL de la config | `restaurant-config-rpc.sql` @ `11c14b2` (`5e5e32cb…`) | — | `config-rpc-revertir.sql` (`e63444b6…`), solo antes del 5 |
 | 4c | avisar a quien usa celular | — (consulta) | — | — |
 | 4b | equipos reales | — | vista previa de `feat/m1-pos-movil` | — |
-| 5 | M1 + config | — | `feat/m1-pos-movil` | rollback |
+| 5.0 | método real en `register_pos_sale` | `pos-sale-metodo-real.sql` @ `fab23b0` (`8568598b…`) | — | `pos-sale-metodo-revertir.sql` (`07e82409…`) |
+| 5 | M1 + config + B (fiado en `/m`) | — | `feat/m1-fiado` @ `fab23b0` | rollback |
 | H | hotfix: Mesas relee la orden antes de cobrar, cerrar o agregar | — | sale dentro de HC | — |
 | HC | hotfix combinado: relee la orden + mesas pegadas + varias cuentas vivas | — | `hotfix/mesas-13-10` | rollback |
 | R | Cocina, Mesas y Delivery se recargan solas | — | `feat/cocina-refresco` | rollback (vuelve al hotfix combinado) |
 | AA | el arqueo cuenta los abonos de fiado | `arqueo-abonos.sql` (`f6ae9549…`), pre-flight justo antes | `feat/arqueo-abonos` | `arqueo-abonos-revertir.sql` (`b6ebb3fb…`) + rollback |
 | 6 | fase 2 de D | `fase2-aplicar.sql` (`d66e8231…`) | — | `fase2-revertir.sql` (`034ec0a4…`) |
+| 7 | SQL de A (cobrar por permiso) | `permisos-cobro.sql` (`55be33e4…`) + `seed-system-roles.sql` (`83219f0e…`), con pre-flight 1, 3 y 4 justo antes | — | `permisos-cobro-revertir.sql` (`e5ac822d…`) |
+| 8 | frontend de A | — | `feat/a-permisos` | rollback (el SQL del 7 se queda) |
