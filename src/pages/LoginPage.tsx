@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 import './login.css'
 import { esRutaMovil } from '@/lib/posMovil'
-import { clasificarFalloLogin, MENSAJE_FALLO_LOGIN, type FalloLogin } from '@/lib/falloLogin'
+import { clasificarFalloLogin, conTiempoMaximo, MENSAJE_FALLO_LOGIN, TIEMPO_MAXIMO_LOGIN_MS, type FalloLogin } from '@/lib/falloLogin'
 
 function Spinner() {
   return (
@@ -75,9 +75,10 @@ export function LoginPage() {
 
     let authError: unknown = null
     try {
-      authError = (await supabase.auth.signInWithPassword({ email, password })).error
+      // Tope de 15 s: sin respuesta, "No hay conexión…" y el botón vuelve a quedar disponible.
+      authError = (await conTiempoMaximo(supabase.auth.signInWithPassword({ email, password }), TIEMPO_MAXIMO_LOGIN_MS)).error
     } catch (err) {
-      authError = err   // un fetch que tiró en vez de devolver error: sin conexión
+      authError = err   // un fetch que tiró, o TiempoAgotado: sin conexión
     }
 
     if (authError) {

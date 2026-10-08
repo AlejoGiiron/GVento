@@ -53,3 +53,27 @@ test('vuelve la conexión: el mismo formulario entra', async ({ page }) => {
   await page.getByRole('button', { name: 'Ingresar' }).click()
   await expect(page).toHaveURL(/\/ventas/, { timeout: 15_000 })
 })
+
+test('el servidor NO contesta: a los 15 s, el mensaje de conexión y el botón vuelve a quedar disponible', async ({ page }) => {
+  test.setTimeout(60_000)
+  await page.route('**/auth/v1/token**', () => new Promise<void>(() => {}))   // nunca contesta
+  await intentar(page)
+  const inicio = Date.now()
+  const boton = page.getByTestId('login-entrar')
+  await expect(boton).toContainText('Autenticando')
+  await expect(boton).toBeDisabled()
+  // Contraste: a los 10 s TODAVÍA espera (el tope no corta antes de tiempo).
+  await page.waitForTimeout(10_000)
+  await expect(page.getByTestId('login-error')).toHaveCount(0)
+  await expect(boton).toBeDisabled()
+
+  await expect(page.getByTestId('login-error')).toHaveAttribute('data-tipo', 'sin-conexion', { timeout: 10_000 })
+  const segundos = (Date.now() - inicio) / 1000
+  expect(segundos, 'el mensaje sale al cumplirse el tope de 15 s').toBeGreaterThanOrEqual(14)
+  expect(segundos).toBeLessThan(20)
+  await expect(page.getByTestId('login-error')).toContainText(SIN_CONEXION)
+  await expect(page.getByTestId('login-error')).toContainText(REVISA_WIFI)
+  await expect(boton).toBeEnabled()
+  await expect(boton).toContainText('Ingresar')
+  await page.unrouteAll({ behavior: 'ignoreErrors' })
+})
