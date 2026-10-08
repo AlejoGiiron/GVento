@@ -5,6 +5,7 @@ import { useAuth } from '@/hooks/useAuth'
 import type { Json } from '@/types/database.types'
 import type { OrderItemPayload, SalePaymentPart } from '@/lib/supabase-helpers'
 import type { DiscountType, DiscountKind } from '@/stores/cartStore'
+import type { MetodoDeLaVenta } from '@/lib/metodoVenta'
 
 // ============================================================================
 // Cobro de una venta del POS: UNA llamada, register_pos_sale
@@ -21,10 +22,14 @@ import type { DiscountType, DiscountKind } from '@/stores/cartStore'
 // El id pendiente vive a nivel de MÓDULO, no en el estado del modal: si el cajero
 // cierra el modal tras un error y lo vuelve a abrir con el mismo carrito, el
 // reintento tiene que llevar el mismo id (la primera pudo haber entrado). Se
-// descarta al cobrar con éxito o cuando cambia el contenido. El método de pago NO
-// forma parte del contenido: si el primer intento entró en efectivo y el cajero
-// reintenta con tarjeta, la respuesta es la venta en efectivo (ya_existia), no una
-// segunda venta. La pantalla lo avisa.
+// descarta al cobrar con éxito o cuando cambia el contenido. El MÉTODO de pago NO
+// forma parte del contenido — y FIADO es un método, aunque viaje en la orden
+// (fiado, customer_id, customer_name): si el primer intento entró en efectivo y el
+// cajero reintenta con tarjeta o a fiado, la respuesta es la venta en efectivo
+// (ya_existia), no una segunda venta. Antes el fiado SÍ entraba en la huella, y
+// pasar de efectivo a fiado tras una respuesta perdida creaba otra venta.
+// La pantalla dice cómo quedó, con el método REAL que devuelve el servidor
+// (lib/metodoVenta.ts, supabase/pos-sale-metodo-real.sql).
 // ============================================================================
 
 export type VentaPOS = {
@@ -41,7 +46,7 @@ export type VentaPOS = {
   payments: SalePaymentPart[]
 }
 
-export type VentaRegistrada = {
+export type VentaRegistrada = MetodoDeLaVenta & {
   order_id: string
   order_number: number
   total: number
@@ -55,10 +60,13 @@ export function useSaleCheckout() {
   const usuario = user?.id ?? null
   const cobrar = useCallback(async (venta: VentaPOS): Promise<VentaRegistrada> => {
     const { items, payments, ...orden } = venta
+    // Lo que NO es contenido: el método (los pagos, y el fiado con su cliente).
+    // undefined = fuera de la huella (JSON.stringify omite esas claves).
+    const contenido = { ...orden, fiado: undefined, customer_id: undefined, customer_name: undefined }
     // El USUARIO es parte de la huella: si A falla, cierra sesión y B entra en la
     // misma pestaña con el mismo carrito, B no puede recibir la venta de A
     // (ya_existia) — sería una venta cobrada por B atribuida a A.
-    const huella = JSON.stringify({ usuario, orden, items })
+    const huella = JSON.stringify({ usuario, contenido, items })
     if (pendiente?.huella !== huella) pendiente = { id: nuevoUuid(), huella }
     const { data, error } = await supabase.rpc('register_pos_sale', {
       p_sale_id: pendiente.id,

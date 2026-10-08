@@ -19,6 +19,7 @@ import { ClienteFiadoMovil, type ClienteElegido } from '@/components/movil/Clien
 import { useShellMovil } from '@/components/movil/contextoShell'
 import { M, botonGrande, formatCOP } from '@/components/movil/estilo'
 import { leerPosMovil } from '@/lib/posMovil'
+import { NOMBRE_METODO, metodoReal, avisoYaExistia } from '@/lib/metodoVenta'
 import { cashQuickAmounts } from '@/lib/cashRounding'
 import { mensajeDeError } from '@/lib/errorMessage'
 import { captureError } from '@/lib/sentry'
@@ -27,7 +28,6 @@ import type { Enums } from '@/types/database.types'
 type Metodo = Enums<'payment_method'>
 type Paso = 'carrito' | 'pagar' | 'fiado' | 'exito'
 
-const NOMBRE_METODO: Record<Metodo, string> = { cash: 'Efectivo', nequi: 'Nequi', card: 'Tarjeta', transfer: 'Transferencia' }
 
 export function VenderMovil() {
   const { data: productos = [], isLoading } = useProducts()
@@ -191,7 +191,10 @@ function HojaCobro({ paso, setPaso }: { paso: Paso; setPaso: (p: Paso | null) =>
   const [mas, setMas] = useState(false)
   const [recibido, setRecibido] = useState('')
   const [enviando, setEnviando] = useState(false)
-  const [venta, setVenta] = useState<{ numero: number; total: number; metodo: Metodo; fiadoA: string | null; yaExistia: boolean; vuelto: number } | null>(null)
+  // detalle/fiado/aviso salen de lo que DEVOLVIÓ el servidor (método real), no de lo
+  // que se eligió en este intento: un reintento puede recibir una venta que ya entró
+  // con otro método (useSaleCheckout).
+  const [venta, setVenta] = useState<{ numero: number; total: number; detalle: string; fiado: boolean; aviso: string | null; vuelto: number } | null>(null)
 
   const total = items.reduce((s, i) => s + cartItemTotal(i), 0)
   const recibidoNum = parseInt(recibido.replace(/\D/g, ''), 10) || 0
@@ -225,9 +228,14 @@ function HojaCobro({ paso, setPaso }: { paso: Paso; setPaso: (p: Paso | null) =>
         // abonos se registran en el escritorio.
         payments: !fiar && total > 0 ? [{ method: metodo, amount: total }] : [],
       })
+      const real = metodoReal(r)
       setVenta({
-        numero: r.order_number, total: r.total, metodo, fiadoA: fiar ? cliente!.name : null, yaExistia: r.ya_existia,
-        vuelto: !fiar && recibidoNum > total ? recibidoNum - total : 0,
+        numero: r.order_number, total: r.total,
+        detalle: real ?? (fiar ? `Fiado a ${cliente!.name}` : NOMBRE_METODO[metodo]),
+        fiado: r.fiado ?? fiar,
+        aviso: r.ya_existia ? avisoYaExistia(r) : null,
+        // El vuelto es de ESTE intento: si la venta ya existía, no se sabe qué se recibió.
+        vuelto: !r.ya_existia && !fiar && metodo === 'cash' && recibidoNum > total ? recibidoNum - total : 0,
       })
       clear()
       setCliente(null)
@@ -379,15 +387,15 @@ function HojaCobro({ paso, setPaso }: { paso: Paso; setPaso: (p: Paso | null) =>
               <Check size={48} strokeWidth={3} />
             </div>
             <div data-testid="m-exito-numero" style={{ fontSize: 26, fontWeight: 800 }}>Venta #{venta.numero}</div>
-            <div data-testid="m-exito-detalle" style={{ fontSize: 18, color: venta.fiadoA ? '#fcd34d' : M.suave }}>
-              {formatCOP(venta.total)} · {venta.fiadoA ? `Fiado a ${venta.fiadoA}` : NOMBRE_METODO[venta.metodo]}
+            <div data-testid="m-exito-detalle" style={{ fontSize: 18, color: venta.fiado ? '#fcd34d' : M.suave }}>
+              {formatCOP(venta.total)} · {venta.detalle}
             </div>
             {venta.vuelto > 0 && (
               <div data-testid="m-exito-vuelto" style={{ fontSize: 24, fontWeight: 800, color: '#6ee7b7' }}>Vuelto: {formatCOP(venta.vuelto)}</div>
             )}
-            {venta.yaExistia && (
+            {venta.aviso && (
               <div data-testid="m-ya-existia" style={{ fontSize: 14, color: '#93c5fd', background: 'rgba(59,130,246,.12)', padding: '10px 14px', borderRadius: 10 }}>
-                Esta venta ya se había registrado en el intento anterior. No se cobró dos veces.
+                {venta.aviso}
               </div>
             )}
           </div>
@@ -452,7 +460,7 @@ function HojaCobro({ paso, setPaso }: { paso: Paso; setPaso: (p: Paso | null) =>
             style={{ ...botonGrande(M.ambar), minHeight: 68, fontSize: 19, opacity: enviando || !cliente || !isOpen ? 0.5 : 1 }}
           >
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {enviando ? 'Registrando…' : cliente ? `Fiar ${formatCOP(total)} a ${cliente.name}` : 'Elegí el cliente'}
+              {enviando ? 'Registrando…' : cliente ? `Fiar ${formatCOP(total)} a ${cliente.name}` : 'Elige el cliente'}
             </span>
           </button>
         )}

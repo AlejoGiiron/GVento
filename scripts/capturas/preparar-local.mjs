@@ -98,6 +98,7 @@ const ORDEN = [
   'app-version.sql',                    // cada equipo reporta su versión de la app (aviso de versión nueva)
   'pos-sale-lotes.sql',                 // paso 2: register_pos_sale + clave por tanda y total desde las líneas en add_order_items_with_extras
   'restaurant-config-rpc.sql',          // M1: restaurants.config se fusiona en el servidor, clave por clave (update_restaurant_config)
+  'pos-sale-metodo-real.sql',           // M1.1: register_pos_sale devuelve el método real (reintento con otro método → la venta existente)
 ]
 
 // ── QUIÉN GANA cuando una función está definida en más de un .sql ─────────────
@@ -124,6 +125,8 @@ const ORDEN = [
 const GANA = {
   // pos-sale-lotes.sql la redefine con (p_order_id, p_items, p_lote) y BORRA la de 2 argumentos:
   'function add_order_items_with_extras': 'pos-sale-lotes.sql',
+  // pos-sale-metodo-real.sql: misma venta, pero la respuesta trae el método real (M1.1):
+  'function register_pos_sale':           'pos-sale-metodo-real.sql',
   'function register_purchase':           'compra-no-toca-caja.sql',
   'function enforce_profile_organization':'fix-enforce-profile-organization-definer.sql',
   'function get_my_organization_id':      'profiles-is-active-enforced.sql',

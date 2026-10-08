@@ -1,5 +1,5 @@
 import net from 'node:net'
-import type { Page } from '@playwright/test'
+import type { Page, Route } from '@playwright/test'
 
 // ============================================================================
 // Proxy TCP entre Chromium y el Supabase LOCAL que reproduce el REENVÍO
@@ -99,4 +99,30 @@ export async function postDesdeElNavegador(
       return `ERROR ${(e as Error).message}`
     }
   }, { anon, token, rpc, cuerpo, calentar: modo !== 'nueva' })
+}
+
+/**
+ * La PRIMERA llamada de la APP a `rpc` pierde su respuesta POR EL PROXY: la URL de
+ * la API de la app es fija (VITE_GVENTO_SUPABASE_URL), así que Playwright le pasa esa
+ * llamada al proxy (route.fetch con su origen). El proxy, en modo 'nueva', deja que
+ * el servidor la ejecute y corta la conexión en cuanto el servidor empieza a
+ * responder (la venta ya confirmó); la app recibe un corte de conexión, como el
+ * cajero en el local ("No se cobró"). Las llamadas siguientes van directo.
+ * Devuelve los p_sale_id de cada llamada, en orden.
+ */
+export async function perderPrimeraRespuesta(page: Page, proxy: Proxy, rpc: string, urlApi: string): Promise<string[]> {
+  const ids: string[] = []
+  let primera = true
+  await page.route(`**/rest/v1/rpc/${rpc}`, async (route: Route) => {
+    ids.push((route.request().postDataJSON() as { p_sale_id: string }).p_sale_id)
+    if (!primera) { await route.continue(); return }
+    primera = false
+    try {
+      await route.fetch({ url: route.request().url().replace(urlApi.replace(/\/$/, ''), proxy.origen) })
+    } catch {
+      // Esperado: el proxy cortó la conexión después de que el servidor confirmó.
+    }
+    await route.abort('connectionreset')
+  })
+  return ids
 }

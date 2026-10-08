@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { ownerCreds, cashierCreds, type Creds } from './helpers/auth'
 import { cliente, psql } from './helpers/db-local'
+import { abrirProxy, perderPrimeraRespuesta } from './helpers/proxy-reenvio'
 
 // ============================================================================
 // FIADO en el POS móvil (/m) — m-android (Chromium) y m-iphone (WebKit).
@@ -221,4 +222,48 @@ test('SIN fiado.gestionar no hay botón Fiado (y el servidor tampoco lo acepta);
   await agregar(page, 'Lab Cerveza')
   await page.getByTestId('m-carrito-abrir').click()
   await expect(page.getByTestId('m-pagar-fiado')).toBeVisible()
+})
+
+// serviceWorkers 'block': en WebKit, page.route no ve los pedidos de una página
+// controlada por el service worker (ver "reintento" en m-pos-movil.spec.ts).
+test.describe('reintento con OTRO método', () => {
+  test.use({ serviceWorkers: 'block' })
+  test('el EFECTIVO entra y su respuesta se pierde (proxy); se reintenta A FIADO → UNA venta, en efectivo, y se dice', async ({ page }) => {
+    const nombre = `${PREFIJO} Reintento`
+    const idCliente = crearCliente(nombre, null)
+    const api = process.env.VITE_GVENTO_SUPABASE_URL!
+    await turnoAbierto()
+    const proxy = await abrirProxy(api, 'rpc/register_pos_sale', 'nueva')
+    try {
+      const ids = await perderPrimeraRespuesta(page, proxy, 'register_pos_sale', api)
+      await entrar(page, cashierCreds())
+      await agregar(page, 'Lab Cerveza')
+      await page.getByTestId('m-carrito-abrir').click()
+      await page.getByTestId('m-pagar-cash').click()
+      await page.getByTestId('m-confirmar').click()
+      await expect(page.getByText(/No se cobró/)).toBeVisible({ timeout: 15_000 })
+      expect(proxy.postsQueLlegaron(), 'la primera llamada pasó por el proxy').toBe(1)
+      expect(psql(`select count(*) from public.payments where order_id = '${ids[0]}' and method = 'cash';`), 'el efectivo YA entró').toBe('1')
+
+      // Vuelve y reintenta, ahora A FIADO.
+      await page.getByTestId('m-hoja-volver').click()
+      await page.getByTestId('m-pagar-fiado').click()
+      await page.getByTestId('m-fiado-buscar').fill(nombre)
+      await page.getByTestId('m-fiado-cliente').click()
+      await page.getByTestId('m-confirmar').click()
+
+      await expect(page.getByTestId('m-ya-existia'))
+        .toHaveText('Esta venta ya quedó registrada como Efectivo. No se cobró dos veces.', { timeout: 15_000 })
+      await expect(page.getByTestId('m-exito-detalle'), 'el detalle es el método REAL, no el del reintento').toContainText('Efectivo')
+      await expect(page.getByTestId('m-exito-detalle')).not.toContainText('Fiado')
+      expect(ids).toHaveLength(2)
+      expect(ids[1], 'el reintento a fiado mandó OTRO id: habría sido una segunda venta').toBe(ids[0])
+      expect(psql(`select count(*) from public.orders where customer_id = '${idCliente}';`), 'no quedó ninguna venta a fiado').toBe('0')
+      expect(psql(`select o.payment_status || '|' || (select string_agg(p.method::text, ',') from public.payments p where p.order_id = o.id)
+                     from public.orders o where o.id = '${ids[0]}';`)).toBe('paid|cash')
+      await page.getByTestId('m-nueva-venta').click()
+    } finally {
+      await proxy.cerrar()
+    }
+  })
 })

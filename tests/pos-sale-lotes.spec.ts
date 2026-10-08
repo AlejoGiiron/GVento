@@ -7,7 +7,7 @@ import { waitPosReady, agregarProductoSimple } from './helpers/pos'
 import { openTableAndAddItems } from './helpers/tables'
 import { mesaFija, liberarMesa } from './helpers/lab'
 import { cliente, psql, sesionRetenida } from './helpers/db-local'
-import { abrirProxy, postDesdeElNavegador, type ModoCorte } from './helpers/proxy-reenvio'
+import { abrirProxy, postDesdeElNavegador, perderPrimeraRespuesta, type ModoCorte } from './helpers/proxy-reenvio'
 
 // ============================================================================
 // supabase/pos-sale-lotes.sql:
@@ -463,6 +463,54 @@ test.describe('frontend: el reintento lleva la MISMA clave', () => {
     await page.getByRole('button', { name: 'Nueva venta' }).click()
   })
 
+  test('POS: el EFECTIVO entra y su respuesta se pierde (proxy); el cajero reintenta A FIADO → UNA venta, en efectivo, y el aviso lo dice', async ({ page }) => {
+    // El método no es contenido de la venta (useSaleCheckout): cambiar de efectivo a
+    // fiado en el reintento conserva el id, y el servidor devuelve la venta que ya
+    // entró, con su método REAL (pos-sale-metodo-real.sql). Antes el fiado entraba
+    // en la huella: este reintento creaba una SEGUNDA venta.
+    await turnoAbierto()
+    const nombre = `E2E Reintento ${Date.now().toString(36)}`
+    const idCliente = psql(`with c as (insert into public.customers (restaurant_id, name) values ('${SEDE}', '${nombre}') returning id) select id from c;`)
+    const proxy = await abrirProxy(URL_API(), 'rpc/register_pos_sale', 'nueva')
+    try {
+      const ids = await perderPrimeraRespuesta(page, proxy, 'register_pos_sale', URL_API())
+      await loginAsOwner(page)
+      await page.goto('/ventas')
+      await openShiftIfClosed(page, 0)
+      await waitPosReady(page)
+      await agregarProductoSimple(page)
+      await page.getByRole('button', { name: 'Cobrar' }).click()
+      await page.getByText('Efectivo', { exact: true }).click()
+      await page.getByRole('button', { name: /Continuar/ }).click()
+      await page.getByTestId('checkout-received').fill('20000')
+      await page.getByRole('button', { name: /Confirmar cobro/ }).click()
+      await expect(page.getByText(/Error al procesar el cobro/)).toBeVisible({ timeout: 15_000 })
+      expect(proxy.postsQueLlegaron(), 'la primera llamada pasó por el proxy').toBe(1)
+      expect(huella(ids[0]).startsWith('1|1|1|8000.00|'), 'el efectivo YA entró: si no, el test no reproduce el caso').toBe(true)
+
+      // El cajero cree que no se cobró y reintenta, ahora A FIADO.
+      await page.getByRole('button', { name: 'Atrás' }).click()
+      await page.getByTestId('pay-method-fiado').click()
+      await page.getByTestId('customer-search').fill(nombre)
+      await page.getByTestId('customer-option').filter({ hasText: nombre }).first().click()
+      await page.getByTestId('checkout-continue').click()
+
+      await expect(page.getByTestId('success-ya-existia'))
+        .toHaveText('Esta venta ya quedó registrada como Efectivo. No se cobró dos veces.', { timeout: 15_000 })
+      expect(ids).toHaveLength(2)
+      expect(ids[1], 'el reintento a fiado mandó OTRO id: habría sido una segunda venta').toBe(ids[0])
+      expect(psql(`select count(*) from public.orders where customer_id = '${idCliente}';`), 'no quedó ninguna venta a fiado').toBe('0')
+      expect(psql(`select o.payment_status || '|' || coalesce(o.customer_id::text, '-') || '|' ||
+                          (select string_agg(p.method::text, ',') from public.payments p where p.order_id = o.id)
+                     from public.orders o where o.id = '${ids[0]}';`)).toBe('paid|-|cash')
+      await page.getByRole('button', { name: 'Nueva venta' }).click()
+    } finally {
+      await proxy.cerrar()
+      // Desactivado, no borrado (un borrado deja ventas sin customer_id).
+      psql(`update public.customers set is_active = false where id = '${idCliente}';`)
+    }
+  })
+
   test('Mesas: se pierde la respuesta, el mozo reintenta → UNA tanda y el total de una', async ({ page }) => {
     const MESA = 'E2E Fija Tandas'
     const cuerpos: { p_order_id: string; p_lote: string }[] = []
@@ -483,8 +531,11 @@ test.describe('frontend: el reintento lleva la MISMA clave', () => {
       expect(lineas(orden), 'el primer intento no llegó a la base: el test no reproduce el caso').toBe('1|8000.00')
 
       await page.getByRole('button', { name: 'Agregar a la mesa' }).click()
+      // Se espera al PEDIDO, no al botón: el botón cambia de texto mientras envía, así
+      // que "ya no está" no es "ya se envió". Medido el 2026-10-08 en el trace: el
+      // botón desapareció 14 ms ANTES de que el reintento llegara a la ruta.
+      await expect.poll(() => cuerpos.length, { timeout: 15_000 }).toBe(2)
       await expect(page.getByRole('button', { name: 'Agregar a la mesa' })).toHaveCount(0, { timeout: 15_000 })
-      expect(cuerpos).toHaveLength(2)
       expect(cuerpos[0].p_lote, 'la tanda salió sin clave').toMatch(/^[0-9a-f-]{36}$/)
       expect(cuerpos[1].p_lote, 'el reintento mandó OTRA tanda: se habría duplicado').toBe(cuerpos[0].p_lote)
       expect(lineas(orden), 'la tanda quedó duplicada o el total no es el de las líneas').toBe('1|8000.00')

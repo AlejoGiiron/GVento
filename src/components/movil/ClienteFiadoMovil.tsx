@@ -146,7 +146,7 @@ export function ClienteFiadoMovil({ value, onChange }: { value: ClienteElegido |
       {isLoading && <div style={{ color: M.suave, padding: 16, textAlign: 'center' }}>Cargando clientes…</div>}
       {!isLoading && lista.length === 0 && (
         <div style={{ color: M.suave, padding: 16, textAlign: 'center' }}>
-          {customers.length === 0 ? 'Todavía no hay clientes. Creá el primero.' : 'Ningún cliente coincide.'}
+          {customers.length === 0 ? 'Todavía no hay clientes. Crea el primero.' : 'Ningún cliente coincide.'}
         </div>
       )}
 
