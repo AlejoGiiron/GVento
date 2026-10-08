@@ -361,6 +361,8 @@ en producción: **primero** el rollback del frontend, **después** este archivo.
 - **Horario:** el del Paso 0. **Q-AHORA** antes. Otro día o ≥ 1 h después del último release.
 
 **3.1 — Merge** (lo hago yo): `feat/pos-sale-lotes` → `develop`, suite completa, te paso el commit.
+*Hecho el 2026-10-07: `9731272` (`merge: paso 2 — venta del POS en una transacción y tandas de
+Mesas sin duplicar`). El release trae 15 archivos.*
 Hay **un conflicto esperado en `docs/DEUDAS.md`** (simulado: un bloque, dos entradas nuevas en el
 mismo lugar). Se resuelve conservando las dos. Ningún archivo de código entra en conflicto.
 
@@ -595,36 +597,80 @@ se hace hasta que la lista pase.**
   `develop` (Paso 3), así que entra solo lo de M1 y la config.
 - **Horario:** el del Paso 0. **Q-AHORA** antes. Otro día o ≥ 1 h después del último release.
 
-**5.1 — Merge** (lo hago yo): `feat/m1-pos-movil` → `develop`, suite completa (escritorio,
-`m-android` y `m-iphone`) con `PLAYWRIGHT_EXIT=0` leído del archivo. Un exit 1 es rojo, aunque
-diga "N passed" (DEUDAS → *"el proceso de WebKit a veces no termina"*). Te paso el commit.
-Mismo conflicto esperado que en 3.1, solo en `docs/DEUDAS.md`, resuelto conservando las dos
-entradas.
+**5.1 — Merge** (lo hago yo): ya está **preparado** en la rama `prep/paso-5` = `develop` del
+Paso 3 (`9731272`) + `feat/m1-pos-movil` (`d4958d5`, el probado en equipos) + esta
+actualización del plan, con la suite completa corrida. Se simuló el 2026-10-07: el merge entra
+**limpio** (el conflicto de `docs/DEUDAS.md` quedó resuelto en el Paso 3). Después del release
+del Paso 3, `develop` avanza a esa rama sin merge nuevo (fast-forward):
+
+```bash
+git checkout develop
+git log -1 --format='%h' develop      # tiene que ser 9731272 (si no, avisame: hay algo más en develop)
+git merge --ff-only prep/paso-5
+git log -1 --format='%h %s' develop   # el commit de prep/paso-5 que te paso
+```
 
 **5.2 — Release**, con estos datos:
-- `git diff --stat origin/main develop` → unos **38 archivos** (los de M1 y la config, más
-  `package.json` y `pnpm-lock.yaml` por Playwright 1.63.0). Nada de `pos-sale-lotes.sql` (ya
-  entró en el Paso 3). `supabase/restaurant-config-rpc.sql` aparece porque ya está aplicado
-  desde el Paso 4: **no se vuelve a correr**.
+- `git diff --stat origin/main develop` → **56 archivos** (28 nuevos, 28 modificados):
+  - **M1 (`/m`):** `src/pages/movil/` (2), `src/components/movil/` (5), `src/hooks/usePosMovil.ts`,
+    `src/hooks/useDispositivoMovil.ts`, `src/hooks/useConfigExtras.ts`, `src/lib/posMovil.ts` (+ test),
+    `public/movil/` (manifest y 4 íconos marcador).
+  - **Identidad por ruta:** `src/lib/identidadRutas.ts` (+ test), `vite.config.ts` (genera
+    `movil.html` y `cocina.html` en el build: **no están en el repo**, por eso no aparecen),
+    `vercel.json` (rewrites `/m` y `/m/*` → `movil.html`, `/cocina` → `cocina.html`, el resto →
+    `index.html`), `tsconfig.node.json`, `index.html` (**sin** manifest; viewport-fit=cover).
+  - **Login:** `src/pages/LoginPage.tsx`, `src/pages/login.css`; ruta `/m/login` en `src/App.tsx`.
+  - **Config:** `supabase/restaurant-config-rpc.sql` (ya aplicado en el Paso 4: **no se vuelve a
+    correr**), `src/lib/restaurantConfig.ts`, `src/hooks/useRestaurantConfig.ts`,
+    `src/components/config/SeccionPosMovil.tsx`, `src/pages/ConfigPage.tsx`,
+    `src/types/database.types.ts`.
+  - **Resto del escritorio:** `src/components/ProtectedRoute.tsx`,
+    `src/components/layout/AppLayout.tsx`, `src/components/layout/VersionBanner.tsx`,
+    `src/components/pos/ItemConfigModal.tsx`, `src/hooks/useSaleCheckout.ts`,
+    `src/hooks/useAgregarTanda.ts`.
+  - **Tests y herramientas:** `playwright.config.ts`, `package.json` y `pnpm-lock.yaml` (Playwright
+    1.63.0), 11 specs/helpers, `scripts/capturas/preparar-local.mjs`.
+  - **Docs:** `CLAUDE.md`, `docs/DEUDAS.md`, `docs/m1-verificacion-equipos.md`,
+    `docs/plan-despliegue-m1.md`.
+  - Nada de `pos-sale-lotes.sql` (entró en el Paso 3).
 - **Lo que este release cambia en el ESCRITORIO** (si algo del escritorio falla después del
   Paso 5, está acá):
-  - `src/components/ProtectedRoute.tsx`: en un **celular**, el dueño y el cajero van a `/m`. En
-    computador y tablet no cambia nada. "Versión completa" se recuerda **por equipo**.
-  - `src/components/layout/AppLayout.tsx`: el botón **Usar la versión para celular**, abajo en el
-    menú lateral. Aparece **solo** en un equipo que eligió "Versión completa".
-  - `src/hooks/useRestaurantConfig.ts`: **todo** guardado de Configuración pasa por
-    `update_restaurant_config`.
-  - `src/components/pos/ItemConfigModal.tsx`: el modal de extras usa la lógica compartida
-    (`useConfigExtras`); se ve igual.
-  - `src/hooks/useSaleCheckout.ts` y `src/hooks/useAgregarTanda.ts`: el usuario entra en la
-    clave del reintento.
-  - `src/pages/ConfigPage.tsx`: la sección nueva **POS móvil**.
-  - `index.html`: `viewport-fit=cover` y el manifest propio de `/m`.
-- Título: `release: POS móvil (/m) y configuración fusionada en el servidor`
+  - **Login (`/login`):** se ve **igual** (comparado píxel a píxel: vacío, con datos y con error).
+    Cambia por dentro: el correo usa `autocomplete="username"` (contraseñas guardadas) y el ojo
+    tiene nombre accesible. En anchos de celular (< 768 px) se ve la versión móvil.
+  - **`ProtectedRoute`:** en un **celular**, el dueño y el cajero van a `/m` (con carga completa de
+    página). Sin sesión dentro de `/m` se va a `/m/login`; desde cualquier otra ruta, a `/login`
+    como siempre. En computador y tablet no cambia nada.
+  - **Menú lateral:** el botón **Usar la versión para celular**, solo en un equipo que eligió
+    "Versión completa".
+  - **Configuración:** **todo** guardado pasa por `update_restaurant_config` (por eso el Paso 4
+    va antes), y aparece la sección **POS móvil**.
+  - **Modal de extras:** misma apariencia, lógica compartida con `/m`.
+  - **Reintento de cobro y de tandas:** el usuario entra en la clave.
+  - **`index.html` sin manifest:** desde una página del escritorio el navegador ya **no** ofrece
+    "Instalar G-Vento Cocina KDS" (antes lo ofrecía en cualquier página, por error). Ver 5.6.
+  - **Aviso de versión:** igual en el escritorio; en `/m` lo muestra el caparazón.
+- Título: `release: POS móvil (/m), login en el celular y configuración fusionada en el servidor`
 
 **5.3 — Verificación:** `/version.json` nuevo y **Q-FUNCIONES** igual que en 4.5. El service
 worker (`public/sw.js`) va primero a la red en todo lo del mismo origen: con **Recargar**,
 cada equipo toma la versión nueva, también la app instalada.
+
+Y que cada ruta reciba su documento (Git Bash; reemplazá `<dominio>` por la dirección de
+producción):
+
+```bash
+for r in /m /m/login /cocina /ventas; do printf '%-10s ' "$r"; curl -s "https://<dominio>$r" | grep -o 'rel="manifest" href="[^"]*"' || echo '(sin manifest)'; done
+```
+
+Esperado, **exacto**:
+
+```
+/m         rel="manifest" href="/movil/manifest.webmanifest"
+/m/login   rel="manifest" href="/movil/manifest.webmanifest"
+/cocina    rel="manifest" href="/manifest.json"
+/ventas    (sin manifest)
+```
 
 **5.4 — Prueba en Café Aroma:**
 1. Escritorio: Configuración → **POS móvil** → fijar 2 productos → **Guardar**.
@@ -647,7 +693,22 @@ cada equipo toma la versión nueva, también la app instalada.
    para celular** → vuelve a Vender, y al reabrir sigue en Vender.
 
 **5.5 — Reversa:** el rollback del frontend (vuelve al Paso 3). Los SQL de los Pasos 2 y 4 **se
-quedan**: el frontend del Paso 3 funciona con los dos.
+quedan**: el frontend del Paso 3 funciona con los dos. El rollback también devuelve el
+`vercel.json` anterior (todo a `index.html`).
+
+**5.6 — Apps ya instaladas: quién tiene que reinstalar**
+- **Tablets de Cocina (KDS) ya instaladas: NADA.** Su manifest es `/manifest.json` (`start_url`
+  `/cocina`, sin `id`: su identidad es `/cocina`), y `/cocina` lo sigue sirviendo igual (ahora desde
+  `cocina.html`). Abren y se actualizan como siempre.
+- **Quien "instaló" el POS de escritorio como app: NADA obligatorio.** Lo que instaló en realidad
+  fue la app de **Cocina** (antes cualquier página ofrecía ese manifest): su ícono abre `/cocina`
+  hoy y lo seguirá haciendo. Si quiere el POS como app en un computador: Chrome → menú ⋮ →
+  **Guardar y compartir** → **Crear acceso directo…** → marcar *Abrir como ventana*, desde
+  `/ventas`.
+- **Quien agregó `/m` a la pantalla de inicio durante las pruebas de la vista previa:** ese
+  ícono apunta a la **vista previa**, no a producción. Borrarlo y agregar el de producción.
+- **El POS móvil en producción:** nadie lo tiene instalado todavía (no existía); se instala desde
+  `/m` después de este paso (mensaje para G-10 aparte).
 
 ---
 
@@ -709,6 +770,24 @@ Esperado: verifica la policy contra el hash de prod y hace rollback si no da; de
 6.3 da `2 | t`.
 
 ---
+
+## Pasos 7 en adelante — "Mesas en el servidor" (ESQUEMA: se completa al construir cada uno)
+
+Orden decidido el 2026-10-07: permisos de cobro (A) → Mesas en el servidor → fiado en `/m`
+(M1.1) → diseño de cuentas abiertas. Mismas reglas: SQL antes del frontend, cada SQL compatible
+con el frontend de producción, reversa con el mismo método. Los md5, verificaciones y pruebas de
+cada paso se escriben cuando el paso esté construido y probado en Docker.
+
+| paso | qué | tipo | depende de |
+|---|---|---|---|
+| 7 | **Permisos de cobro** (A): `pos.vender` y `mesas.cobrar` dejan de ser inertes; el servidor deja de mirar el rol viejo. Incluye la migración de unión para las organizaciones existentes, con pre-flight de quién gana y quién pierde (nadie pierde). | SQL (+ catálogo) | Paso 5 |
+| 7b | Frontend de permisos: quién va a `/m` pasa a ser `pos.vender`; rol de sistema "bartender". | frontend | 7 |
+| 8 | `close_table_sale` + quién cobró (el pago registra al usuario desde el servidor). Cierra H2. | SQL | 7 |
+| 8b | Mesas cobra con `close_table_sale`. | frontend | 8 |
+| 9 | Quitar ítem de mesa devolviendo stock (cierra H3 y el 3.5) + cerrar mesa sin consumo en una RPC. | SQL | 8 |
+| 9b | Mesas usa las dos RPC. | frontend | 9 |
+| 10 | Archivar mesas (`archived_at` + RPC de eliminar). | SQL + frontend | 9b |
+| 11 | Fiado en `/m` (M1.1). | frontend | 5 (puede ir antes del 7: ver la respuesta del 2026-10-07) |
 
 ## Resumen
 
