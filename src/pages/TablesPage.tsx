@@ -1434,6 +1434,9 @@ function TableSidePanel({
     }
   }
   const { restaurant } = useRestaurantConfig()
+  // A: cobrar una mesa exige mesas.cobrar, lo mismo que register_sale_payment (dine_in).
+  const { can } = usePermissions()
+  const puedeCobrarMesa = can('mesas.cobrar')
   const cfg = STATUS_CONFIG[table.status]
 
   const unsentItems = order?.order_items.filter((i) => !i.sent_to_kitchen) ?? []
@@ -1765,21 +1768,29 @@ function TableSidePanel({
             <X size={16} strokeWidth={2.5} /> {closingTable ? 'Cerrando...' : 'Cerrar mesa'}
           </button>
         ) : (
+          <>
           <button
-            disabled={!order}
+            data-testid="mesa-cobrar"
+            disabled={!order || !puedeCobrarMesa}
             onClick={onCheckout}
             style={{
               width: '100%', padding: '14px',
-              background: !order ? '#cbd5e1' : '#10b981',
+              background: !order || !puedeCobrarMesa ? '#cbd5e1' : '#10b981',
               border: 'none', borderRadius: 10,
-              cursor: !order ? 'not-allowed' : 'pointer',
+              cursor: !order || !puedeCobrarMesa ? 'not-allowed' : 'pointer',
               fontSize: 15, fontWeight: 700, color: '#fff',
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-              boxShadow: !order ? 'none' : '0 6px 16px rgba(16,185,129,.35)',
+              boxShadow: !order || !puedeCobrarMesa ? 'none' : '0 6px 16px rgba(16,185,129,.35)',
             }}
           >
             Cobrar <ChevronRight size={17} strokeWidth={2.5} />
           </button>
+          {!puedeCobrarMesa && (
+            <div data-testid="mesa-sin-permiso" style={{ marginTop: 8, fontSize: 12, color: '#b45309', textAlign: 'center' }}>
+              Tu usuario no tiene permiso para cobrar mesas.
+            </div>
+          )}
+          </>
         )}
       </div>
       )}
@@ -1811,6 +1822,7 @@ export function TablesPage() {
   // Cobrar exige turno abierto: si no hay, abre el modal de apertura primero.
   const handleStartCheckout = () => {
     if (!selectedOrder) return
+    if (!can('mesas.cobrar')) return   // A: el botón ya está deshabilitado sin el permiso
     if (!isShiftOpen) { setShowOpenShift(true); return }
     setCheckoutOrder(selectedOrder)
     setCheckoutTable(selectedTable)

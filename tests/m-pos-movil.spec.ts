@@ -132,11 +132,15 @@ test('"Versión completa" se recuerda POR EQUIPO (otra pestaña) y se puede volv
   await expect(c.getByTestId('m-shell')).toBeVisible()
 })
 
-test('un mozo en el celular NO va a /m (no puede cobrar); si entra a /m, se le dice', async ({ page }) => {
+test('un mozo en el celular NO se redirige a /m (hasta M2); por URL entra y puede vender (pos.vender, A)', async ({ page }) => {
+  // Antes de A, /m decidía por el rol viejo y al mozo se le decía que no podía cobrar.
+  // Desde A decide pos.vender, que el mozo tiene. El caso SIN pos.vender (m-sin-permiso)
+  // está en m-permisos.spec.ts, con su sonda del servidor.
   test.skip(!hasWaiterCreds(), 'sin credenciales de mozo en local.config')
   await entrar(page, waiterCreds(), /\/ventas$/)
   await page.goto('/m')
-  await expect(page.getByTestId('m-sin-permiso')).toBeVisible()
+  await expect(page.getByTestId('m-shell')).toBeVisible()
+  await expect(page.getByTestId('m-sin-permiso')).toHaveCount(0)
 })
 
 /** Manifests del DOCUMENTO cargado y la URL con la que se cargó (no navegación interna). */
