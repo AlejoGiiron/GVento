@@ -774,8 +774,8 @@ Esperado: verifica la policy contra el hash de prod y hace rollback si no da; de
 
 ## Pasos 7 en adelante — "Mesas en el servidor" (ESQUEMA: se completa al construir cada uno)
 
-Orden decidido el 2026-10-07: permisos de cobro (A) → Mesas en el servidor → fiado en `/m`
-(M1.1) → diseño de cuentas abiertas. Mismas reglas: SQL antes del frontend, cada SQL compatible
+Orden decidido el 2026-10-07 (y ajustado ese día): fiado en `/m` (M1.1, B) → permisos de cobro
+(A) → Mesas en el servidor → diseño de cuentas abiertas. B va primero porque no lleva SQL. Mismas reglas: SQL antes del frontend, cada SQL compatible
 con el frontend de producción, reversa con el mismo método. Los md5, verificaciones y pruebas de
 cada paso se escriben cuando el paso esté construido y probado en Docker.
 
@@ -788,7 +788,7 @@ cada paso se escriben cuando el paso esté construido y probado en Docker.
 | 9 | Quitar ítem de mesa devolviendo stock (cierra H3 y el 3.5) + cerrar mesa sin consumo en una RPC. | SQL | 8 |
 | 9b | Mesas usa las dos RPC. | frontend | 9 |
 | 10 | Archivar mesas (`archived_at` + RPC de eliminar). | SQL + frontend | 9b |
-| 11 | Fiado en `/m` (M1.1). | frontend | 5 (puede ir antes del 7: ver la respuesta del 2026-10-07) |
+| 11 | Fiado en `/m` (M1.1, B), en la rama `feat/m1-fiado`. Sin SQL: usa `register_pos_sale` con `fiado` y la RLS de `customers` que ya existen. Trae además el arreglo del cambio de rol en Configuración → Usuarios (`role` y `role_id` juntos; rol personalizado → `waiter`). Se release-a DESPUÉS del Paso 5, como paso propio. | frontend | 5 |
 
 ## Resumen
 

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-hot-toast'
-import { Search, Minus, Plus, X, Banknote, Smartphone, CreditCard, Building2, Check, ChevronLeft, Star } from 'lucide-react'
+import { Search, Minus, Plus, X, Banknote, Smartphone, CreditCard, Building2, Check, ChevronLeft, Star, UserRound } from 'lucide-react'
 import { useProducts } from '@/hooks/useProducts'
 import { useCategories } from '@/hooks/useCategories'
 import { useProductsWithExtras } from '@/hooks/useProductsWithExtras'
@@ -10,10 +10,12 @@ import { useRestaurantConfig } from '@/hooks/useRestaurantConfig'
 import { useCashShift } from '@/hooks/useCashShift'
 import { useSaleCheckout } from '@/hooks/useSaleCheckout'
 import { useMasVendidos } from '@/hooks/usePosMovil'
+import { usePermissions } from '@/hooks/usePermissions'
 import { useTecladoTapa } from '@/hooks/useDispositivoMovil'
 import { useCartStore, cartItemTotal, type ProductWithCategory } from '@/stores/cartStore'
 import { ExtrasMovil } from '@/components/movil/ExtrasMovil'
 import { CapaMovil } from '@/components/movil/CapaMovil'
+import { ClienteFiadoMovil, type ClienteElegido } from '@/components/movil/ClienteFiadoMovil'
 import { useShellMovil } from '@/components/movil/contextoShell'
 import { M, botonGrande, formatCOP } from '@/components/movil/estilo'
 import { leerPosMovil } from '@/lib/posMovil'
@@ -23,7 +25,7 @@ import { captureError } from '@/lib/sentry'
 import type { Enums } from '@/types/database.types'
 
 type Metodo = Enums<'payment_method'>
-type Paso = 'carrito' | 'pagar' | 'exito'
+type Paso = 'carrito' | 'pagar' | 'fiado' | 'exito'
 
 const NOMBRE_METODO: Record<Metodo, string> = { cash: 'Efectivo', nequi: 'Nequi', card: 'Tarjeta', transfer: 'Transferencia' }
 
@@ -180,12 +182,16 @@ function HojaCobro({ paso, setPaso }: { paso: Paso; setPaso: (p: Paso | null) =>
   const { cobrar } = useSaleCheckout()
   const queryClient = useQueryClient()
   const tapa = useTecladoTapa()
+  // Fiado: solo con fiado.gestionar, la misma regla que aplica register_pos_sale.
+  const { can } = usePermissions()
+  const puedeFiar = can('fiado.gestionar')
+  const [cliente, setCliente] = useState<ClienteElegido | null>(null)
 
   const [metodo, setMetodo] = useState<Metodo>('cash')
   const [mas, setMas] = useState(false)
   const [recibido, setRecibido] = useState('')
   const [enviando, setEnviando] = useState(false)
-  const [venta, setVenta] = useState<{ numero: number; total: number; metodo: Metodo; yaExistia: boolean; vuelto: number } | null>(null)
+  const [venta, setVenta] = useState<{ numero: number; total: number; metodo: Metodo; fiadoA: string | null; yaExistia: boolean; vuelto: number } | null>(null)
 
   const total = items.reduce((s, i) => s + cartItemTotal(i), 0)
   const recibidoNum = parseInt(recibido.replace(/\D/g, ''), 10) || 0
@@ -194,7 +200,8 @@ function HojaCobro({ paso, setPaso }: { paso: Paso; setPaso: (p: Paso | null) =>
   const elegir = (m: Metodo) => { setMetodo(m); setRecibido(''); setPaso('pagar') }
 
   const confirmar = async () => {
-    if (enviando || falta) return
+    const fiar = paso === 'fiado'
+    if (enviando || falta || (fiar && !cliente)) return
     setEnviando(true)
     try {
       const r = await cobrar({
@@ -204,9 +211,9 @@ function HojaCobro({ paso, setPaso }: { paso: Paso; setPaso: (p: Paso | null) =>
         discount_type: null,
         discount_kind: 'normal',
         discount_reason: null,
-        fiado: false,
-        customer_id: null,
-        customer_name: null,
+        fiado: fiar,
+        customer_id: fiar ? cliente!.id : null,
+        customer_name: fiar ? cliente!.name : null,
         items: items.map((i) => ({
           product_id: i.product.id,
           qty: i.qty,
@@ -214,17 +221,27 @@ function HojaCobro({ paso, setPaso }: { paso: Paso; setPaso: (p: Paso | null) =>
           notes: i.note || null,
           extras: i.extras.map((e) => ({ extra_id: e.extra_id, qty: e.qty })),
         })),
-        payments: total > 0 ? [{ method: metodo, amount: total }] : [],
+        // A fiado no hay pagos: la deuda es la orden (payment_status 'pending') y los
+        // abonos se registran en el escritorio.
+        payments: !fiar && total > 0 ? [{ method: metodo, amount: total }] : [],
       })
-      setVenta({ numero: r.order_number, total: r.total, metodo, yaExistia: r.ya_existia, vuelto: recibidoNum > total ? recibidoNum - total : 0 })
+      setVenta({
+        numero: r.order_number, total: r.total, metodo, fiadoA: fiar ? cliente!.name : null, yaExistia: r.ya_existia,
+        vuelto: !fiar && recibidoNum > total ? recibidoNum - total : 0,
+      })
       clear()
+      setCliente(null)
       refetchSales()
       void queryClient.invalidateQueries({ queryKey: ['mis_ventas'] })
+      if (fiar) {
+        void queryClient.invalidateQueries({ queryKey: ['ultimo_fiado'] })
+        void queryClient.invalidateQueries({ queryKey: ['debts'] })
+      }
       navigator.vibrate?.([30, 40, 30])
       setPaso('exito')
     } catch (err) {
       toast.error(`No se cobró: ${mensajeDeError(err, 'error desconocido')}`)
-      captureError(err, 'cobro', { origen: 'POS móvil', metodo, cantidadItems: items.length })
+      captureError(err, 'cobro', { origen: 'POS móvil', metodo: fiar ? 'fiado' : metodo, cantidadItems: items.length })
     } finally {
       setEnviando(false)
     }
@@ -246,13 +263,13 @@ function HojaCobro({ paso, setPaso }: { paso: Paso; setPaso: (p: Paso | null) =>
             type="button"
             data-testid="m-hoja-volver"
             aria-label="Volver"
-            onClick={() => setPaso(paso === 'pagar' ? 'carrito' : null)}
+            onClick={() => setPaso(paso === 'pagar' || paso === 'fiado' ? 'carrito' : null)}
             style={{ width: 48, height: 48, display: 'grid', placeItems: 'center', background: M.panel, border: 'none', borderRadius: 12, color: M.texto }}
           >
             <ChevronLeft size={24} />
           </button>
           <div style={{ flex: 1, fontSize: 17, fontWeight: 700 }}>
-            {paso === 'carrito' ? 'Carrito' : NOMBRE_METODO[metodo]}
+            {paso === 'carrito' ? 'Carrito' : paso === 'fiado' ? 'Fiado' : NOMBRE_METODO[metodo]}
           </div>
           <div data-testid="m-total" style={{ fontSize: 22, fontWeight: 800, fontFamily: 'monospace' }}>{formatCOP(total)}</div>
         </div>
@@ -347,13 +364,24 @@ function HojaCobro({ paso, setPaso }: { paso: Paso; setPaso: (p: Paso | null) =>
           </div>
         )}
 
+        {paso === 'fiado' && (
+          <div style={{ display: 'grid', gap: 12 }}>
+            <ClienteFiadoMovil value={cliente} onChange={setCliente} />
+            <div style={{ fontSize: 13, color: M.suave, textAlign: 'center' }}>
+              Los abonos de la deuda se registran en el computador (Fiado).
+            </div>
+          </div>
+        )}
+
         {paso === 'exito' && venta && (
           <div data-testid="m-exito" style={{ display: 'grid', gap: 14, justifyItems: 'center', textAlign: 'center', paddingTop: 48 }}>
             <div data-testid="m-exito-icono" style={{ width: 88, height: 88, borderRadius: '50%', background: 'rgba(16,185,129,.18)', display: 'grid', placeItems: 'center', color: M.verde }}>
               <Check size={48} strokeWidth={3} />
             </div>
             <div data-testid="m-exito-numero" style={{ fontSize: 26, fontWeight: 800 }}>Venta #{venta.numero}</div>
-            <div style={{ fontSize: 18, color: M.suave }}>{formatCOP(venta.total)} · {NOMBRE_METODO[venta.metodo]}</div>
+            <div data-testid="m-exito-detalle" style={{ fontSize: 18, color: venta.fiadoA ? '#fcd34d' : M.suave }}>
+              {formatCOP(venta.total)} · {venta.fiadoA ? `Fiado a ${venta.fiadoA}` : NOMBRE_METODO[venta.metodo]}
+            </div>
             {venta.vuelto > 0 && (
               <div data-testid="m-exito-vuelto" style={{ fontSize: 24, fontWeight: 800, color: '#6ee7b7' }}>Vuelto: {formatCOP(venta.vuelto)}</div>
             )}
@@ -397,7 +425,36 @@ function HojaCobro({ paso, setPaso }: { paso: Paso; setPaso: (p: Paso | null) =>
                 Otros métodos
               </button>
             )}
+            {puedeFiar && (
+              <button
+                type="button"
+                data-testid="m-pagar-fiado"
+                disabled={!isOpen || items.length === 0}
+                onClick={() => setPaso('fiado')}
+                style={{
+                  minHeight: 52, background: 'transparent', border: `1px solid ${M.ambar}`, borderRadius: 12, color: '#fcd34d',
+                  fontSize: 16, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  opacity: !isOpen || items.length === 0 ? 0.4 : 1,
+                }}
+              >
+                <UserRound size={20} /> Fiado
+              </button>
+            )}
           </>
+        )}
+
+        {paso === 'fiado' && (
+          <button
+            type="button"
+            data-testid="m-confirmar"
+            disabled={enviando || !cliente || !isOpen}
+            onClick={() => void confirmar()}
+            style={{ ...botonGrande(M.ambar), minHeight: 68, fontSize: 19, opacity: enviando || !cliente || !isOpen ? 0.5 : 1 }}
+          >
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {enviando ? 'Registrando…' : cliente ? `Fiar ${formatCOP(total)} a ${cliente.name}` : 'Elegí el cliente'}
+            </span>
+          </button>
         )}
 
         {paso === 'pagar' && (

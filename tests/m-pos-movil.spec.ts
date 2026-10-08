@@ -520,6 +520,37 @@ test.describe('nada nuestro tapa la acción principal', () => {
     await page.getByTestId('m-nueva-venta').click()
   })
 
+  test('cobro a FIADO, con el alta rápida del cliente', async ({ page }, info) => {
+    const nombre = `E2E Tapa ${Date.now().toString(36)}`
+    await turnoAbierto()
+    await conAvisos(page, info)
+    await agregar(page, 'Lab Cerveza')
+    await page.getByTestId('m-carrito-abrir').click()
+    await usable(page, 'm-pagar-fiado', true)
+    await page.getByTestId('m-pagar-fiado').click()
+    await usable(page, 'm-fiado-buscar', false)
+    await usable(page, 'm-fiado-nuevo', false)
+    await page.getByTestId('m-fiado-nuevo').click()
+    await page.getByTestId('m-fiado-nombre').fill(nombre)
+    await usable(page, 'm-fiado-telefono', false)
+    await usable(page, 'm-fiado-guardar', false)
+    await page.getByTestId('m-fiado-guardar').click()
+    // Recién cuando el alta terminó (el cliente quedó elegido) existe la fila.
+    await expect(page.getByTestId('m-confirmar')).toContainText(nombre)
+    const id = psql(`select id from public.customers where restaurant_id = '${SEDE}' and name = '${nombre}';`)
+    expect(id).toMatch(/^[0-9a-f-]{36}$/)
+    try {
+      await usable(page, 'm-confirmar', true)
+      await page.getByTestId('m-confirmar').click()
+      await expect(page.getByTestId('m-exito')).toBeVisible({ timeout: 15_000 })
+      await usable(page, 'm-nueva-venta', true)
+      await page.getByTestId('m-nueva-venta').click()
+    } finally {
+      // Desactivado, no borrado: borrarlo dejaría la venta sin customer_id.
+      psql(`update public.customers set is_active = false where id = '${id}';`)
+    }
+  })
+
   test('hoja de EXTRAS', async ({ page }, info) => {
     await turnoAbierto()
     await conAvisos(page, info)

@@ -35,16 +35,21 @@ export function MisVentasMovil() {
       <div style={{ display: 'flex', justifyContent: 'space-between', background: M.panel, borderRadius: 14, padding: '12px 14px', fontSize: 15 }}>
         <span>Ventas: <b data-testid="m-mis-cantidad">{data.cantidad}</b></span>
         {otros > 0 && <span style={{ color: M.suave }}>Otros: {formatCOP(otros)}</span>}
+        {data.fiado > 0 && <span data-testid="m-mis-fiado" style={{ color: '#fcd34d' }}>Fiado: {formatCOP(data.fiado)}</span>}
       </div>
 
       <div style={{ display: 'grid' }}>
         {data.ventas.slice(0, 30).map((v) => (
           <div key={v.orderId} data-testid="m-mi-venta" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 2px', borderBottom: `1px solid ${M.borde}` }}>
             <div style={{ width: 64, fontWeight: 700 }}>{v.numero != null ? `#${v.numero}` : '—'}</div>
-            <div style={{ flex: 1, color: M.suave, fontSize: 14 }}>
-              {hora(v.creada)} · {v.metodos.length ? v.metodos.map((m) => NOMBRE[m]).join(' + ') : 'Gratis'}
+            <div style={{ flex: 1, minWidth: 0, color: M.suave, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {hora(v.creada)} · {v.fiadoA != null
+                ? <span style={{ color: '#fcd34d' }}>Fiado · {v.fiadoA}</span>
+                : v.metodos.length ? v.metodos.map((m) => NOMBRE[m]).join(' + ') : 'Gratis'}
             </div>
-            <div style={{ fontFamily: 'monospace', fontWeight: 600 }}>{formatCOP(v.cobrado)}</div>
+            <div style={{ fontFamily: 'monospace', fontWeight: 600, color: v.fiadoA != null ? '#fcd34d' : undefined }}>
+              {formatCOP(v.fiadoA != null ? v.fiado : v.cobrado)}
+            </div>
           </div>
         ))}
         {data.ventas.length === 0 && <div style={{ color: M.suave, padding: 24, textAlign: 'center' }}>Todavía no cobraste nada en este turno.</div>}
