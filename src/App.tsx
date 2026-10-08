@@ -58,6 +58,10 @@ function App() {
         <VersionBanner />
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          {/* El mismo login DENTRO del alcance de la app instalada (/m): sin sesión en
+              /m, al cerrar sesión o si vence, se va acá y al entrar se vuelve a /m sin
+              salir del documento de /m (nunca aparece la barra del navegador). */}
+          <Route path="/m/login" element={<LoginPage />} />
 
           {/* Cocina KDS — acceso independiente por PIN, sin Supabase Auth */}
           <Route path="cocina" element={<KitchenPage />} />

@@ -43,6 +43,7 @@ separado** en un iPhone (Safari) y en un Android (Chrome).
 | 12 | Menú → **Versión completa** | Abre el escritorio y no vuelve solo a Vender en esa pestaña | ☐ | ☐ |
 | 13 | Tocar un producto con **extras** | Sube una hoja oscura desde abajo; los + / − se aciertan con el pulgar; **Agregar** queda arriba de la barra de inicio; el extra aparece en el carrito, y después en la venta (Historial, desde el escritorio) | ☐ | ☐ |
 | 14 | **Login** con la sesión cerrada (Menú → Cerrar sesión) | Sin zoom al tocar los campos; el correo abre el teclado de correo, sin mayúscula inicial; el teléfono **ofrece la contraseña guardada** (iCloud / Google) y la completa; el ojo muestra y oculta la clave; con el teclado abierto, **Ingresar** se ve y se toca; con datos malos, el error se lee completo; al entrar cae en **Vender** | ☐ | ☐ |
+| 15 | **App instalada**: Menú → **Cerrar sesión** | El login aparece **dentro de la app**, sin barra del navegador ni hoja de Safari (es `/m/login`); al entrar vuelve a **Vender** sin salir de la app. Repetirlo cerrando la app con la sesión vencida (o borrando los datos del sitio): al abrirla, el login también sale dentro de la app | ☐ | ☐ |
 
 **Anotar por teléfono:** modelo, versión de iOS/Android y del navegador. Si algo falla,
 una captura y el número de punto.

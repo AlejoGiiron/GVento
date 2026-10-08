@@ -187,6 +187,78 @@ test('entrar a /m después del login es una CARGA del documento de /m (no navega
 // ── Login en el celular (iPhone 16 Pro Max, 2026-10-07: no estaba pensado para
 // el celular). El escritorio no cambia: se comparó píxel a píxel contra capturas
 // de antes. Anchos del pedido: 360 a 430 px.
+// ── Login DENTRO de la app instalada (/m/login) ───────────────────────────────
+// El scope del manifest es /m: un login en /login quedaba FUERA de la app instalada
+// (en iPhone se abre como hoja de Safari). Sin sesión en /m, al cerrar sesión o si la
+// sesión vence, se va a /m/login, y al entrar se vuelve a /m SIN recargar: el mismo
+// documento de /m, con su manifest.
+test.describe('login dentro de la app (/m/login)', () => {
+  /** Marca la página: si sobrevive, no hubo recarga (seguimos en el mismo documento). */
+  const marcar = (page: Page) => page.evaluate(() => { (window as unknown as { __mismoDocumento: boolean }).__mismoDocumento = true })
+  const mismoDocumento = (page: Page) => page.evaluate(() => (window as unknown as { __mismoDocumento?: boolean }).__mismoDocumento === true)
+  /** El login VISIBLE está en /m/login. toHaveURL solo no alcanza: sin la ruta, la app
+   *  pasa un instante por /m/login antes de redirigir a /login, y el poll lo puede ver
+   *  (un mutante sobrevivió así el 2026-10-07). */
+  const enLoginDeM = async (page: Page) => {
+    await expect(page).toHaveURL(/\/m\/login$/, { timeout: 15_000 })
+    await expect(page.getByTestId('login-entrar')).toBeVisible()
+    await page.waitForTimeout(500)   // que termine cualquier redirección en curso
+    expect(new URL(page.url()).pathname, 'el login que se ve no es el de /m').toBe('/m/login')
+  }
+
+  test('sin sesión: /m → /m/login → entrar → /m, sin salir del documento de /m', async ({ page }) => {
+    await page.goto('/m')
+    await enLoginDeM(page)
+    expect((await documento(page)).manifests, 'el login de /m tiene que estar en el documento de /m').toEqual(['/movil/manifest.webmanifest'])
+    await marcar(page)
+    await page.locator('#login-correo').fill(cashierCreds().email)
+    await page.locator('#login-clave').fill(cashierCreds().password)
+    await page.getByTestId('login-entrar').click()
+    await expect(page).toHaveURL(/\/m$/, { timeout: 15_000 })
+    await expect(page.getByTestId('m-shell')).toBeVisible()
+    expect(await mismoDocumento(page), 'al entrar se recargó la página (salió del documento de /m)').toBe(true)
+    expect((await documento(page)).manifests).toEqual(['/movil/manifest.webmanifest'])
+  })
+
+  test('cerrar sesión desde /m → /m/login (no /login)', async ({ page }) => {
+    await entrar(page, cashierCreds())
+    await marcar(page)
+    await page.getByTestId('m-nav-menu').click()
+    await page.getByTestId('m-salir').click()
+    await enLoginDeM(page)
+    expect(await mismoDocumento(page)).toBe(true)
+    expect((await documento(page)).manifests).toEqual(['/movil/manifest.webmanifest'])
+  })
+
+  test('sesión vencida estando en /m → /m/login', async ({ page }) => {
+    await entrar(page, cashierCreds())
+    // La sesión guardada queda como cuando vence de verdad: token de acceso con fecha
+    // pasada y token de renovación inválido. Al cargar, supabase-js intenta renovar,
+    // el servidor lo rechaza y cierra la sesión (lo mismo que pasa en producción).
+    const clave = await page.evaluate(() => {
+      const k = Object.keys(localStorage).find((x) => x.startsWith('sb-') && x.endsWith('-auth-token'))!
+      const sesion = JSON.parse(localStorage.getItem(k)!) as { expires_at: number; refresh_token: string }
+      sesion.expires_at = Math.floor(Date.now() / 1000) - 60
+      sesion.refresh_token = 'vencido-e2e'
+      localStorage.setItem(k, JSON.stringify(sesion))
+      return k
+    })
+    expect(clave).toBeTruthy()
+    await page.reload()
+    await enLoginDeM(page)
+    // Y se puede volver a entrar desde ahí.
+    await page.locator('#login-correo').fill(cashierCreds().email)
+    await page.locator('#login-clave').fill(cashierCreds().password)
+    await page.getByTestId('login-entrar').click()
+    await expect(page).toHaveURL(/\/m$/, { timeout: 15_000 })
+  })
+
+  test('por /login (el de siempre) un cajero en el celular sigue cayendo en /m', async ({ page }) => {
+    await entrar(page, cashierCreds())   // entra por /login y espera /m
+    await expect(page.getByTestId('m-shell')).toBeVisible()
+  })
+})
+
 test.describe('login en el celular', () => {
   for (const ancho of [360, 390, 430]) {
     test(`${ancho} px: sin desborde, campos de 16 px, autocompletado, ver la clave y "Ingresar" usable`, async ({ page }) => {

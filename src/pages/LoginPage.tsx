@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { ShoppingCart, LayoutGrid, BarChart3, User, Lock, Eye, EyeOff, Check, X, ChevronRight } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 import './login.css'
+import { esRutaMovil } from '@/lib/posMovil'
 
 function Spinner() {
   return (
@@ -23,6 +24,9 @@ const FEATURES = [
 export function LoginPage() {
   const { user, isLoading } = useAuth()
   const navigate = useNavigate()
+  // /m/login (la app instalada) vuelve a /m SIN recargar: sigue en el documento de /m.
+  // /login va a /ventas, y desde ahí un dueño o cajero en el celular sigue cayendo en /m.
+  const destino = esRutaMovil(useLocation().pathname) ? '/m' : '/ventas'
 
   const [email, setEmail]       = useState('')
   const [password, setPassword] = useState('')
@@ -59,8 +63,8 @@ export function LoginPage() {
   }, [])
 
   useEffect(() => {
-    if (!isLoading && user) navigate('/ventas', { replace: true })
-  }, [user, isLoading, navigate])
+    if (!isLoading && user) navigate(destino, { replace: true })
+  }, [user, isLoading, navigate, destino])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -80,7 +84,7 @@ export function LoginPage() {
         if (key.startsWith('sb-')) localStorage.removeItem(key)
       }
     }
-    // Éxito: onAuthStateChange actualiza el user → useEffect redirige a /ventas
+    // Éxito: onAuthStateChange actualiza el user → useEffect redirige al destino (/ventas o /m)
   }
 
   if (isLoading) return null

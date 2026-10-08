@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { usePermissions } from '@/hooks/usePermissions'
-import { debeIrAMovil, cargarDocumento } from '@/lib/posMovil'
+import { debeIrAMovil, cargarDocumento, esRutaMovil } from '@/lib/posMovil'
 
 interface ProtectedRouteProps {
   /** Permiso RBAC requerido para acceder. Sin él, cualquier autenticado pasa. */
@@ -22,7 +22,9 @@ export function ProtectedRoute({ permission }: ProtectedRouteProps) {
     )
   }
 
-  if (!user) return <Navigate to="/login" replace />
+  // Sin sesión (nunca entró, cerró sesión o la sesión venció): desde /m, al login
+  // de /m, que está dentro del alcance de la app instalada; desde el resto, al de siempre.
+  if (!user) return <Navigate to={esRutaMovil(location.pathname) ? '/m/login' : '/login'} replace />
 
   // En un CELULAR, quien cobra va al POS móvil (/m). Solo en el nivel de arriba
   // (sin permiso): los ProtectedRoute anidados ya pasaron por acá. Un mozo no se
