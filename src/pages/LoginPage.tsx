@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 import './login.css'
 import { esRutaMovil } from '@/lib/posMovil'
+import { clasificarFalloLogin, MENSAJE_FALLO_LOGIN, type FalloLogin } from '@/lib/falloLogin'
 
 function Spinner() {
   return (
@@ -33,7 +34,8 @@ export function LoginPage() {
   const [remember, setRemember] = useState(true)
   const [showPwd, setShowPwd]   = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [error, setError]       = useState(false)
+  // null = sin error. El TIPO decide el mensaje: solo 'credenciales' culpa a la clave.
+  const [error, setError]       = useState<FalloLogin | null>(null)
   const entrarRef = useRef<HTMLButtonElement>(null)
 
   // Celular: con el teclado abierto, "Ingresar" no puede quedar debajo. Al abrirse
@@ -68,13 +70,18 @@ export function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setError(false)
+    setError(null)
     setSubmitting(true)
 
-    const { error: authError } = await supabase.auth.signInWithPassword({ email, password })
+    let authError: unknown = null
+    try {
+      authError = (await supabase.auth.signInWithPassword({ email, password })).error
+    } catch (err) {
+      authError = err   // un fetch que tiró en vez de devolver error: sin conexión
+    }
 
     if (authError) {
-      setError(true)
+      setError(clasificarFalloLogin(authError))
       setSubmitting(false)
       return
     }
@@ -200,7 +207,7 @@ export function LoginPage() {
 
             {/* Banner de error */}
             {error && (
-              <div className="login-error" role="alert" style={{
+              <div className="login-error" role="alert" data-testid="login-error" data-tipo={error} style={{
                 marginTop: 22, padding: '11px 13px',
                 background: '#fef2f2', border: '1px solid #fecaca',
                 borderRadius: 9, display: 'flex', alignItems: 'flex-start', gap: 10,
@@ -209,8 +216,8 @@ export function LoginPage() {
                   <X size={15} strokeWidth={2.5} />
                 </div>
                 <div>
-                  <div className="login-error-titulo" style={{ fontSize: 12.5, fontWeight: 600, color: '#991b1b' }}>Credenciales incorrectas</div>
-                  <div className="login-error-detalle" style={{ fontSize: 11.5, color: '#b91c1c', marginTop: 2 }}>Verifica tu correo y contraseña e intenta de nuevo.</div>
+                  <div className="login-error-titulo" style={{ fontSize: 12.5, fontWeight: 600, color: '#991b1b' }}>{MENSAJE_FALLO_LOGIN[error].titulo}</div>
+                  <div className="login-error-detalle" style={{ fontSize: 11.5, color: '#b91c1c', marginTop: 2 }}>{MENSAJE_FALLO_LOGIN[error].detalle}</div>
                 </div>
               </div>
             )}
@@ -238,7 +245,7 @@ export function LoginPage() {
                   type="email"
                   inputMode="email"
                   value={email}
-                  onChange={e => { setEmail(e.target.value); setError(false) }}
+                  onChange={e => { setEmail(e.target.value); setError(null) }}
                   placeholder="tu@restaurante.com"
                   autoFocus
                   // "username": así lo reconocen las contraseñas guardadas del iPhone y de Android.
@@ -271,7 +278,7 @@ export function LoginPage() {
                   className="login-input"
                   type={showPwd ? 'text' : 'password'}
                   value={password}
-                  onChange={e => { setPassword(e.target.value); setError(false) }}
+                  onChange={e => { setPassword(e.target.value); setError(null) }}
                   placeholder="••••••••"
                   autoComplete="current-password"
                   style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontSize: 14, color: '#0f172a' }}
