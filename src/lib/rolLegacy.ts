@@ -10,10 +10,15 @@ import type { Database } from '@/types/database.types'
 // lista de usuarios. Lo que NO cubre: la Edge Function no compara los dos si se la
 // llama directo, y un usuario creado desde el Dashboard nace sin role_id (DEUDAS,
 // dentro de A). Desaparece cuando el servidor y /m decidan por permisos (A).
+//
+// ALLOWLIST (R2): solo los roles de sistema tienen traducción. Un rol personalizado
+// cae en 'waiter' — no entra a /m ni cobra — hasta que A decida por permisos. Antes
+// caía en 'cashier' (fallaba abierto); se cambió el 2026-10-08 con 0 perfiles activos
+// con rol personalizado en producción (consulta corrida por el dueño del proyecto).
 export type RolLegacy = Database['public']['Enums']['user_role']
 
 export function rolLegacyDeRol(nombre: string): RolLegacy {
   if (nombre === 'owner' || nombre === 'admin') return 'admin'
-  if (nombre === 'mozo') return 'waiter'
-  return 'cashier'
+  if (nombre === 'cajero') return 'cashier'
+  return 'waiter'
 }

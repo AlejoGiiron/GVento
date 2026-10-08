@@ -1045,8 +1045,11 @@ cobrar**. No hay error en ningún lado: es fallo silencioso.
 
 **Lo que ya cierra B (`feat/m1-fiado`):** la app escribe los dos en la misma llamada con
 `rolLegacyDeRol` (`src/lib/rolLegacy.ts`) — al crear (`create-user`) y al cambiar el rol en la
-lista de usuarios (antes este camino escribía solo `role_id`; lo vigila
-`tests/usuarios-cambio-rol.spec.ts`).
+lista de usuarios (antes este camino escribía solo `role_id`). Además, en B: la fila de la lista
+muestra lo que devolvió la base apenas se guarda (antes mostraba el rol anterior hasta la recarga
+y un segundo cambio se perdía sin aviso), y un rol personalizado da `'waiter'` — falla cerrado —
+en vez de `'cashier'` (se cambió el 2026-10-08 con 0 perfiles activos con rol personalizado en
+prod). Lo vigila `tests/usuarios-cambio-rol.spec.ts`.
 
 **Lo que queda abierto, para A:**
 - **La Edge Function `create-user` no compara `role` con `role_id`.** Recibe los dos del
@@ -1058,17 +1061,18 @@ lista de usuarios (antes este camino escribía solo `role_id`; lo vigila
 - **Cualquier escritor futuro de `profiles`** (un seed, un script, una RPC) que toque una sola
   de las dos columnas. Es la forma de R1: el sincronizador es quien se acuerde.
 
-**La idea para barrer la clase entera (a decidir en A, no construida):** un trigger de
-`profiles` que derive `role` de `role_id` del lado del servidor, de modo que ningún camino
-pueda escribir uno sin el otro. Dos cosas a resolver antes:
-- **R6 dice que un trigger de invariante VALIDA, no fuerza.** Derivar es forzar: reescribe en
-  silencio lo que mandó el llamante. La alternativa que respeta R6 es un trigger que **rechace**
-  el par incoherente (falla ruidoso, y cada escritor tiene que mandar los dos). La elección es
-  de A; queda escrita para que no se tome sin ver la regla.
-- **La regla actual mapea por NOMBRE de rol** (`owner`/`admin` → admin, `mozo` → waiter, resto →
-  cashier). Un rol renombrado o personalizado cambia de significado sin que nadie lo note
-  (R2: por nombre, no por id). Si A pasa `/m` y el cobro a `has_permission('pos.vender')` /
-  `mesas.cobrar`, el enum deja de decidir y la clase desaparece en vez de vigilarse.
+**✅ DECIDIDO (2026-10-08): SIN trigger. En A, `/m` y el cobro pasan a PERMISOS y
+`profiles.role` deja de decidir.**
+- Se descartó un trigger de `profiles` que derive `role` de `role_id`: **R6 — un trigger de
+  invariante VALIDA, no fuerza.** Derivar reescribe en silencio lo que mandó el llamante.
+- Tampoco se vigila la pareja: se **elimina la razón de vigilarla**. Quién entra a `/m` y quién
+  cobra pasa a `has_permission('pos.vender')` (POS y `/m`) / `has_permission('mesas.cobrar')`
+  (Mesas), en el servidor (`register_pos_sale`, `register_sale_payment`) y en el cliente
+  (`ROLES_QUE_COBRAN` / `puedeCobrar` en `src/lib/posMovil.ts`). Con eso los dos caminos de
+  arriba dejan de importar para cobrar, y la traducción por NOMBRE de rol (`rolLegacyDeRol`,
+  que hoy es una allowlist de los 4 roles de sistema) queda sin consumidores que decidan.
+- Hasta A, la coherencia la sostienen solo los dos caminos de la app; la consulta de abajo
+  detecta lo que entre por otro lado.
 
 **Para detectar casos hoy** (solo lectura, por organización — fijar el UUID):
 
@@ -1105,8 +1109,13 @@ select p.full_name, p.email, p.is_active, p.role::text as rol_viejo, r.name as r
   las listas org-wide (asignar usuarios a sedes, conteo de usuarios por rol) solo ven
   usuarios de la sede activa. Con 1 sede coincide con toda la org; al haber multi-sede
   real hay que ampliar ese SELECT a nivel organización.
-- **Edge Function `create-user` valida enum `role === 'admin'`**: cambiar a
-  `has_permission(...)` cuando se elimine el enum `profiles.role`.
+- **Edge Function `create-user`: el GATE ya es por permiso** (corregido 2026-10-08; esta nota
+  decía que validaba `role === 'admin'`, y era falso al menos desde `bbf75ff`, 2026-07-31). Hoy
+  exige `has_permission('usuarios.gestionar')` con el cliente del llamante, y `is_active`. Lo que
+  sí sigue dependiendo del enum: **recibe `role` del navegador** y lo pasa en la metadata a
+  `handle_new_user` — es uno de los caminos de la entrada *"A (permisos de cobro): `profiles.role`
+  y `profiles.role_id` pueden divergir"*. Para reconfirmar:
+  `grep -n "has_permission\|includes(role)" supabase/functions/create-user/index.ts`.
 - **Política vieja `"restaurants: admin actualiza"` (por enum `get_my_role()`)**: debe
   quitarse al eliminar el enum `role` (queda redundante con `"restaurants: editar sede
   con permiso"`).

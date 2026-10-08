@@ -18,7 +18,10 @@ describe('rolLegacyDeRol: el rol viejo que corresponde a cada rol RBAC', () => {
     }
   })
 
-  it('rol personalizado: HOY cae en cashier (falla abierto, R2) — pendiente pasar a waiter', () => {
-    expect(rolLegacyDeRol('bartender')).toBe('cashier')
+  it('rol personalizado: falla CERRADO (waiter: no entra a /m ni cobra) hasta que A decida por permisos', () => {
+    for (const nombre of ['bartender', 'Cajero', 'cajero ', 'domiciliario', '']) {
+      expect(rolLegacyDeRol(nombre), `"${nombre}"`).toBe('waiter')
+      expect(puedeCobrar(rolLegacyDeRol(nombre))).toBe(false)
+    }
   })
 })
