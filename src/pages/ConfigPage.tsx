@@ -28,6 +28,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { useRestaurantConfig } from '@/hooks/useRestaurantConfig'
+import { rolLegacyDeRol } from '@/lib/rolLegacy'
 import { SeccionPosMovil } from '@/components/config/SeccionPosMovil'
 import { useUsers } from '@/hooks/useUsers'
 import { useAuth } from '@/hooks/useAuth'
@@ -382,13 +383,6 @@ function generatePassword(): string {
   return Array.from(arr).map(b => chars[b % chars.length]).join('')
 }
 
-// Deriva el enum legacy (que exige la Edge Function) desde el nombre del rol RBAC.
-function enumFromRoleName(name: string): 'admin' | 'cashier' | 'waiter' {
-  if (name === 'owner' || name === 'admin') return 'admin'
-  if (name === 'mozo') return 'waiter'
-  return 'cashier'
-}
-
 function CreateUserModal({ onClose }: { onClose: () => void }) {
   const { createUser, isCreatingUser } = useUsers()
   const { roles } = useRoles()
@@ -420,7 +414,7 @@ function CreateUserModal({ onClose }: { onClose: () => void }) {
       full_name: fullName.trim(),
       email: email.trim(),
       password,
-      enumRole: enumFromRoleName(selected.name),
+      enumRole: rolLegacyDeRol(selected.name),
       roleId: selected.id,
     })
     onClose()
@@ -639,7 +633,15 @@ function SectionUsers() {
             <select
               value={user.role_id ?? ''}
               disabled={isUpdating}
-              onChange={e => updateUser(user.id, { role_id: e.target.value })}
+              data-testid={`user-role-${user.email}`}
+              onChange={e => {
+                // role_id y role en la MISMA escritura: si solo cambiara role_id, el
+                // rol viejo (quién entra a /m y cobra) quedaría desalineado del RBAC
+                // (quién tiene fiado). Contrato en src/lib/rolLegacy.ts.
+                const elegido = roles.find(r => r.id === e.target.value)
+                if (!elegido) { toast.error('Rol no encontrado'); return }
+                updateUser(user.id, { role_id: elegido.id, role: rolLegacyDeRol(elegido.name) })
+              }}
               style={{
                 border: '1.5px solid #e2e8f0',
                 borderRadius: 7,

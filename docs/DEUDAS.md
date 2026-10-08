@@ -1034,6 +1034,56 @@ catálogo es la promesa; el `can()` es la cosa real. Es R4 —verificar contra l
 contra el proxy— aplicada al RBAC: que la clave figure en `PERMISSION_GROUPS` es exactamente
 el tipo de proxy que dice OK sin que nada funcione.
 
+### 🔴 A (permisos de cobro): `profiles.role` y `profiles.role_id` pueden divergir (anotado 2026-10-07)
+
+**La clase.** Dos columnas deciden cosas distintas del mismo usuario y nada en el servidor las
+ata: `role` (el enum viejo) decide quién entra a `/m` y quién cobra (`get_my_role()` en
+`register_pos_sale` / `register_sale_payment`, `ROLES_QUE_COBRAN` en `src/lib/posMovil.ts`);
+`role_id` decide los permisos (`has_permission`: fiado, descuento, anular…). Si divergen, alguien
+**entra a `/m` sin fiado** (el servidor le rechaza la venta fiada) o **tiene fiado y no puede
+cobrar**. No hay error en ningún lado: es fallo silencioso.
+
+**Lo que ya cierra B (`feat/m1-fiado`):** la app escribe los dos en la misma llamada con
+`rolLegacyDeRol` (`src/lib/rolLegacy.ts`) — al crear (`create-user`) y al cambiar el rol en la
+lista de usuarios (antes este camino escribía solo `role_id`; lo vigila
+`tests/usuarios-cambio-rol.spec.ts`).
+
+**Lo que queda abierto, para A:**
+- **La Edge Function `create-user` no compara `role` con `role_id`.** Recibe los dos del
+  navegador y acepta cualquier par. Requiere `usuarios.gestionar`, así que el que puede
+  desalinearlos es un admin llamándola directo, no un cajero.
+- **Un usuario creado desde el Dashboard de Supabase nace sin `role_id`.** `handle_new_user`
+  toma `role` de la metadata (`'waiter'` si no viene) y no asigna rol RBAC: el usuario no tiene
+  ningún permiso de los nuevos, aunque su `role` diga `cashier`.
+- **Cualquier escritor futuro de `profiles`** (un seed, un script, una RPC) que toque una sola
+  de las dos columnas. Es la forma de R1: el sincronizador es quien se acuerde.
+
+**La idea para barrer la clase entera (a decidir en A, no construida):** un trigger de
+`profiles` que derive `role` de `role_id` del lado del servidor, de modo que ningún camino
+pueda escribir uno sin el otro. Dos cosas a resolver antes:
+- **R6 dice que un trigger de invariante VALIDA, no fuerza.** Derivar es forzar: reescribe en
+  silencio lo que mandó el llamante. La alternativa que respeta R6 es un trigger que **rechace**
+  el par incoherente (falla ruidoso, y cada escritor tiene que mandar los dos). La elección es
+  de A; queda escrita para que no se tome sin ver la regla.
+- **La regla actual mapea por NOMBRE de rol** (`owner`/`admin` → admin, `mozo` → waiter, resto →
+  cashier). Un rol renombrado o personalizado cambia de significado sin que nadie lo note
+  (R2: por nombre, no por id). Si A pasa `/m` y el cobro a `has_permission('pos.vender')` /
+  `mesas.cobrar`, el enum deja de decidir y la clase desaparece en vez de vigilarse.
+
+**Para detectar casos hoy** (solo lectura, por organización — fijar el UUID):
+
+```sql
+select p.full_name, p.email, p.is_active, p.role::text as rol_viejo, r.name as rol_rbac,
+       (r.id is not null and r.organization_id = s.organization_id
+        and p.role::text = case when r.name in ('owner','admin') then 'admin'
+                                when r.name = 'mozo' then 'waiter' else 'cashier' end) as coherente
+  from public.profiles p
+  join public.restaurants s on s.id = p.restaurant_id
+  left join public.roles r on r.id = p.role_id
+ where s.organization_id = '<uuid de la organización>'
+ order by coherente, p.is_active desc, p.full_name;
+```
+
 
 - **Regenerar `database.types.ts` con `supabase gen types`** cuando se resuelva el acceso
   de management del CLI. Hoy la entrada de `register_sale_payment` (Functions) está agregada
