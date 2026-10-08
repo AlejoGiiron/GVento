@@ -50,6 +50,21 @@ Para reconfirmarlo: `node -e "console.log(Object.keys(require('./package.json').
 - Tests: Playwright (E2E, `tests/`) + Vitest (unit, `*.test.ts` junto al código)
 - Gestor: pnpm, **un solo paquete**
 
+## Idioma — español de Colombia, con "tú", sin voseo (2026-10-08)
+
+**Todo lo que se escribe para el usuario va en español de Colombia, con "tú" (o "usted"), nunca
+con voseo** ("Instalá", "Tocá", "Revisá", "Pedile", "podés"):
+- los informes y las respuestas en el chat;
+- los mensajes de commit;
+- los textos que ve el usuario en la app (pantallas, botones, avisos, toasts, mensajes de error,
+  también los `raise exception` del SQL que la app muestra).
+
+Los comentarios de código y los docs internos que ya están en voseo no se reescriben por esto.
+**Para revisar lo que tocaste:** `node scripts/buscar-voseo.mjs <carpeta|archivo>` (busca por
+forma, con regex Unicode; `grep` en esta máquina no sirve para palabras con tilde). El voseo que
+queda en el escritorio está en [`docs/DEUDAS.md`](docs/DEUDAS.md) → *"Textos en voseo que quedan
+FUERA de `/m` y del login"*.
+
 ## Convenciones de código
 - Componentes: PascalCase en archivos .tsx
 - Hooks: camelCase con prefijo "use", en src/hooks/
