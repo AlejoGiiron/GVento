@@ -36,6 +36,14 @@
 --     from pg_proc p where p.pronamespace = 'public'::regnamespace
 --      and p.proname in ('register_pos_sale', 'register_sale_payment') order by 1;
 --   select to_regclass('public.permisos_cobro_agregados');   -- no nulo = aplicada
+--   -- y que la tabla quedó encerrada (esperado: t · 0 · f · f):
+--   select c.relrowsecurity as rls,
+--          (select count(*) from pg_policies where schemaname = 'public' and tablename = 'permisos_cobro_agregados') as policies,
+--          has_table_privilege('anon', c.oid, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+--            or has_any_column_privilege('anon', c.oid, 'SELECT,INSERT,UPDATE,REFERENCES') as anon_algun_privilegio,
+--          has_table_privilege('authenticated', c.oid, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+--            or has_any_column_privilege('authenticated', c.oid, 'SELECT,INSERT,UPDATE,REFERENCES') as auth_algun_privilegio
+--     from pg_class c where c.oid = 'public.permisos_cobro_agregados'::regclass;
 -- ============================================================================
 
 begin;
@@ -62,7 +70,27 @@ create table public.permisos_cobro_agregados (
   primary key (role_id, clave)
 );
 alter table public.permisos_cobro_agregados enable row level security;
+-- Supabase da por defecto TODOS los privilegios (arwdDxtm) a anon y authenticated sobre
+-- cada tabla nueva de public (pg_default_acl). Se quitan, y se COMPRUEBA: si quedara
+-- alguno, o RLS apagado, o alguna policy, la migración aborta entera (falla cerrado).
 revoke all on table public.permisos_cobro_agregados from anon, authenticated;
+do $$
+declare
+  v_rls      boolean;
+  v_policies int;
+  v_con      text;
+begin
+  select relrowsecurity into v_rls from pg_class where oid = 'public.permisos_cobro_agregados'::regclass;
+  select count(*) into v_policies from pg_policies where schemaname = 'public' and tablename = 'permisos_cobro_agregados';
+  select string_agg(r, ', ') into v_con
+    from unnest(array['anon', 'authenticated']) r
+   where has_table_privilege(r, 'public.permisos_cobro_agregados', 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+      or has_any_column_privilege(r, 'public.permisos_cobro_agregados', 'SELECT,INSERT,UPDATE,REFERENCES');
+  if not v_rls or v_policies > 0 or v_con is not null then
+    raise exception 'permisos_cobro_agregados no quedó encerrada (rls=%, policies=%, con privilegios: %). No se cambió nada.',
+      v_rls, v_policies, coalesce(v_con, '-');
+  end if;
+end $$;
 
 -- ── 2. Roles de cada organización: UNIÓN ─────────────────────────────────────
 do $$

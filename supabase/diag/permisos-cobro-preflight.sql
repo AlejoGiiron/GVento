@@ -15,6 +15,12 @@
 -- Consulta 1 — las tres listas. 'PIERDE' tiene que salir VACÍA para aplicar A.
 -- Consulta 2 — cobertura: TODAS las organizaciones (desde organizations), con cuántos
 --              usuarios activos tiene cada una y cuántos caen en cada lista.
+-- Consulta 3 — tipos de orden de los últimos 180 días (incluido null), por organización,
+--              con cuántas tienen pagos. register_sale_payment de A RECHAZA todo lo que
+--              no sea dine_in, takeaway o delivery: si aparece otro, se decide ANTES.
+-- Consulta 4 — md5 de PRODUCCIÓN de las dos funciones que A reemplaza: la precondición
+--              de la migración exige exactamente 5c0e0d9e… y 8fc041a9….
+-- Corre cada consulta POR SEPARADO: el SQL Editor muestra solo el último resultado.
 -- ============================================================================
 
 -- ── Consulta 1 ──
@@ -91,3 +97,40 @@ select o.id as org_id, o.name as organizacion,
   left join public.profiles p on p.restaurant_id = s.id
  group by o.id, o.name
  order by o.name;
+
+-- ── Consulta 3: tipos de orden (180 días hacia atrás desde la medianoche de Bogotá, R7) ──
+select coalesce(o.name, '(sin organización)') as organizacion,
+       coalesce(x.type::text, '(null)')       as tipo,
+       count(*)                               as ordenes,
+       count(*) filter (where exists (select 1 from public.payments p where p.order_id = x.id)) as con_pagos,
+       x.type::text in ('dine_in', 'takeaway', 'delivery') as en_la_lista_de_A
+  from public.orders x
+  left join public.restaurants s on s.id = x.restaurant_id
+  left join public.organizations o on o.id = s.organization_id
+ where x.created_at >= (((now() at time zone 'America/Bogota')::date - 180)::timestamp at time zone 'America/Bogota')
+ group by o.name, x.type
+ order by en_la_lista_de_A nulls first, organizacion, tipo;
+-- Esperado: en_la_lista_de_A = true en TODAS las filas. Una fila con false o null
+-- (tipo null u otro) se decide antes de aplicar A. Nota: orders.type es el enum
+-- order_type (hoy: dine_in, takeaway, delivery); esta consulta además detecta nulls.
+
+-- ── Consulta 4: md5 de producción de las funciones que A reemplaza ──
+select p.oid::regprocedure as funcion,
+       md5(regexp_replace(regexp_replace(pg_get_functiondef(p.oid), E'\r','','g'), E'[ \t]+\n', E'\n','g')) as md5,
+       case p.proname
+         when 'register_pos_sale'     then '5c0e0d9eee8b2ad8fb5ecba549ab9d32'
+         when 'register_sale_payment' then '8fc041a9f9bdf535f309f6576eb058e5'
+       end as el_que_exige_A,
+       md5(regexp_replace(regexp_replace(pg_get_functiondef(p.oid), E'\r','','g'), E'[ \t]+\n', E'\n','g'))
+         = case p.proname
+             when 'register_pos_sale'     then '5c0e0d9eee8b2ad8fb5ecba549ab9d32'
+             when 'register_sale_payment' then '8fc041a9f9bdf535f309f6576eb058e5'
+           end as coincide
+  from pg_proc p
+ where p.pronamespace = 'public'::regnamespace
+   and p.proname in ('register_pos_sale', 'register_sale_payment')
+ order by 1;
+-- Esperado: 2 filas con coincide = true. register_pos_sale da 23e946e8… (y coincide =
+-- false) si el 5.0 del Paso 5 todavía no se aplicó: es normal antes de mañana. Lo que
+-- importa ya es register_sale_payment: si NO da 8fc041a9…, la migración de A abortaría
+-- en su precondición; pásame la salida.
