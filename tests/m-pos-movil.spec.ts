@@ -65,7 +65,7 @@ async function entrar(page: Page, creds: Creds, destino: RegExp = /\/m$/, recarg
   // "Cerrar sesión"). Un page.goto RECARGA la página y borra el estado en
   // memoria de la pestaña — justo lo que un test de cambio de usuario necesita conservar.
   if (recargar) await page.goto('/login')
-  await page.locator('input[autocomplete="email"]').fill(creds.email)
+  await page.locator('input[type="email"]').fill(creds.email)
   await page.locator('input[autocomplete="current-password"]').fill(creds.password)
   await page.getByRole('button', { name: 'Ingresar' }).click()
   await expect(page).toHaveURL(destino, { timeout: 15_000 })
@@ -183,6 +183,91 @@ test('entrar a /m después del login es una CARGA del documento de /m (no navega
   await expect.poll(async () => (await documento(page)).cargadoEn).toBe('/m')
   expect((await documento(page)).manifests).toEqual(['/movil/manifest.webmanifest'])
 })
+
+// ── Login en el celular (iPhone 16 Pro Max, 2026-10-07: no estaba pensado para
+// el celular). El escritorio no cambia: se comparó píxel a píxel contra capturas
+// de antes. Anchos del pedido: 360 a 430 px.
+test.describe('login en el celular', () => {
+  for (const ancho of [360, 390, 430]) {
+    test(`${ancho} px: sin desborde, campos de 16 px, autocompletado, ver la clave y "Ingresar" usable`, async ({ page }) => {
+      await page.setViewportSize({ width: ancho, height: 800 })
+      await page.goto('/login')
+      const correo = page.locator('#login-correo')
+      const clave = page.locator('#login-clave')
+      await expect(correo).toBeVisible()
+
+      // Sin desborde horizontal y cada campo entero dentro del ancho.
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+      for (const campo of [correo, clave, page.getByTestId('login-entrar')]) {
+        const c = (await campo.boundingBox())!
+        expect(c.x >= 0 && c.x + c.width <= ancho, 'un campo se sale del ancho').toBe(true)
+      }
+      // Letra de 16 px o más: con menos, Safari del iPhone hace zoom al tocar.
+      for (const campo of [correo, clave]) {
+        expect(parseFloat(await campo.evaluate((e) => getComputedStyle(e).fontSize))).toBeGreaterThanOrEqual(16)
+      }
+      // Teclado y contraseñas guardadas del iPhone y de Android.
+      await expect(correo).toHaveAttribute('type', 'email')
+      await expect(correo).toHaveAttribute('inputmode', 'email')
+      await expect(correo).toHaveAttribute('autocomplete', 'username')
+      await expect(correo).toHaveAttribute('autocapitalize', 'none')
+      await expect(clave).toHaveAttribute('autocomplete', 'current-password')
+      // Mostrar / ocultar la contraseña (con contraste: vuelve a ocultarse).
+      const ojo = page.getByTestId('login-ver-clave')
+      await expect(clave).toHaveAttribute('type', 'password')
+      await ojo.click()
+      await expect(clave).toHaveAttribute('type', 'text')
+      await expect(ojo).toHaveAttribute('aria-pressed', 'true')
+      await ojo.click()
+      await expect(clave).toHaveAttribute('type', 'password')
+      expect((await ojo.boundingBox())!.height, 'el ojo es chico para el pulgar').toBeGreaterThanOrEqual(44)
+
+      // "Ingresar": al menos 44 px, entero en pantalla, arriba de todo y tocable sin forzar.
+      await correo.fill(cashierCreds().email)
+      await clave.fill(cashierCreds().password)
+      const entrar = page.getByTestId('login-entrar')
+      expect((await entrar.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+      await usable(page, 'login-entrar', true)
+      await entrar.click()
+      await expect(page).toHaveURL(/\/m$/, { timeout: 15_000 })
+      await expect(page.getByTestId('m-shell')).toBeVisible()
+    })
+  }
+
+  test('con el teclado abierto, "Ingresar" queda a la vista (se desplaza solo)', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 800 })
+    await page.goto('/login')
+    await page.locator('#login-correo').fill('alguien@ejemplo.com')
+    await page.locator('#login-clave').fill('x')
+    await page.locator('#login-clave').focus()
+    // El teclado achica el viewport visible. Acá se simula achicando la ventana: es un
+    // proxy (en el equipo real lo que cambia es visualViewport); lo real va en la lista
+    // de verificación de equipos.
+    await page.setViewportSize({ width: 390, height: 330 })
+    await expect.poll(async () => {
+      const b = (await page.getByTestId('login-entrar').boundingBox())!
+      const vv = await page.evaluate(() => ({ top: window.visualViewport!.offsetTop, h: window.visualViewport!.height }))
+      return b.y >= -0.5 && b.y + b.height <= vv.h + 0.5
+    }, { timeout: 3000 }).toBe(true)
+  })
+
+  test('el mensaje de error se ve completo', async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 800 })
+    await page.goto('/login')
+    await page.locator('#login-correo').fill('nadie@ejemplo.com')
+    await page.locator('#login-clave').fill('clave-incorrecta')
+    await page.getByTestId('login-entrar').click()
+    const error = page.getByRole('alert')
+    await expect(error).toContainText('Credenciales incorrectas')
+    await expect(error).toContainText('Verifica tu correo y contraseña e intenta de nuevo.')
+    const c = (await error.boundingBox())!
+    expect(c.x >= 0 && c.x + c.width <= 360, 'el error se sale del ancho').toBe(true)
+    // Ningún texto del error queda cortado (su contenido no es más ancho que su caja).
+    expect(await error.evaluate((e) => [...e.querySelectorAll('div')].every((d) => d.scrollWidth <= d.clientWidth + 1))).toBe(true)
+  })
+})
+
+// ── Vender ───────────────────────────────────────────────────────────────
 
 test('venta en EFECTIVO: con vuelto, número, y queda a nombre del cajero', async ({ page }) => {
   await turnoAbierto()

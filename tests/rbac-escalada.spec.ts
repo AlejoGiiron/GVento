@@ -293,7 +293,7 @@ test('el desactivado NO entra: la sesión se corta con mensaje', async ({ page }
   try {
     const { email, password } = cashierCreds()
     await page.goto('/login')
-    await page.locator('input[autocomplete="email"]').fill(email)
+    await page.locator('input[type="email"]').fill(email)
     await page.locator('input[autocomplete="current-password"]').fill(password)
     await page.getByRole('button', { name: 'Ingresar' }).click()
 
@@ -316,7 +316,7 @@ test('Configuración: el toggle de is_active NO se ofrece en la fila propia', as
   // producía el toast genérico de error. Las filas ajenas lo conservan.
   const { email, password } = ownerCreds()
   await page.goto('/login')
-  await page.locator('input[autocomplete="email"]').fill(email)
+  await page.locator('input[type="email"]').fill(email)
   await page.locator('input[autocomplete="current-password"]').fill(password)
   await page.getByRole('button', { name: 'Ingresar' }).click()
   await expect(page).toHaveURL(/\/ventas/, { timeout: 15_000 })

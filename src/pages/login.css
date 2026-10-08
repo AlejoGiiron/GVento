@@ -1,0 +1,58 @@
+/* ============================================================================
+   Login en el CELULAR. El escritorio NO cambia: los estilos del escritorio siguen
+   en línea en LoginPage.tsx y TODO lo de acá vive dentro de este media query
+   (menos el logo móvil, oculto por defecto). Los !important son necesarios para
+   ganarle a los estilos en línea, y solo existen en anchos de celular.
+   Comprobado contra capturas del escritorio (píxel a píxel) el 2026-10-07.
+   ============================================================================ */
+
+.login-logo-movil { display: none; }
+
+@media (max-width: 767px) {
+  /* El documento se desplaza (para que el teclado no tape "Ingresar"). */
+  .login-raiz {
+    display: block !important;
+    width: auto !important;
+    height: auto !important;
+    min-height: 100dvh;
+    overflow: visible !important;
+  }
+  /* El panel de marca (40 %) no entra en 360–430 px: se reemplaza por un logo chico. */
+  .login-marca { display: none !important; }
+
+  /* Zonas seguras del iPhone (viewport-fit=cover en index.html). */
+  .login-panel {
+    min-height: 100dvh;
+    box-sizing: border-box;
+    padding:
+      calc(env(safe-area-inset-top) + 16px)
+      calc(env(safe-area-inset-right) + 16px)
+      calc(env(safe-area-inset-bottom) + 24px)
+      calc(env(safe-area-inset-left) + 16px) !important;
+  }
+  .login-ayuda { flex-wrap: wrap; justify-content: flex-start !important; gap: 4px 6px; }
+  .login-ayuda > span { margin-left: 0 !important; }
+  .login-form-caja { justify-content: flex-start !important; padding: 20px 0 24px; }
+
+  .login-logo-movil {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+
+  /* Campos: letra de 16 px (con menos, Safari del iPhone hace zoom al tocarlos)
+     y alto cómodo para el pulgar. */
+  .login-campo { min-height: 52px; box-sizing: border-box; padding: 4px 4px 4px 14px !important; }
+  .login-input { font-size: 16px !important; min-width: 0; min-height: 44px; }
+  .login-ojo { width: 44px; height: 44px; flex-shrink: 0; }
+
+  .login-recordar { min-height: 44px; font-size: 15px !important; }
+
+  .login-entrar { min-height: 52px; font-size: 16px !important; }
+
+  /* Mensajes de error completos y legibles (el texto ya corta la línea solo: no
+     hay palabras largas sin espacios; lo vigila tests/m-pos-movil.spec.ts). */
+  .login-error-titulo { font-size: 15px !important; }
+  .login-error-detalle { font-size: 14px !important; }
+}

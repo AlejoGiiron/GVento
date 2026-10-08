@@ -397,7 +397,7 @@ test.describe('frontend: el reintento lleva la MISMA clave', () => {
       await page.getByRole('button', { name: /Confirmar cobro/ }).click()
     }
     const entrarSinRecargar = async (email: string, password: string) => {
-      await page.locator('input[autocomplete="email"]').fill(email)
+      await page.locator('input[type="email"]').fill(email)
       await page.locator('input[autocomplete="current-password"]').fill(password)
       await page.getByRole('button', { name: 'Ingresar' }).click()
       await expect(page).toHaveURL(/\/ventas$/, { timeout: 15_000 })
