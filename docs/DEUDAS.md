@@ -1079,6 +1079,58 @@ supabase-js 2.104 le pasa a postgrest solo `schema`, `fetch`, `timeout` y `urlLe
 se prueba con la red cortada antes de soltarlo. Para reconfirmar la versión y el número:
 `grep -n "DEFAULT_MAX_RETRIES =" node_modules/.pnpm/@supabase+postgrest-js@*/node_modules/@supabase/postgrest-js/dist/index.mjs`.
 
+### 🔴 Mesas cerradas como pagadas SIN filas en `payments` (hallado 2026-10-09, pre-flight de Mesas)
+
+**Lo medido en producción (consulta 2b de `supabase/diag/mesas-preflight.sql`, la corrió el dueño del
+repo el 2026-10-09):** G-10, 20 órdenes de mesa `delivered` + `paid` + total > 0 sin pagos (17/8 a
+26/9, $613.800); Salchimelo, 18 ($419.000). Y en Salchimelo, 49 mesas entregadas con total 0 y sin
+pagos (48 con descuento).
+**El camino del código (leído en `70d8fcb`, la versión de `TablesPage.tsx` que corrió entre el 10/8
+y el 30/9, y en `develop` `9731272`, igual en esto):** `handleConfirm` de `TableCheckoutModal` saca
+el total de la copia del `order` tomada AL TOCAR "Cobrar" (`setCheckoutOrder(selectedOrder)`); esa
+copia no se actualiza. Si valía 0, `else if (total > 0)` se salta el pago; sin descuento tampoco
+corre `applyOrderDiscount`, así que el total de la base (las tandas que entraron después) queda > 0,
+y la orden pasa a `delivered` con `payment_status = 'paid'`, el DEFAULT de la columna. El botón
+"Cobrar" se habilita con cualquier orden, también con total 0. Por qué el modal valía 0 en cada
+caso NO está probado: es el único camino del código que da esa forma.
+**Mezcladas en la 2b hay otras dos clases:** fiado saldado con abonos (legítimo: la plata está en
+`debt_payments`) y líneas agregadas a una orden YA cerrada (ver la entrada siguiente).
+**Hoy sigue pudiendo pasar** (ni `cobro-turno.sql` ni el Paso 3 tocan ese camino: saltarse el pago
+no llama a `register_sale_payment`). **`close_table_sale` (Paso 9) lo hace imposible:** el total sale
+de las líneas y tiene que ser el que vio la pantalla (B1), y con total > 0 no hay `delivered` sin
+que `register_sale_payment` cobre la suma exacta. Queda abierto hasta que el Paso 10 esté en todos
+los equipos y el Paso 11 cierre el UPDATE directo de `orders.status`.
+**Para medirlo:** `supabase/diag/mesas-sin-pagos.sql` (solo lectura): la consulta 1 da la clase de
+cada orden y el turno en que cayó; la 2, cada turno con su sobrante y lo que esas ventas explicarían
+(una mesa cobrada en efectivo sin `payments` deja la plata en el cajón sin que el sistema la
+espere: sobrante por ese monto); la 3, las de total 0.
+
+### 🔴 Una tanda entra a una orden YA cobrada o cancelada (hallado 2026-10-09)
+
+`add_order_items_with_extras` (`pos-sale-lotes.sql`, `e2e6ec81…`) bloquea la orden y valida sede,
+productos y extras, pero **no mira `orders.status`**. Un equipo con la pantalla vieja (la mesa todavía
+"ocupada" en su copia) puede agregar una tanda a una orden `delivered` o `cancelled`: descuenta
+stock, sube el total y nadie la cobra. `close_table_sale` NO lo cierra. **Propuesto (sin decidir):**
+que la tanda rechace toda orden fuera de `pending/preparing/ready`, en el Paso 9. Clase: un escritor
+de la orden que no valida el estado (la misma de la doble anulación).
+
+### Diseño C — cuentas abiertas: lo que hay que preservar (anotado 2026-10-09)
+
+G-10 usa mesas con nombre de persona como cuentas abiertas (a la fecha: Camelo $221.000 desde el 3/9,
+Sebastian $126.500, Isabella $47.500, Katerine $23.000). Es el flujo intencional de CLAUDE.md
+(*"Mesas abiertas de larga duración"*): **cualquier cambio se habla con el cliente primero.** Para
+migrarlas sin perder lo que deben, el diseño tiene que decidir y probar:
+- **El monto:** `orders.total` contra la suma de las líneas (`supabase/diag/mesas-sin-pagos.sql`,
+  consulta 4). Antes del Paso 3 el total lo calculaba el cliente; si difieren, lo que dice la
+  pantalla no es lo que dicen las líneas y hay que decidir cuál vale ANTES de migrar.
+- **El stock:** ya se descontó al agregar cada tanda; la migración no puede volver a descontarlo.
+- **La fecha de la venta (R7):** convertirlas hoy en fiado (`close_table_sale` con `p_fiado`) las
+  cuenta como venta del día de la conversión, no de cuando se consumieron (Camelo: desde el 3/9).
+- **Las opciones, sin elegir:** (a) dejarlas como mesas y marcarlas como "cuenta" para sacarlas de la
+  operación de mesas; (b) pasarlas a fiado con un cliente (entra al módulo de Fiado con su saldo);
+  (c) una entidad nueva de cuenta abierta ligada a un cliente, que se lleva la orden tal cual.
+- **El objetivo de la migración, por UUID de orden** (R2), nunca por nombre de mesa.
+
 ### 🔴 Una venta se anula DOS veces si dos anulaciones llegan juntas: el stock vuelve dos veces (hallado 2026-10-08)
 
 **La clase:** una guarda de estado leída SIN lock antes de escribir (*check-then-act*).
