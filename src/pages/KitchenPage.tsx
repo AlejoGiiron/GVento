@@ -3,6 +3,7 @@ import { toast } from 'react-hot-toast'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import { updateOrderStatus } from '@/lib/supabase-helpers'
+import { useRecargaPeriodica } from '@/hooks/useRecargaPeriodica'
 import type { Tables } from '@/types/database.types'
 import {
   ChefHat, Check, RefreshCw, UtensilsCrossed,
@@ -439,12 +440,20 @@ function OrderCard({
 
 // ─── KDSBoard ────────────────────────────────────────────────────────────────
 
+const HORA_KDS = new Intl.DateTimeFormat('es-CO', {
+  timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+})
+
 function KDSBoard({ restaurantId, onLogout }: { restaurantId: string; onLogout: () => void }) {
   const [orders, setOrders]       = useState<KDSOrder[]>([])
   const [loading, setLoading]     = useState(true)
   const [filter, setFilter]       = useState<KDSFilter>('todas')
   const [advancingId, setAdvancingId] = useState<string | null>(null)
-  const [connected, setConnected] = useState(false)
+  // El indicador dice lo que de verdad pasa. "En línea" solo si llegó un EVENTO de
+  // Realtime hace poco: un canal SUBSCRIBED sin tablas publicadas no recibe nada
+  // (medido 2026-10-09) y antes igual decía "En línea". Si no, la hora de la última carga.
+  const [ultimaCarga, setUltimaCarga] = useState<number | null>(null)
+  const [ultimoEvento, setUltimoEvento] = useState<number | null>(null)
   const [, setClockTick]          = useState(0)
 
   const channelRef      = useRef<RealtimeChannel | null>(null)
@@ -457,7 +466,7 @@ function KDSBoard({ restaurantId, onLogout }: { restaurantId: string; onLogout: 
     const acquire = async () => {
       if (!('wakeLock' in navigator)) return
       try {
-        wakeLockRef.current = await (navigator as any).wakeLock.request('screen')
+        wakeLockRef.current = await navigator.wakeLock.request('screen')
       } catch { /* device may deny */ }
     }
     acquire()
@@ -503,6 +512,7 @@ function KDSBoard({ restaurantId, onLogout }: { restaurantId: string; onLogout: 
       prevOrderIdsRef.current = newIds
 
       setOrders(all)
+      setUltimaCarga(Date.now())
     } finally {
       // El KDS nunca debe quedar colgado en "Cargando…" ante un error de red.
       setLoading(false)
@@ -510,6 +520,10 @@ function KDSBoard({ restaurantId, onLogout }: { restaurantId: string; onLogout: 
   }, [restaurantId])
 
   useEffect(() => { fetchOrders() }, [fetchOrders])
+
+  // Sin Realtime (producción hoy) esta es la única forma de que una comanda nueva
+  // aparezca sola: cada 30 s y al volver a la pestaña.
+  useRecargaPeriodica(fetchOrders, { cadaMs: 30_000 })
 
   // Realtime subscription with unique channel name (avoids ghost subscriptions)
   useEffect(() => {
@@ -519,12 +533,11 @@ function KDSBoard({ restaurantId, onLogout }: { restaurantId: string; onLogout: 
       .on('postgres_changes', {
         event: '*', schema: 'public', table: 'orders',
         filter: `restaurant_id=eq.${restaurantId}`,
-      }, fetchOrders)
+      }, () => { setUltimoEvento(Date.now()); fetchOrders() })
       .on('postgres_changes', {
         event: '*', schema: 'public', table: 'order_items',
-      }, fetchOrders)
+      }, () => { setUltimoEvento(Date.now()); fetchOrders() })
       .subscribe((status) => {
-        setConnected(status === 'SUBSCRIBED')
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') setTimeout(fetchOrders, 5_000)
       })
     channelRef.current = ch
@@ -555,6 +568,10 @@ function KDSBoard({ restaurantId, onLogout }: { restaurantId: string; onLogout: 
     filter === 'pendientes' ? kitchenOrders.filter((o) => o.status === 'pending') :
     filter === 'preparando' ? kitchenOrders.filter((o) => o.status === 'preparing') :
                               kitchenOrders.filter((o) => o.status === 'ready')
+
+  // "En línea" = llegó un evento de Realtime en los últimos 2 minutos (el reloj de 30 s
+  // de esta pantalla lo reevalúa).
+  const enVivo = ultimoEvento !== null && Date.now() - ultimoEvento < 120_000
 
   const counts = {
     todas:      kitchenOrders.length,
@@ -603,11 +620,15 @@ function KDSBoard({ restaurantId, onLogout }: { restaurantId: string; onLogout: 
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2 }}>
               <div style={{
                 width: 6, height: 6, borderRadius: '50%',
-                background: connected ? '#10b981' : '#475569',
-                boxShadow: connected ? '0 0 0 3px rgba(16,185,129,.2)' : 'none',
+                background: enVivo ? '#10b981' : '#475569',
+                boxShadow: enVivo ? '0 0 0 3px rgba(16,185,129,.2)' : 'none',
               }} />
-              <span style={{ fontSize: 11, color: connected ? '#10b981' : '#475569', fontWeight: 500 }}>
-                {connected ? 'En línea' : 'Conectando…'}
+              <span data-testid="kds-actualizacion" style={{ fontSize: 11, color: enVivo ? '#10b981' : '#94a3b8', fontWeight: 500 }}>
+                {enVivo
+                  ? 'En línea'
+                  : ultimaCarga === null
+                    ? 'Cargando…'
+                    : `Se actualiza cada 30 s · ${HORA_KDS.format(new Date(ultimaCarga))}`}
               </span>
             </div>
           </div>

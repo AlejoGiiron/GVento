@@ -12,6 +12,7 @@ import { usePermissions } from '@/hooks/usePermissions'
 import { useRestaurantConfig } from '@/hooks/useRestaurantConfig'
 import { useCashShift } from '@/hooks/useCashShift'
 import { useTables } from '@/hooks/useTables'
+import { useRecargaPeriodica } from '@/hooks/useRecargaPeriodica'
 import { useProducts } from '@/hooks/useProducts'
 import { useCategories } from '@/hooks/useCategories'
 import { useProductsWithExtras } from '@/hooks/useProductsWithExtras'
@@ -1779,9 +1780,12 @@ export function TablesPage() {
   const [showCheckout, setShowCheckout] = useState(false)
   const [showConfig, setShowConfig] = useState(false)
   const [showOpenShift, setShowOpenShift] = useState(false)
-  // Orden capturada al abrir el checkout — aislada de actualizaciones Realtime
-  // para evitar que el modal se desmonte mientras está en progreso.
+  // Orden Y MESA capturadas al abrir el checkout — aisladas de Realtime para que el
+  // modal no se desmonte mientras está en progreso. La mesa también: si otro equipo
+  // la cobra, Realtime la marca libre y el panel se cierra (selectedTable = null);
+  // el modal sigue, y al confirmar el servidor dice quién la cobró (otro_cobro).
   const [checkoutOrder, setCheckoutOrder] = useState<ActiveOrder | null>(null)
+  const [checkoutTable, setCheckoutTable] = useState<TableRow | null>(null)
   const { refetchSales, isOpen: isShiftOpen } = useCashShift()
 
   // Cobrar exige turno abierto: si no hay, abre el modal de apertura primero.
@@ -1789,6 +1793,7 @@ export function TablesPage() {
     if (!selectedOrder) return
     if (!isShiftOpen) { setShowOpenShift(true); return }
     setCheckoutOrder(selectedOrder)
+    setCheckoutTable(selectedTable)
     setShowCheckout(true)
   }
 
@@ -1815,6 +1820,12 @@ export function TablesPage() {
       setSelectedTableId(null)
     }
   }, [selectedTable?.status, showOpenModal])
+
+  // Lo que hicieron los otros equipos llega sin recargar a mano: cada 45 s y al volver a
+  // la pestaña. PAUSADA con cualquier modal abierto: una recarga de fondo no cambia ni
+  // cierra lo que el usuario está haciendo (el cobro, sobre todo).
+  const hayModal = showOpenModal || showProductPicker || showCheckout || showConfig || showOpenShift
+  useRecargaPeriodica(refetch, { cadaMs: 45_000, pausada: hayModal })
 
   const handleTableClick = (table: TableRow) => {
     if (table.status === 'free') {
@@ -1848,6 +1859,7 @@ export function TablesPage() {
   const handleCheckoutComplete = () => {
     setShowCheckout(false)
     setCheckoutOrder(null)
+    setCheckoutTable(null)
     setSelectedTableId(null)
     refetchSales()
     refetch()
@@ -2003,11 +2015,11 @@ export function TablesPage() {
         />
       )}
 
-      {showCheckout && selectedTable && checkoutOrder && (
+      {showCheckout && checkoutTable && checkoutOrder && (
         <TableCheckoutModal
-          table={selectedTable}
+          table={checkoutTable}
           order={checkoutOrder}
-          onClose={() => { setShowCheckout(false); setCheckoutOrder(null) }}
+          onClose={() => { setShowCheckout(false); setCheckoutOrder(null); setCheckoutTable(null) }}
           onComplete={handleCheckoutComplete}
         />
       )}
@@ -2026,7 +2038,7 @@ export function TablesPage() {
           onClose={() => setShowOpenShift(false)}
           onOpened={() => {
             setShowOpenShift(false)
-            if (selectedOrder) { setCheckoutOrder(selectedOrder); setShowCheckout(true) }
+            if (selectedOrder) { setCheckoutOrder(selectedOrder); setCheckoutTable(selectedTable); setShowCheckout(true) }
           }}
         />
       )}
