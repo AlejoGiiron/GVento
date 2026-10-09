@@ -127,7 +127,8 @@ const ORDEN = [
 // (supabase/diag/deriva-esquema.sql + scripts/deriva-comparar.mjs).
 const GANA = {
   // pos-sale-lotes.sql la redefine con (p_order_id, p_items, p_lote) y BORRA la de 2 argumentos:
-  'function add_order_items_with_extras': 'pos-sale-lotes.sql',
+  // mesas-servidor.sql (Paso 9) le agrega la guarda de orden cerrada:
+  'function add_order_items_with_extras': 'mesas-servidor.sql',
   // pos-sale-metodo-real.sql: misma venta, pero la respuesta trae el método real (M1.1):
   // permisos-cobro.sql (A): la misma venta y el mismo cobro, con la compuerta por permiso:
   'function register_pos_sale':           'permisos-cobro.sql',

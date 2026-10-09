@@ -14,6 +14,9 @@
 --      y con la orden bloqueada: dos anulaciones simultáneas de la misma venta devolvían el
 --      stock DOS veces (medido el 2026-10-08 en Docker con la versión 2e9d312e…, la de
 --      producción: la segunda esperaba el UPDATE de la primera y seguía, sin error).
+--   6b. add_order_items_with_extras — la misma tanda, pero rechaza una tanda NUEVA a una
+--      orden ya cobrada o cancelada (decidido el 2026-10-09). El reintento de una tanda ya
+--      registrada sigue devolviendo éxito; register_pos_sale la llama con la orden 'pending'.
 --   7. close_table_sale — el cobro de mesa en una transacción (cierra H2).
 --   8. quitar_item_mesa — quitar un ítem (cierra H3): pos.anular + motivo + "¿Se alcanzó a
 --      preparar?" (Sí → merma: return + merma, el stock no cambia; No → devuelve stock).
@@ -28,8 +31,9 @@
 -- (una orden viva no tiene pagos): solo orden → mesa, nunca el turno, así que no hay ciclo.
 --
 -- PRECONDICIÓN (bloque 0, aborta sin cambiar nada): A aplicada (register_sale_payment =
--- 3dbb2ea5…, permisos-cobro.sql), el 5.0 aplicado (_venta_pos_respuesta existe) y
--- register_sale_void = 2e9d312e… (la de close-cash-shift.sql, que este archivo reemplaza).
+-- 3dbb2ea5…, permisos-cobro.sql), el 5.0 aplicado (_venta_pos_respuesta existe),
+-- register_sale_void = 2e9d312e… (la de close-cash-shift.sql) y add_order_items_with_extras
+-- = e2e6ec81… (la de pos-sale-lotes.sql): las dos que este archivo reemplaza.
 --
 -- RE-APLICAR: falla en la precondición (register_sale_void ya no es la de antes) y hace
 -- rollback: no cambia nada. 🔴 Re-aplicar después close-cash-shift.sql o register-sale-void.sql
@@ -41,6 +45,7 @@
 --     from pg_proc p where p.pronamespace = 'public'::regnamespace
 --      and p.proname in ('register_sale_void', 'close_table_sale', 'quitar_item_mesa',
 --                        'cerrar_mesa_sin_consumo', 'eliminar_mesa', '_stock_inverso_item',
+--                        'add_order_items_with_extras',
 --                        '_mover_stock_inverso', '_cierre_mesa_respuesta') order by 1;
 --   select to_regclass('public.order_item_bajas');   -- no nulo = aplicada
 -- ============================================================================
@@ -52,6 +57,7 @@ do $$
 declare
   v_pago text := md5(regexp_replace(regexp_replace(pg_get_functiondef('public.register_sale_payment(uuid,jsonb)'::regprocedure), E'\r','','g'), E'[ \t]+\n', E'\n','g'));
   v_void text := md5(regexp_replace(regexp_replace(pg_get_functiondef('public.register_sale_void(uuid,text)'::regprocedure), E'\r','','g'), E'[ \t]+\n', E'\n','g'));
+  v_aoi  text := md5(regexp_replace(regexp_replace(pg_get_functiondef('public.add_order_items_with_extras(uuid,jsonb,uuid)'::regprocedure), E'\r','','g'), E'[ \t]+\n', E'\n','g'));
 begin
   if v_pago is distinct from '3dbb2ea5b7810c6ec718fca9dc962a3d' then
     raise exception 'Precondición: register_sale_payment no es la de permisos-cobro.sql (md5 %). Aplica antes el Paso 7 (A). No se cambió nada.', v_pago;
@@ -61,6 +67,9 @@ begin
   end if;
   if v_void is distinct from '2e9d312e315597f70796a9fc9cafbb7c' then
     raise exception 'Precondición: register_sale_void no es la de close-cash-shift.sql (md5 %, se esperaba 2e9d312e…). No se cambió nada.', v_void;
+  end if;
+  if v_aoi is distinct from 'e2e6ec81b743d9afc900c793b9910ff3' then
+    raise exception 'Precondición: add_order_items_with_extras no es la de pos-sale-lotes.sql (md5 %, se esperaba e2e6ec81…). No se cambió nada.', v_aoi;
   end if;
 end $$;
 
@@ -363,6 +372,199 @@ $function$;
 
 revoke execute on function public.register_sale_void(uuid, text) from public, anon;
 grant  execute on function public.register_sale_void(uuid, text) to authenticated;
+
+-- ── 6b. add_order_items_with_extras (copia de pos-sale-lotes.sql + la guarda 1c) ──
+CREATE OR REPLACE FUNCTION public.add_order_items_with_extras(p_order_id uuid, p_items jsonb, p_lote uuid DEFAULT NULL::uuid)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+  v_restaurant_id     uuid;
+  v_order_created_by  uuid;
+  v_created_by        uuid;
+  v_item              jsonb;
+  v_item_id           uuid;
+  v_item_qty          integer;
+  v_product_id        uuid;
+  v_kind              text;
+  v_stock_tracking    boolean;
+  v_comp              record;
+  v_comp_total        integer;
+  v_extra             jsonb;
+  v_extra_id          uuid;
+  v_extra_qty         integer;
+  v_extra_price       numeric(12, 2);
+  v_extra_linked      uuid;
+  v_total_qty         integer;
+  v_lote_orden        uuid;
+  v_estado            text;
+begin
+  -- 1. La orden debe existir y pertenecer a la sede activa del llamante.
+  --    FOR UPDATE: las tandas de una misma orden se serializan, y el total que
+  --    se recalcula al final ve las líneas de la tanda anterior.
+  select restaurant_id, created_by, status
+  into v_restaurant_id, v_order_created_by, v_estado
+  from public.orders
+  where id = p_order_id
+  for update;
+
+  if v_restaurant_id is null then
+    raise exception 'La orden % no existe', p_order_id;
+  end if;
+  if v_restaurant_id <> get_my_restaurant_id() then
+    raise exception 'La orden no pertenece a tu sede';
+  end if;
+
+  -- 1b. CLAVE POR TANDA: si esta tanda ya se registró, no se repite. Devuelve
+  --     éxito: es el reenvío de algo que ya está hecho.
+  if p_lote is not null then
+    insert into public.order_item_lotes (id, order_id, created_by)
+    values (p_lote, p_order_id, auth.uid())
+    on conflict (id) do nothing;
+    if not found then
+      select order_id into v_lote_orden from public.order_item_lotes where id = p_lote;
+      if v_lote_orden is distinct from p_order_id then
+        raise exception 'La tanda % es de otra orden', p_lote;
+      end if;
+      return;
+    end if;
+  end if;
+
+  -- 1c. La orden tiene que estar ABIERTA (mesas-servidor.sql). Un equipo con la pantalla
+  --     vieja agregaba una tanda a una orden ya cobrada o cancelada: descontaba stock y
+  --     nadie la cobraba. VALIDA, no corrige. Va DESPUÉS de la clave: el reintento de una
+  --     tanda que entró antes del cierre sigue devolviendo éxito (1b). Con la excepción se
+  --     deshace también el registro de la clave.
+  if v_estado not in ('pending', 'preparing', 'ready') then
+    raise exception 'La mesa ya se cobró o se cerró: no se agregó nada. Actualiza la pantalla.';
+  end if;
+
+  -- Autor de los movimientos de stock: el usuario actual; si por algún motivo
+  -- no hay sesión (no debería en DEFINER llamado por authenticated), cae al
+  -- created_by de la orden.
+  v_created_by := coalesce(auth.uid(), v_order_created_by);
+
+  -- 2. Cada ítem con sus extras.
+  for v_item in select * from jsonb_array_elements(p_items)
+  loop
+    v_item_qty   := (v_item->>'qty')::integer;
+    v_product_id := (v_item->>'product_id')::uuid;
+
+    select kind, stock_tracking
+    into v_kind, v_stock_tracking
+    from public.products
+    where id = v_product_id and restaurant_id = v_restaurant_id;
+    if not found then
+      raise exception 'El producto % no pertenece a tu sede', v_product_id;
+    end if;
+
+    insert into public.order_items (order_id, product_id, qty, unit_price, notes)
+    values (
+      p_order_id,
+      v_product_id,
+      v_item_qty,
+      (v_item->>'unit_price')::numeric,
+      nullif(v_item->>'notes', '')
+    )
+    returning id into v_item_id;
+
+    -- DESCUENTO DE STOCK POR PRODUCTO (inventario por recetas). SIN piso.
+    if v_item_qty > 0 then
+      if v_kind = 'simple' then
+        if v_stock_tracking then
+          update public.products
+          set stock_qty = coalesce(stock_qty, 0) - v_item_qty
+          where id = v_product_id and restaurant_id = v_restaurant_id;
+
+          insert into public.stock_movements
+            (restaurant_id, product_id, type, qty, reference_id, created_by)
+          values
+            (v_restaurant_id, v_product_id, 'sale', -v_item_qty, p_order_id, v_created_by);
+        end if;
+
+      elsif v_kind = 'composite' then
+        for v_comp in
+          select pc.component_id, pc.qty as recipe_qty
+          from public.product_components pc
+          join public.products p on p.id = pc.component_id
+          where pc.parent_id = v_product_id
+            and pc.restaurant_id = v_restaurant_id
+            and p.stock_tracking = true
+        loop
+          v_comp_total := v_comp.recipe_qty * v_item_qty;
+
+          update public.products
+          set stock_qty = coalesce(stock_qty, 0) - v_comp_total
+          where id = v_comp.component_id and restaurant_id = v_restaurant_id;
+
+          insert into public.stock_movements
+            (restaurant_id, product_id, type, qty, reference_id, created_by)
+          values
+            (v_restaurant_id, v_comp.component_id, 'sale', -v_comp_total, p_order_id, v_created_by);
+        end loop;
+      end if;
+    end if;
+
+    -- EXTRAS: precio y producto vinculado se LEEN de la BD, no del JSON.
+    for v_extra in
+      select * from jsonb_array_elements(coalesce(v_item->'extras', '[]'::jsonb))
+    loop
+      v_extra_id  := (v_extra->>'extra_id')::uuid;
+      v_extra_qty := (v_extra->>'qty')::integer;
+
+      if v_extra_qty <= 0 then
+        continue;
+      end if;
+
+      select price, linked_product_id
+      into v_extra_price, v_extra_linked
+      from public.extras
+      where id = v_extra_id
+        and restaurant_id = v_restaurant_id
+        and is_active = true;
+
+      if not found then
+        raise exception 'Extra % no es válido para esta sede', v_extra_id;
+      end if;
+
+      perform 1 from public.product_extras
+      where product_id = v_product_id and extra_id = v_extra_id;
+      if not found then
+        raise exception 'El extra % no está asignado al producto %', v_extra_id, v_product_id;
+      end if;
+
+      v_total_qty := v_extra_qty * v_item_qty;
+
+      insert into public.order_item_extras (order_item_id, extra_id, qty, unit_price)
+      values (v_item_id, v_extra_id, v_total_qty, v_extra_price);
+
+      if v_extra_linked is not null then
+        update public.products
+        set stock_qty = coalesce(stock_qty, 0) - v_total_qty
+        where id = v_extra_linked
+          and restaurant_id = v_restaurant_id
+          and stock_tracking = true;
+      end if;
+    end loop;
+  end loop;
+
+  -- 3. TOTAL DESDE LAS LÍNEAS (la base es la dueña del total, no el cliente):
+  --    ítems + extras − el descuento ya aplicado a la orden. Mismo invariante que
+  --    usa el checkout de Mesas (subtotal = total + discount_amount).
+  update public.orders o
+     set total = greatest(0,
+           coalesce((select sum(i.qty * i.unit_price) from public.order_items i where i.order_id = o.id), 0)
+         + coalesce((select sum(e.qty * e.unit_price) from public.order_item_extras e
+                       join public.order_items i on i.id = e.order_item_id where i.order_id = o.id), 0)
+         - coalesce(o.discount_amount, 0))
+   where o.id = p_order_id;
+end;
+$function$;
+
+revoke execute on function public.add_order_items_with_extras(uuid, jsonb, uuid) from public, anon;
+grant  execute on function public.add_order_items_with_extras(uuid, jsonb, uuid) to authenticated;
 
 -- ── 7. close_table_sale — el cobro de mesa en una transacción ─────────────────
 -- La respuesta: la de _venta_pos_respuesta (número, total, métodos REALES, fiado, cliente)

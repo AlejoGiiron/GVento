@@ -94,7 +94,7 @@ select 'funcion' as que, p.proname as nombre,
        md5(regexp_replace(regexp_replace(pg_get_functiondef(p.oid), E'\r','','g'), E'[ \t]+\n', E'\n','g')) as estado
   from pg_proc p
  where p.pronamespace = 'public'::regnamespace
-   and p.proname in ('register_sale_void', 'register_sale_payment', '_venta_pos_respuesta',
+   and p.proname in ('register_sale_void', 'register_sale_payment', '_venta_pos_respuesta', 'add_order_items_with_extras',
                      'close_table_sale', 'quitar_item_mesa', 'cerrar_mesa_sin_consumo', 'eliminar_mesa',
                      '_stock_inverso_item', '_mover_stock_inverso', '_cierre_mesa_respuesta')
 union all
@@ -106,7 +106,8 @@ select 'columna', c.table_name || '.' || c.column_name, c.data_type
 union all
 select 'tabla', 'order_item_bajas', coalesce(to_regclass('public.order_item_bajas')::text, 'no existe')
  order by 1, 2;
--- Esperado ANTES del Paso 7 (A):  register_sale_void 2e9d312e…, register_sale_payment 8fc041a9…,
+-- Esperado ANTES del Paso 7 (A):  register_sale_void 2e9d312e…, add_order_items_with_extras
+--   e2e6ec81…, register_sale_payment 8fc041a9…,
 --   _venta_pos_respuesta presente (el 5.0), ninguna de las funciones nuevas, ninguna columna, y
 --   "tabla | order_item_bajas | no existe".
 -- Esperado DESPUÉS del Paso 7: lo mismo, pero register_sale_payment 3dbb2ea5… (es la que exige

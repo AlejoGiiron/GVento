@@ -513,6 +513,42 @@ test.describe('quitar_item_mesa', () => {
   })
 })
 
+// ── La tanda contra una orden cerrada (add_order_items_with_extras, guarda 1c) ──
+
+test.describe('add_order_items_with_extras: orden cerrada', () => {
+  const tanda = (orden: string, lote: string) => cajero.rpc('add_order_items_with_extras', {
+    p_order_id: orden, p_lote: lote, p_items: [{ product_id: P_SIMPLE, qty: 1, unit_price: 5000, extras: [] }],
+  })
+  const lineasDe = (orden: string) => psql(`select count(*) from public.order_items where order_id = '${orden}';`)
+
+  test('una tanda NUEVA a una orden cobrada se rechaza sin efecto; el reintento de la que ya entró sigue con éxito', async () => {
+    await turnoAbierto()
+    const { orden } = mesaVacia()
+    const lote = randomUUID()
+    expect((await tanda(orden, lote)).error).toBeNull()
+    expect((await cajero.rpc('close_table_sale', {
+      p_order_id: orden, p_close_id: randomUUID(), p_total_esperado: 5000, p_payments: [{ method: 'cash', amount: 5000 }],
+    })).error).toBeNull()
+    const s = stock()
+    const nueva = await tanda(orden, randomUUID())
+    expect(nueva.error?.message ?? '', 'una tanda entró a una orden ya cobrada').toMatch(/ya se cobró o se cerró: no se agregó nada/)
+    expect(lineasDe(orden)).toBe('1')
+    expect(stock(), 'la tanda rechazada movió stock').toBe(s)
+    // Contraste: el reenvío de la tanda que entró ANTES del cierre no es una tanda nueva.
+    const reintento = await tanda(orden, lote)
+    expect(reintento.error, reintento.error?.message).toBeNull()
+    expect(lineasDe(orden)).toBe('1')
+  })
+
+  test('una tanda a una orden cerrada sin consumo (cancelada) también se rechaza', async () => {
+    const { orden } = mesaVacia()
+    expect((await mozo.rpc('cerrar_mesa_sin_consumo', { p_order_id: orden })).error).toBeNull()
+    const r = await tanda(orden, randomUUID())
+    expect(r.error?.message ?? '').toMatch(/ya se cobró o se cerró/)
+    expect(lineasDe(orden)).toBe('0')
+  })
+})
+
 // ── Decisión 4: anular y "No se preparó" dejan el MISMO inventario ───────────
 
 test('anular la venta de una mesa y quitar sus ítems con "No se preparó" devuelven EXACTAMENTE el mismo stock', async () => {

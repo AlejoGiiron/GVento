@@ -1112,9 +1112,23 @@ espere: sobrante por ese monto); la 3, las de total 0.
 `add_order_items_with_extras` (`pos-sale-lotes.sql`, `e2e6ec81…`) bloquea la orden y valida sede,
 productos y extras, pero **no mira `orders.status`**. Un equipo con la pantalla vieja (la mesa todavía
 "ocupada" en su copia) puede agregar una tanda a una orden `delivered` o `cancelled`: descuenta
-stock, sube el total y nadie la cobra. `close_table_sale` NO lo cierra. **Propuesto (sin decidir):**
-que la tanda rechace toda orden fuera de `pending/preparing/ready`, en el Paso 9. Clase: un escritor
-de la orden que no valida el estado (la misma de la doble anulación).
+stock, sube el total y nadie la cobra. `close_table_sale` NO lo cierra. Clase: un escritor de la
+orden que no valida el estado (la misma de la doble anulación).
+**Decidido el 2026-10-09 y construido:** en la pantalla, `hotfix/mesa-total-cero` (relee el estado
+antes de agregar); en el servidor, la guarda 1c de `add_order_items_with_extras` en
+`mesas-servidor.sql` (Paso 9). **Hasta el Paso 9 sigue abierto en el servidor:** la guarda del
+navegador deja una ventana de milisegundos entre releer y escribir.
+
+### Realtime de la base LOCAL no publica ninguna tabla (medido 2026-10-09)
+
+`select tablename from pg_publication_tables where pubname = 'supabase_realtime';` devuelve **cero
+filas** en el Supabase de Docker: localmente la pantalla nunca se entera de cambios de otros equipos
+(Mesas, cocina, delivery). Ningún test lo notaba porque ninguno dependía de eso; lo hizo visible
+`tests/mesas-frontend.spec.ts` (*"otro equipo la cobró"*), que esperaba ver la mesa "Libre". Lo que
+NO se puede probar localmente hoy: que el modal de cobro siga abierto cuando Realtime libera la mesa
+(el arreglo existe en el Paso 10, `checkoutTable`). **En producción no está medido:** la misma
+consulta en el SQL Editor lo dice. Si producción sí publica, conviene que `pnpm e2e:preparar` replique
+la publicación para que la suite pruebe lo mismo que se usa.
 
 ### Diseño C — cuentas abiertas: lo que hay que preservar (anotado 2026-10-09)
 
