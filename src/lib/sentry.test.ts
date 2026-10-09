@@ -153,6 +153,18 @@ const COLUMNAS_DEL_ESQUEMA: ColumnaEsquema[] = [
   { tabla: 'stock_movements', columna: 'notes', ejemplo: 'Ajuste hecho por Ana' },
   { tabla: 'stock_movements', columna: 'reference_id', ejemplo: '3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d', permitida: true },
   { tabla: 'store_sequences', columna: 'last_order_number', ejemplo: 1247 },
+
+  // ── mesas-servidor.sql: quién cobró la mesa, mesas archivadas y los ítems quitados
+  { tabla: 'orders', columna: 'close_id', ejemplo: '5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e' },
+  { tabla: 'orders', columna: 'cobrada_por', ejemplo: '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d' },
+  { tabla: 'orders', columna: 'cobrada_at', ejemplo: '2026-10-09T02:40:00.000Z' },
+  { tabla: 'tables', columna: 'archived_at', ejemplo: '2026-10-09T02:40:00.000Z' },
+  { tabla: 'tables', columna: 'archived_by', ejemplo: '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d' },
+  { tabla: 'order_item_bajas', columna: 'producto', ejemplo: 'Hamburguesa de Pedro' },
+  { tabla: 'order_item_bajas', columna: 'motivo', ejemplo: 'Se le cayó a Ana' },
+  { tabla: 'order_item_bajas', columna: 'monto', ejemplo: 13000 },
+  { tabla: 'order_item_bajas', columna: 'extras', ejemplo: 'Tocineta para Pedro' },
+  { tabla: 'order_item_bajas', columna: 'preparado', ejemplo: true },
 ]
 
 const PROHIBIDAS = COLUMNAS_DEL_ESQUEMA.filter((c) => !c.permitida)

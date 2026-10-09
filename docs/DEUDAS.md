@@ -336,7 +336,9 @@ Lo que hay que saber al operarlo:
   pantalla lo avisa (`success-ya-existia`). Es a propósito: entre una venta con el método
   equivocado y una venta DUPLICADA, la duplicada es peor (arqueo y stock).
 - **En el POS ya no existe "venta cobrada sin número"**: el número va en la misma transacción.
-  El aviso y su reintento siguen en Mesas, y `tests/numeracion-fallo.spec.ts` ahora prueba ahí.
+  *(Actualizado 2026-10-09: con el Paso 10, Mesas cobra con `close_table_sale`, que también numera
+  en la misma transacción; el aviso, su reintento y `tests/numeracion-fallo.spec.ts` se borraron
+  en `feat/mesas-servidor`. Para reconfirmar: `grep -rn "assignOrderNumber" src/` no devuelve nada.)*
 - **Reversa:** `pos-sale-lotes-revertir.sql` (raíz, fuera de git), con autoverificación por
   md5 contra el export de prod. **Primero el frontend, después el SQL.**
 
@@ -1162,9 +1164,12 @@ rol ni permiso en el servidor**: hoy lo frena solo la pantalla. Un usuario de la
 
 **No lo cubre A** (A cambia quién COBRA: `register_pos_sale` y `register_sale_payment`). Va en el
 paquete Mesas: `close_table_sale` con el parámetro de fiado (decidido 2026-10-07) exige
-`fiado.gestionar` en el servidor, y entonces el UPDATE directo se puede cerrar. Para
-reconfirmarlo: `select policyname, qual, with_check from pg_policies where tablename = 'orders'
-and cmd = 'UPDATE';` y `grep -rn "setOrderFiado" src/`.
+`fiado.gestionar` en el servidor, y entonces el UPDATE directo se puede cerrar.
+**Estado (2026-10-09):** desde el Paso 10 (`feat/mesas-servidor`) la pantalla ya no lo usa
+(`setOrderFiado` se borró; el fiado de mesa va por `close_table_sale`). **La puerta sigue abierta en
+la base** hasta el Paso 11, que saca las columnas de cobro del UPDATE directo. Para reconfirmar lo
+que sigue abierto: `select policyname, qual, with_check from pg_policies where tablename = 'orders'
+and cmd = 'UPDATE';`.
 
 ### 🔴 A (permisos de cobro): `profiles.role` y `profiles.role_id` pueden divergir (anotado 2026-10-07)
 

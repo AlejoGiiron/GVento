@@ -1,13 +1,13 @@
 import { useState, useMemo } from 'react'
 import {
   Search, X, ChevronLeft, ChevronRight, Printer, Receipt,
-  Store, Bike, UtensilsCrossed, Calendar, Ban, AlertTriangle,
+  Store, Bike, UtensilsCrossed, Calendar, Ban, AlertTriangle, ChevronDown, Undo2,
 } from 'lucide-react'
 import { useRestaurantConfig } from '@/hooks/useRestaurantConfig'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useCashShift } from '@/hooks/useCashShift'
 import {
-  useSalesHistory, useSaleDetail, useVoidSale, useCancelledSales, SALES_PAGE_SIZE,
+  useSalesHistory, useSaleDetail, useVoidSale, useCancelledSales, useItemsQuitados, SALES_PAGE_SIZE,
   type SalesHistoryRow, type CancelledSaleRow,
 } from '@/hooks/useSalesHistory'
 import { printSaleTicket } from '@/lib/printer'
@@ -428,6 +428,11 @@ export function SalesHistoryPage() {
   // no bucketizable; se muestra aparte. No toca la query paginada.
   const { rows: cancelledRows } = useCancelledSales({ from, to, enabled: !!method })
 
+  // Sección "Ítems quitados de mesas": plegada por defecto (no empuja la lista de
+  // ventas), con el conteo del rango a la vista.
+  const { rows: quitados } = useItemsQuitados({ from, to })
+  const [verQuitados, setVerQuitados] = useState(false)
+
   // Cualquier cambio de filtro vuelve a la primera página.
   const resetPage = () => setPage(0)
 
@@ -559,6 +564,53 @@ export function SalesHistoryPage() {
                 </button>
               ))}
             </div>
+          </div>
+        )}
+
+        {quitados.length > 0 && (
+          <div data-testid="items-quitados-section" style={{ marginBottom: 16 }}>
+            <button
+              type="button"
+              data-testid="items-quitados-toggle"
+              onClick={() => setVerQuitados((v) => !v)}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+            >
+              <Undo2 size={14} color="#b45309" />
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: '#b45309', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                Ítems quitados de mesas ({quitados.length})
+              </span>
+              <ChevronDown size={14} color="#b45309" style={{ transform: verQuitados ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
+            </button>
+            {verQuitados && (
+              <div style={{ background: '#fff', border: '1px solid #fde68a', borderRadius: 12, overflow: 'hidden' }}>
+                {quitados.map((b) => (
+                  <div
+                    key={b.id}
+                    data-testid="item-quitado-row"
+                    style={{ display: 'grid', gridTemplateColumns: '120px 1fr 110px 110px', gap: 12, alignItems: 'center', padding: '11px 16px', borderBottom: '1px solid #fffbeb' }}
+                  >
+                    <span style={{ fontSize: 12.5, color: '#0f172a', fontFamily: 'monospace' }}>{formatDateTime(b.created_at)}</span>
+                    <span style={{ minWidth: 0 }}>
+                      <span style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {b.qty}× {b.producto}{b.tables?.name ? ` · ${b.tables.name}` : ''}
+                      </span>
+                      <span data-testid="item-quitado-motivo" style={{ display: 'block', fontSize: 12, color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {b.profiles?.full_name ?? '—'} · {b.motivo}
+                      </span>
+                    </span>
+                    <span
+                      data-testid="item-quitado-destino"
+                      style={{ justifySelf: 'start', fontSize: 11.5, fontWeight: 700, borderRadius: 6, padding: '3px 8px', ...(b.preparado
+                        ? { background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca' }
+                        : { background: '#ecfdf5', color: '#065f46', border: '1px solid #a7f3d0' }) }}
+                    >
+                      {b.preparado ? 'Merma' : 'Volvió al stock'}
+                    </span>
+                    <span style={{ textAlign: 'right', fontSize: 13, fontWeight: 700, color: '#0f172a', fontFamily: 'monospace' }}>{formatCOP(Number(b.monto))}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

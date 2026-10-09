@@ -380,6 +380,75 @@ export type Database = {
           },
         ]
       }
+      order_item_bajas: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          extras: Json
+          id: string
+          monto: number
+          motivo: string
+          order_id: string
+          order_item_id: string
+          preparado: boolean
+          product_id: string | null
+          producto: string
+          qty: number
+          restaurant_id: string
+          table_id: string | null
+          unit_price: number
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          extras?: Json
+          id: string
+          monto: number
+          motivo: string
+          order_id: string
+          order_item_id: string
+          preparado: boolean
+          product_id?: string | null
+          producto: string
+          qty: number
+          restaurant_id: string
+          table_id?: string | null
+          unit_price: number
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          extras?: Json
+          id?: string
+          monto?: number
+          motivo?: string
+          order_id?: string
+          order_item_id?: string
+          preparado?: boolean
+          product_id?: string | null
+          producto?: string
+          qty?: number
+          restaurant_id?: string
+          table_id?: string | null
+          unit_price?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "order_item_bajas_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "order_item_bajas_table_id_fkey"
+            columns: ["table_id"]
+            isOneToOne: false
+            referencedRelation: "tables"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       order_item_extras: {
         Row: {
           created_at: string
@@ -481,6 +550,9 @@ export type Database = {
           cancel_reason: string | null
           cancelled_at: string | null
           cancelled_by: string | null
+          close_id: string | null
+          cobrada_at: string | null
+          cobrada_por: string | null
           courier_id: string | null
           created_at: string
           created_by: string
@@ -510,6 +582,9 @@ export type Database = {
           cancel_reason?: string | null
           cancelled_at?: string | null
           cancelled_by?: string | null
+          close_id?: string | null
+          cobrada_at?: string | null
+          cobrada_por?: string | null
           courier_id?: string | null
           created_at?: string
           created_by: string
@@ -539,6 +614,9 @@ export type Database = {
           cancel_reason?: string | null
           cancelled_at?: string | null
           cancelled_by?: string | null
+          close_id?: string | null
+          cobrada_at?: string | null
+          cobrada_por?: string | null
           courier_id?: string | null
           created_at?: string
           created_by?: string
@@ -1230,6 +1308,8 @@ export type Database = {
       }
       tables: {
         Row: {
+          archived_at: string | null
+          archived_by: string | null
           capacity: number | null
           created_at: string
           id: string
@@ -1240,6 +1320,8 @@ export type Database = {
           zone: string | null
         }
         Insert: {
+          archived_at?: string | null
+          archived_by?: string | null
           capacity?: number | null
           created_at?: string
           id?: string
@@ -1250,6 +1332,8 @@ export type Database = {
           zone?: string | null
         }
         Update: {
+          archived_at?: string | null
+          archived_by?: string | null
           capacity?: number | null
           created_at?: string
           id?: string
@@ -1410,8 +1494,31 @@ export type Database = {
         Args: { p_product_id: string; p_qty: number; p_reason: string }
         Returns: undefined
       }
+      cerrar_mesa_sin_consumo: {
+        Args: { p_order_id: string }
+        Returns: Json
+      }
       close_cash_shift: {
         Args: { p_comentario?: string | null; p_declarado: Json; p_shift_id: string }
+        Returns: Json
+      }
+      close_table_sale: {
+        Args: {
+          p_close_id: string
+          p_descuento?: Json | null
+          p_fiado?: Json | null
+          p_order_id: string
+          p_payments?: Json
+          p_total_esperado: number
+        }
+        Returns: Json
+      }
+      eliminar_mesa: {
+        Args: { p_table_id: string }
+        Returns: Json
+      }
+      quitar_item_mesa: {
+        Args: { p_baja_id: string; p_item_id: string; p_motivo: string; p_preparado?: boolean }
         Returns: Json
       }
       get_my_organization_id: { Args: never; Returns: string }

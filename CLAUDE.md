@@ -278,7 +278,8 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    esquema **sin que `tsc` lo note** — es exactamente el proxy que R4 prohíbe confundir con
    la cosa real.
 
-4. **Tabla de columnas de `src/lib/sentry.test.ts` vs el esquema real — 74 entradas.**
+4. **Tabla de columnas de `src/lib/sentry.test.ts` vs el esquema real** (88 entradas al
+   2026-10-09; para contarlas: `grep -c "{ tabla: '" src/lib/sentry.test.ts`).
    Agregar una columna al esquema obliga a agregarla ahí, en la misma sesión. Si no, el
    allowlist igual la redacta (ese es el punto de invertir el filtro) pero **se pierde la
    verificación**.

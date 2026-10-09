@@ -58,7 +58,7 @@ Una página por módulo en `src/pages/`, hooks de datos en `src/hooks/`, spec E2
 | **Inventario** | stock por sede, movimientos, mínimo, descuento por receta al vender, stock negativo permitido | `inventario` |
 | **Compras / proveedores** | compras que alimentan inventario y no tocan caja | `compras` |
 | **Fiado** | clientes con deuda, abonos, historial | `fiado` |
-| **Historial de ventas** | ventas numeradas por sede, reimpresión, anulación con permiso | `ventas-historial`, `historiales`, `anular-venta`, `numeracion-fallo` |
+| **Historial de ventas** | ventas numeradas por sede, reimpresión, anulación con permiso | `ventas-historial`, `historiales`, `anular-venta`, `mesas-frontend` |
 | **Historial de turnos y gastos** | consulta de cierres anteriores y de movimientos | `historiales` |
 | **Reportes** | Financiero (por canal y método) y Stock (unidades, top productos, por categoría) | `reportes` |
 | **Configuración** | datos de la sede, usuarios (crear vía Edge Function, activar/desactivar), sedes, roles con matriz de permisos | `config`, `create-user`, `roles`, `rbac`, `rbac-escalada` |

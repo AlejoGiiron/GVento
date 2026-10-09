@@ -718,8 +718,8 @@ export function captureError(
 }
 
 /**
- * Reporta una condición anómala que no lanzó excepción — el caso de
- * `assignOrderNumber` (cobro de Mesas), que devuelve null y deja la venta sin número.
+ * Reporta una condición anómala que no lanzó excepción (una que el código detecta
+ * y sobrevive, pero que alguien tiene que ver).
  */
 export function captureIssue(
   mensaje: string,

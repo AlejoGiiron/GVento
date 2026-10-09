@@ -2,13 +2,13 @@ import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tansta
 import { toast } from 'react-hot-toast'
 import { useAuth } from '@/hooks/useAuth'
 import {
-  getSalesHistory, getSaleDetail, getCancelledSales, registerSaleVoid,
-  type SalesHistoryRow, type SaleDetailRow, type SaleVoidResult,
+  getSalesHistory, getSaleDetail, getCancelledSales, registerSaleVoid, getItemsQuitados,
+  type SalesHistoryRow, type SaleDetailRow, type SaleVoidResult, type ItemQuitadoRow,
 } from '@/lib/supabase-helpers'
 import type { Enums } from '@/types/database.types'
 import { mensajeDeError } from '@/lib/errorMessage'
 
-export type { SalesHistoryRow, SaleDetailRow }
+export type { SalesHistoryRow, SaleDetailRow, ItemQuitadoRow }
 
 // Fila de la sección "Anuladas": historial + quién anuló (para la auditoría).
 export type CancelledSaleRow = SalesHistoryRow & { canceller: { full_name: string | null } | null }
@@ -79,6 +79,27 @@ export function useSalesHistory({ from, to, method, search, page }: SalesHistory
     error: query.error,
     refetch: query.refetch,
   }
+}
+
+/**
+ * Ítems quitados de las mesas en el rango (quitar_item_mesa): quién, cuándo, el
+ * motivo y si fue merma o volvió al inventario. No paginada (son pocos).
+ */
+export function useItemsQuitados({ from, to }: { from: string; to: string }) {
+  const { profile } = useAuth()
+  const restaurantId = profile?.restaurant_id ?? null
+  const query = useQuery({
+    queryKey: ['items_quitados', restaurantId, from, to],
+    queryFn: async () => {
+      const { data, error } = await getItemsQuitados(restaurantId!, dayStartISO(from), dayEndISO(to))
+      if (error) throw error
+      return (data ?? []) as unknown as ItemQuitadoRow[]
+    },
+    enabled: !!restaurantId && !!from && !!to,
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  })
+  return { rows: query.data ?? [], isLoading: query.isLoading }
 }
 
 /**

@@ -1,5 +1,4 @@
 import { supabase } from './supabase'
-import { captureIssue } from './sentry'
 import type { OrdenFresca } from './mesaFresca'
 import type { Enums, Json, Tables, TablesInsert, TablesUpdate } from '@/types/database.types'
 import { separarMovimientos } from '@/lib/shiftCalc'
@@ -280,17 +279,16 @@ export const deleteProductImage = async (imageUrl: string): Promise<void> => {
 
 // --- Tables ---
 
+// Las mesas ARCHIVADAS (eliminar_mesa con ventas, mesas-servidor.sql) no se operan:
+// salen del mapa y de la configuración. Los reportes las siguen nombrando por su join.
 export const getTables = (restaurantId: string) =>
-  supabase.from('tables').select('*').eq('restaurant_id', restaurantId).order('name')
+  supabase.from('tables').select('*').eq('restaurant_id', restaurantId).is('archived_at', null).order('name')
 
 export const createTable = (table: TablesInsert<'tables'>) =>
   supabase.from('tables').insert(table).select().single()
 
 export const updateTable = (tableId: string, data: TablesUpdate<'tables'>) =>
   supabase.from('tables').update(data).eq('id', tableId).select().single()
-
-export const deleteTable = (tableId: string) =>
-  supabase.from('tables').delete().eq('id', tableId)
 
 export const updateTableStatus = (
   tableId: string,
@@ -426,14 +424,6 @@ export const getOrdenFresca = async (orderId: string): Promise<OrdenFresca> => {
 export const updateOrderStatus = (orderId: string, status: Tables<'orders'>['status']) =>
   supabase.from('orders').update({ status }).eq('id', orderId).select().single()
 
-export const updateOrderTotal = (orderId: string, total: number) =>
-  supabase.from('orders').update({ total }).eq('id', orderId)
-
-// Aplica un descuento/vale a una orden. IDEMPOTENTE: el caller pasa `total` ya
-// recalculado desde el SUBTOTAL INVARIANTE (order.total + order.discount_amount),
-// no desde el total crudo → reintentar no doble-descuenta. Persiste el descuento
-// REAL (monto + tipo + kind + razón). Escribir ANTES de registerSalePayment para
-// que la RPC valide Σ pagos contra el total ya descontado.
 // Total REGALADO en vales en un rango (por sede). Suma discount_amount de las
 // órdenes con discount_kind='vale' y created_at en [fromISO, toISO]. RLS ya
 // limita a la sede; se filtra por restaurant_id de todas formas. Para el KPI
@@ -452,169 +442,14 @@ export const getVouchersTotal = async (
   return (data ?? []).reduce((s, o) => s + (o.discount_amount ?? 0), 0)
 }
 
-export const applyOrderDiscount = (
-  orderId: string,
-  data: Pick<
-    TablesUpdate<'orders'>,
-    'total' | 'discount_amount' | 'discount_type' | 'discount_kind' | 'discount_reason'
-  >,
-) => supabase.from('orders').update(data).eq('id', orderId).select().single()
-
 // --- Numeración secuencial de ventas (por sede) ---
 
-// Devuelve el siguiente número correlativo de la sede (incremento atómico en
-// la BD). Solo debe llamarse para una venta YA cobrada.
-export const nextOrderNumber = (restaurantId: string) =>
-  supabase.rpc('next_order_number', { p_restaurant_id: restaurantId })
-
-// Graba el número correlativo en la orden ya cobrada.
-export const setOrderNumber = (orderId: string, orderNumber: number) =>
-  supabase.from('orders').update({ order_number: orderNumber }).eq('id', orderId)
-
-/**
- * ─────────────────────────────────────────────────────────────────────────────
- * ARREGLO DE FONDO PENDIENTE (opción C): asignar el correlativo DENTRO de
- * `register_sale_payment`, no acá.
- *
- * 📌 HECHO PARA EL POS (supabase/pos-sale-lotes.sql): `register_pos_sale` numera
- * en la misma transacción que el cobro, así que el POS ya no usa esto. Lo que
- * sigue vale para el ÚNICO llamador que queda: el cobro de MESAS (TablesPage).
- *
- * Lo de abajo (reintento del UPDATE + aviso al cajero) reduce la ventana y la
- * hace visible, pero NO la cierra: entre que la RPC de cobro hace commit y que
- * el navegador graba el número hay un hueco donde se puede cerrar la pestaña,
- * morir la red o cortarse la luz — y la venta queda cobrada sin número.
- * `register_sale_payment` ya es una transacción SECURITY DEFINER: asignar el
- * número ahí lo vuelve atómico con el pago y elimina la ventana en vez de
- * reportarla.
- *
- * 🔴 `store_sequences` es una TABLA, no una sequence de Postgres — NO migrarla
- *    a una sequence real "para optimizar". Esa diferencia es la que hace que la
- *    opción C sea limpia: al ser una tabla, el incremento del contador vive
- *    dentro de la transacción, así que un ROLLBACK del cobro devuelve también
- *    el número y NO deja hueco. Las sequences de Postgres son deliberadamente
- *    NO transaccionales (`nextval` no se revierte en un rollback, justamente
- *    para no serializar a los escritores): con una sequence real, cada cobro
- *    fallido quemaría un número para siempre. La contención extra de la fila no
- *    es problema a escala de un restaurante.
- *
- * Falta cubrir los dos caminos que NO pasan por `register_sale_payment`:
- * el fiado (no hay pago) y la venta gratis por vale del 100% (total 0).
- * ─────────────────────────────────────────────────────────────────────────────
- */
-export interface AssignOrderNumberResult {
-  /** Número asignado, o null si no se pudo. */
-  orderNumber: number | null
-  /**
-   * Número que la secuencia YA entregó pero que no se pudo grabar en la orden.
-   *
-   * Es la pieza que hace barato el reintento manual: si viene, hay que
-   * reintentar con ESTE número (`setOrderNumber` es idempotente) en vez de
-   * pedir otro. Sin esto, cada reintento llamaría de nuevo a
-   * `next_order_number` —que NO es idempotente— y quemaría un número más,
-   * agrandando el hueco que justamente estamos tratando de cerrar.
-   */
-  numeroReservado: number | null
-}
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-
-/** Backoff del reintento del UPDATE: 3 intentos en total (~0,8 s peor caso). */
-const BACKOFF_UPDATE_MS = [200, 600]
-
-/**
- * Graba el correlativo REINTENTANDO.
- *
- * ⚠️ Se reintenta SOLO este paso, nunca `next_order_number`. La asimetría es
- * la que decide el diseño:
- *   · `next_order_number` NO es idempotente — cada llamada incrementa el
- *     contador de la sede, así que reintentarla genera huecos permanentes.
- *   · `setOrderNumber` SÍ lo es — mismo número, misma fila: reintentar sale
- *     gratis y no tiene efecto acumulativo.
- * Cubre el caso dominante (un hipo de red en el UPDATE) que además es el modo
- * de fallo PEOR, porque es el único que quema un número.
- */
-const setOrderNumberConReintento = async (
-  orderId: string,
-  orderNumber: number,
-): Promise<{ ok: boolean; error: unknown; intentos: number }> => {
-  let ultimoError: unknown = null
-  for (let i = 0; i <= BACKOFF_UPDATE_MS.length; i++) {
-    const { error } = await setOrderNumber(orderId, orderNumber)
-    if (!error) return { ok: true, error: null, intentos: i + 1 }
-    ultimoError = error
-    if (i < BACKOFF_UPDATE_MS.length) await sleep(BACKOFF_UPDATE_MS[i])
-  }
-  return { ok: false, error: ultimoError, intentos: BACKOFF_UPDATE_MS.length + 1 }
-}
-
-// Asigna el número correlativo a una venta completada: pide el siguiente número
-// a la sede y lo graba en la orden. NO tumba el cobro si falla (la venta ya
-// quedó registrada con su pago), pero SÍ lo reporta y deja al llamante la
-// posibilidad de reintentar.
-export const assignOrderNumber = async (
-  orderId: string,
-  restaurantId: string,
-): Promise<AssignOrderNumberResult> => {
-  // Una venta sin número no aparece en el Historial (ordena por número), no se
-  // puede reimprimir su ticket, y close_cash_shift cuenta las ventas gratis
-  // por `order_number not null`. Devolver null en silencio dejaba un cobro real
-  // con el registro incompleto y CERO señal de que pasó.
-  const { data, error } = await nextOrderNumber(restaurantId)
-  if (error || typeof data !== 'number') {
-    captureIssue('Venta cobrada sin número: falló next_order_number', 'numeracion', {
-      orderId,
-      restaurantId,
-      error,
-      tipoDeDato: typeof data,
-    })
-    // Sin número reservado: la secuencia no llegó a entregar nada, así que un
-    // reintento puede pedirlo de nuevo sin quemar de más.
-    return { orderNumber: null, numeroReservado: null }
-  }
-
-  const res = await setOrderNumberConReintento(orderId, data)
-  if (!res.ok) {
-    // Peor caso: el contador de la sede YA avanzó pero la orden no lo guardó →
-    // hueco permanente en la numeración además de la venta sin número.
-    captureIssue('Venta cobrada sin número: falló el UPDATE del correlativo', 'numeracion', {
-      orderId,
-      restaurantId,
-      numeroPerdido: data,
-      error: res.error,
-      intentos: res.intentos,
-    })
-    return { orderNumber: null, numeroReservado: data }
-  }
-  return { orderNumber: data, numeroReservado: null }
-}
-
-/**
- * Reintento a pedido del cajero desde la pantalla de éxito.
- *
- * Reusa el número ya reservado si lo hay (no quema uno nuevo); si la secuencia
- * nunca llegó a entregar, hace el flujo completo.
- */
-export const retryOrderNumber = async (
-  orderId: string,
-  restaurantId: string,
-  numeroReservado: number | null,
-): Promise<AssignOrderNumberResult> => {
-  if (numeroReservado === null) return assignOrderNumber(orderId, restaurantId)
-
-  const res = await setOrderNumberConReintento(orderId, numeroReservado)
-  if (!res.ok) {
-    captureIssue('Reintento manual del correlativo falló', 'numeracion', {
-      orderId,
-      restaurantId,
-      numeroPerdido: numeroReservado,
-      error: res.error,
-      intentos: res.intentos,
-    })
-    return { orderNumber: null, numeroReservado }
-  }
-  return { orderNumber: numeroReservado, numeroReservado: null }
-}
+// El número lo asigna el SERVIDOR en la misma transacción que el cobro:
+// register_pos_sale (POS, pos-sale-lotes.sql) y close_table_sale (Mesas,
+// mesas-servidor.sql). Acá vivían assignOrderNumber / retryOrderNumber, que lo
+// pedían y grababan desde el navegador DESPUÉS de cobrar: un corte en el medio
+// dejaba la venta cobrada sin número. Con los dos cobros en el servidor esa
+// ventana no existe, y se borraron para que nadie vuelva a numerar desde acá.
 
 // --- Historial de ventas (ventas completadas, con número) ---
 
@@ -740,6 +575,31 @@ export const getCancelledSales = (restaurantId: string, from?: string, to?: stri
   return q.order('order_number', { ascending: false })
 }
 
+// --- Ítems quitados de mesas (order_item_bajas, mesas-servidor.sql) ---
+
+export interface ItemQuitadoRow {
+  id: string
+  created_at: string
+  producto: string
+  qty: number
+  monto: number
+  preparado: boolean
+  motivo: string
+  tables: { name: string } | null
+  profiles: { full_name: string | null } | null
+}
+
+// Lo escribe SOLO quitar_item_mesa (la tabla no admite escritura directa); RLS
+// limita la lectura a la sede activa. Por fecha de la baja, no de la venta.
+export const getItemsQuitados = (restaurantId: string, from: string, to: string) =>
+  supabase
+    .from('order_item_bajas')
+    .select('id, created_at, producto, qty, monto, preparado, motivo, tables(name), profiles!order_item_bajas_created_by_fkey(full_name)')
+    .eq('restaurant_id', restaurantId)
+    .gte('created_at', from)
+    .lte('created_at', to)
+    .order('created_at', { ascending: false })
+
 // --- Anulación de venta (RPC atómica register_sale_void) ---
 
 export interface SaleVoidResult {
@@ -762,9 +622,6 @@ export const addOrderItems = (items: TablesInsert<'order_items'>[]) =>
 export const updateOrderItem = (itemId: string, data: TablesUpdate<'order_items'>) =>
   supabase.from('order_items').update(data).eq('id', itemId).select().single()
 
-export const removeOrderItem = (itemId: string) =>
-  supabase.from('order_items').delete().eq('id', itemId)
-
 // --- Payments ---
 
 export const createPayment = (payment: TablesInsert<'payments'>) =>
@@ -773,16 +630,6 @@ export const createPayment = (payment: TablesInsert<'payments'>) =>
 // Una parte de un pago (mixto o simple): método del enum + monto imputado.
 // El vuelto NO se persiste: la fila de efectivo va por el monto imputado.
 export type SalePaymentPart = { method: Enums<'payment_method'>; amount: number }
-
-// Registra atómicamente N pagos de una venta de contado (pago mixto). La RPC
-// SECURITY DEFINER valida sede, que sea venta de contado (no fiado), que no
-// tenga pagos previos y que Σ amounts = total de la orden (rechaza si no cuadra).
-// NO crea cash_movement: el efectivo se deriva de payments en el cuadre de caja.
-export const registerSalePayment = (orderId: string, parts: SalePaymentPart[]) =>
-  supabase.rpc('register_sale_payment', {
-    p_order_id: orderId,
-    p_payments: parts as unknown as Json,
-  })
 
 export const getOrderPayments = (orderId: string) =>
   supabase.from('payments').select('*').eq('order_id', orderId)
@@ -1323,21 +1170,6 @@ export const upsertCustomer = (data: TablesInsert<'customers'>) =>
 // cliente para no perder la trazabilidad de la deuda. Se desactiva.
 export const deleteCustomer = (customerId: string) =>
   supabase.from('customers').update({ is_active: false }).eq('id', customerId)
-
-// Marca una orden EXISTENTE como venta a fiado (usado en el cobro de mesa, donde
-// la orden ya existe con sus ítems y el stock ya descontado). El POS no lo usa:
-// crea la orden directamente con estos campos.
-export const setOrderFiado = (
-  orderId: string,
-  customerId: string,
-  customerName: string | null,
-) =>
-  supabase
-    .from('orders')
-    .update({ payment_status: 'pending', customer_id: customerId, customer_name: customerName })
-    .eq('id', orderId)
-    .select()
-    .single()
 
 // --- Cuentas por cobrar (deudas a fiado) ---
 

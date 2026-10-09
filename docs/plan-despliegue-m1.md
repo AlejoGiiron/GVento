@@ -1359,15 +1359,65 @@ devolverían `register_sale_void` a la versión sin el camino compartido, en sil
 
 ---
 
-## Pasos 10 y 11 — Mesas (ESQUEMA: se completa al construir cada uno)
+## Paso 10 — frontend de Mesas
 
-Mismas reglas: SQL antes del frontend, cada SQL compatible con el frontend de producción,
-reversa con el mismo método. Los md5, verificaciones y pruebas se escriben cuando el paso esté
-construido y probado en Docker.
+- **Depende de:** Paso 9 aplicado y verificado. **El orden importa:** este frontend llama a
+  `close_table_sale`, `quitar_item_mesa`, `cerrar_mesa_sin_consumo` y `eliminar_mesa`; sin el
+  Paso 9, cobrar una mesa falla ("function does not exist") y la mesa queda abierta.
+- **Qué lleva:** `feat/mesas-servidor` → `develop`, por **fast-forward** (la rama ya contiene A):
+  ```bash
+  git fetch origin
+  git checkout develop
+  git merge-base --is-ancestor develop feat/mesas-servidor && echo FF   # tiene que decir FF; si no, avísame
+  git merge --ff-only feat/mesas-servidor
+  ```
+- **Lo que cambia en pantalla:**
+  - **Cobrar una mesa:** el mismo modal, pero todo va en una sola llamada al servidor. Si la mesa
+    cambió desde que se abrió el modal: "No se cobró: el total de la mesa (…) no coincide con el de
+    la pantalla (…)". Si OTRO equipo ya la cobró: *"Esta mesa ya la cobró <usuario> a las <hora>
+    con <método>."*, y no se registra un cobro nuevo. Si se pierde la respuesta y el cajero vuelve a
+    tocar "Confirmar cobro": recibe su venta y el aviso "No se cobró dos veces". Ya no existe el
+    aviso "Venta registrada — sin número asignado": el número va en la misma transacción.
+  - **Quitar un ítem:** la X pide motivo y "¿Se alcanzó a preparar?" (Sí = merma, el stock no
+    vuelve; No = vuelve al inventario). Exige `pos.anular` en **todos** los ítems guardados (antes
+    los no enviados a cocina se borraban sin preguntar): lo que todavía no se agregó se corrige en
+    el carrito del selector. Sin el permiso, la X sale deshabilitada.
+  - **Cerrar mesa sin consumo:** igual que antes, en una llamada.
+  - **Eliminar mesa** (Configurar): pide confirmación; si la mesa vendió alguna vez se **archiva**
+    (sale del mapa; los reportes la siguen nombrando). Solo con `config.acceder`: el mozo ve
+    "Configurar" pero no "Eliminar mesa".
+  - **Historial:** la sección plegable "Ítems quitados de mesas (N)": quién, cuándo, el motivo y si
+    fue merma o volvió al stock. **Inventario:** el tipo "Merma" y su filtro.
+- **Pruebas:** `tests/mesas-frontend.spec.ts` (escritorio: lo que hace la pantalla contra lo que
+  quedó en la base, incluido que el cobro sea UNA llamada y ningún PATCH directo) y
+  `tests/mesas-servidor.spec.ts` (el SQL del 9). `tests/numeracion-fallo.spec.ts` se borró: probaba
+  el aviso "sin número" de Mesas, que ya no puede ocurrir.
+
+**10.1 — Release.** Título: `release: mesas en el servidor (cobro, quitar ítem, cerrar, archivar)`.
+
+**10.2 — Verificación** con `owner.test` en LAB (producción): `/version.json` nuevo; abrir una mesa,
+agregar dos productos, quitar uno con "No" (el stock vuelve) y cobrar en efectivo: "Venta #N".
+Después, en el SQL Editor:
+```sql
+select order_number, status, cobrada_at is not null as con_hora, close_id is not null as con_clave,
+       (select count(*) from public.payments p where p.order_id = o.id) as pagos
+  from public.orders o
+ where o.restaurant_id in (select id from public.restaurants
+                            where organization_id = 'f4fa692d-6cf3-43fb-a17f-18b8b163c918')
+   and o.type = 'dine_in' and o.cobrada_at is not null
+ order by o.cobrada_at desc limit 3;
+```
+Esperado: la mesa recién cobrada con `delivered · t · t · 1`.
+
+**10.3 — Reversa:** rollback del frontend (vuelve al Paso 8). El SQL del 9 se queda: el frontend
+del Paso 8 funciona con él.
+
+---
+
+## Paso 11 — Mesas, fase 2 (ESQUEMA: se completa al construirlo)
 
 | paso | qué | tipo | depende de |
 |---|---|---|---|
-| 10 | **Frontend de Mesas:** cobrar con `close_table_sale` (y el aviso *"Esta mesa ya la cobró…"*); quitar ítem con motivo y "¿Se alcanzó a preparar?"; cerrar sin consumo; archivar; "Ítems quitados de mesas" en Historial. ("Merma" en Inventario ya está en la rama desde el 9 —contrato de 3 lados con el CHECK, R1 #10—, pero llega a producción con este frontend, que es el primero que genera mermas.) | frontend | 9 |
 | 11 | **Fase 2:** sin DELETE directo en `order_items`; las columnas de cobro de `orders` fuera del UPDATE directo (allowlist de columnas); borrado de mesas solo por la función; DEUDAS → *"Fiado en MESA"*. | SQL | 10 en todos los equipos (`app_versiones`) |
 
 ## Calendario de releases (actualizado el 2026-10-13)
@@ -1405,3 +1455,4 @@ Los martes G-10 y Salchimelo no abren: los pasos con SQL van ese día.
 | 7 | SQL de A (cobrar por permiso) | `permisos-cobro.sql` (`55be33e4…`) + `seed-system-roles.sql` (`83219f0e…`), con pre-flight 1, 3 y 4 justo antes | — | `permisos-cobro-revertir.sql` (`e5ac822d…`) |
 | 8 | frontend de A | — | `feat/a-permisos` | rollback (el SQL del 7 se queda) |
 | 9 | SQL de Mesas en el servidor | `mesas-servidor.sql` (`a4ac0bef…`), con pre-flight 3, 4 y 5 justo antes | — | `mesas-servidor-revertir.sql` (`bb6a53c2…`), solo antes del 10 |
+| 10 | frontend de Mesas | — | `feat/mesas-servidor` | rollback (el SQL del 9 se queda) |
