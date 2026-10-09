@@ -1223,7 +1223,7 @@ devolverían la función que redefinen a la versión por rol viejo, en silencio 
   git merge-base --is-ancestor develop feat/a-permisos && echo FF   # tiene que decir FF
   git merge --ff-only feat/a-permisos
   ```
-  **22 archivos** sobre `fab23b0` (6 nuevos, 16 modificados): el SQL del Paso 7 (ya aplicado),
+  **25 archivos** sobre `fab23b0` (6 nuevos, 19 modificados): el SQL del Paso 7 (ya aplicado),
   el catálogo (`permissions.ts` + `seed-system-roles.sql`), `ProtectedRoute`, `MobileShell`,
   `posMovil.ts`, `rolLegacy.ts`, `POSPage`, `TablesPage`, sus pruebas, `preparar-local.mjs`,
   `CLAUDE.md`, `DEUDAS.md`, el hook de SQL y este plan.
@@ -1236,6 +1236,9 @@ devolverían la función que redefinen a la versión por rol viejo, en silencio 
     vender" y el botón a la versión completa.
   - **Celular, redirección automática:** dueño, admin y cajero **con** `pos.vender`. El mozo no
     (hasta M2).
+  - **`/m` sin red al cargar el usuario:** "No se pudo cargar tu usuario. Revisa el wifi." con
+    **Reintentar** (antes: "Cargando…" ~35 s y después un "no puedes vender" falso).
+  - **Fiado, buscar cliente:** un nombre con números ya no busca por teléfono.
 - **Pruebas:** `tests/permisos-cobro.spec.ts` (escritorio) y `tests/m-permisos.spec.ts` (Android e
   iPhone) comparan, rol por rol (dueño, cajero, mozo y dos roles sin permisos de cobro), lo que se
   ve con lo que el servidor acepta, y "Versión completa" para todos.
