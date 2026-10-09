@@ -37,7 +37,19 @@ export function useUsers() {
       if (error) throw error
       return updated
     },
-    onSuccess: () => { invalidate(); toast.success('Usuario actualizado') },
+    onSuccess: (updated) => {
+      // La fila se actualiza con lo que devolvió la BASE, y recién después se recarga
+      // la lista. Sin esto, el select (controlado por user.role_id) mostraba el valor
+      // ANTERIOR hasta que terminaba la recarga, y un segundo cambio hacia ese valor
+      // no disparaba nada: se perdía sin aviso.
+      if (updated) {
+        queryClient.setQueryData<UserRow[]>(['restaurant_users', restaurantId], (prev) =>
+          prev?.map((u) => (u.id === updated.id ? { ...u, ...updated } : u)),
+        )
+      }
+      invalidate()
+      toast.success('Usuario actualizado')
+    },
     onError: () => toast.error('Error al actualizar el usuario'),
   })
 

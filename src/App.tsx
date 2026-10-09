@@ -23,6 +23,9 @@ import { SalesHistoryPage } from '@/pages/SalesHistoryPage'
 import { ShiftHistoryPage } from '@/pages/ShiftHistoryPage'
 import { ExpensesHistoryPage } from '@/pages/ExpensesHistoryPage'
 import { ConfigPage } from '@/pages/ConfigPage'
+import { MobileShell } from '@/components/movil/MobileShell'
+import { VenderMovil } from '@/pages/movil/VenderMovil'
+import { MisVentasMovil } from '@/pages/movil/MisVentasMovil'
 
 function App() {
   const [queryClient] = useState(
@@ -55,12 +58,22 @@ function App() {
         <VersionBanner />
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          {/* El mismo login DENTRO del alcance de la app instalada (/m): sin sesión en
+              /m, al cerrar sesión o si vence, se va acá y al entrar se vuelve a /m sin
+              salir del documento de /m (nunca aparece la barra del navegador). */}
+          <Route path="/m/login" element={<LoginPage />} />
 
           {/* Cocina KDS — acceso independiente por PIN, sin Supabase Auth */}
           <Route path="cocina" element={<KitchenPage />} />
 
           {/* Rutas protegidas — cualquier usuario autenticado */}
           <Route element={<ProtectedRoute />}>
+            {/* POS móvil: dentro de ProtectedRoute y FUERA de AppLayout (su propio
+                caparazón). En un celular, ProtectedRoute manda acá a quien cobra. */}
+            <Route path="m" element={<MobileShell />}>
+              <Route index element={<VenderMovil />} />
+              <Route path="ventas" element={<MisVentasMovil />} />
+            </Route>
             <Route element={<AppLayout />}>
               <Route index element={<Navigate to="/ventas" replace />} />
               <Route path="ventas" element={<POSPage />} />

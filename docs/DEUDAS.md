@@ -255,8 +255,34 @@ SECURITY DEFINER. Las policies y grants salen de `pg_policies` y
 | `products` | stock por `add_order_items_with_extras`, `adjust_stock`, `register_purchase`, anulación | `stock_qty` = 0/null al crear o al apagar el seguimiento (modal de producto) | INSERT · UPDATE · DELETE admin | dejar. `updateProductStock` no tiene llamadores, pero el modal escribe `stock_qty` y una restricción por columna lo rompería. |
 | `stock_movements`, `store_sequences`, `purchase_invoice_items` | solo RPC | — | **ninguna** ✅ | ya está bien: es el modelo a copiar. |
 | `cash_shifts` | `close_cash_shift` (U) | INSERT (abrir turno) | INSERT | UPDATE ya revocado en la fase 2 de D. |
+| `restaurants.config` | `update_restaurant_config` (fusiona clave por clave; `restaurant-config-rpc.sql`, rama `feat/m1-pos-movil`, 2026-10-04) | **ninguna** desde ese frontend (`updateRestaurant` ya no acepta `config` por tipo). El frontend anterior escribe el objeto ENTERO y puede pisar claves | UPDATE "admin actualiza" (rol viejo `admin`) y "editar sede con permiso" (`sedes.gestionar`), sobre toda la fila | **después de M1:** restringir el UPDATE directo a las columnas que la app escribe (nombre, dirección, teléfono, logo, `uses_kitchen`) y dejar `config` solo por la RPC. **¿Ya se pisó algo en prod? CERRADO, 2026-10-04: sin señales.** `config-pisado-senales.sql` (raíz) en prod: el único QR de Nequi configurado (G-10) sale "ok" (el archivo y la config coinciden). Resultado reportado: "sin señales". Las claves que no dejan rastro (PIN, estaciones, motivos, métodos) no se pueden medir con esa consulta. Queda abierto solo el endurecimiento (restringir el UPDATE directo), no un daño a reparar. |
 
 `anon` tiene grants I/U/D en todas (deuda aparte, más abajo); lo frena la RLS, no el grant.
+
+### Mesas: H2 y H3 van DESPUÉS de M1, con M2 (decidido 2026-10-04)
+
+Salió de `mesas-total-anomalias.sql` corrido en prod el 2026-10-04 (60 días, mesas cerradas):
+
+| organización | mesas | cuadran | total 0 sin pagos | total 0 con pagos | total < líneas | total > líneas | pagos ≠ total |
+|---|---|---|---|---|---|---|---|
+| G-10 | 383 | 381 | 4 | 0 | 2 | 0 | 0 |
+| Salchimelo | 1756 | 1748 | 48 | 2 | 5 | 1 | 2 |
+
+Los "total 0 sin pagos" son **cortesías y gastos internos, a propósito** (lo confirmó el dueño). No
+se tocan. Es la misma familia que *"Mesas abiertas de larga duración = FLUJO INTENCIONAL"* en
+CLAUDE.md.
+
+| caso | qué es | estado |
+|---|---|---|
+| Salchimelo #1878 | 6 tandas (20.000 + 5.000 + 4 × 4.000) y total = pagos = 24.000: el total escrito desde el cliente perdió tandas (**H1**) | lo cierra el paso 2 (`pos-sale-lotes.sql`: total desde las líneas, con la orden bloqueada) |
+| Salchimelo #2401 (03/10) | pago 62.000 a las 23:21, delivered 23:33, descuento fijo 62.000, total 0: el cobro reintentado puso un descuento por el total (**H2**). Además, 4 movimientos de stock de COCA COLA para 2 líneas. **Medido en prod el 2026-10-04 con `mesas-2401-stock.sql` (raíz):** las 4 son **dos causas juntas**. (1) **H3:** dos Coca Colas agregadas a las 22:12 y a las 22:13 y después quitadas, **sin devolver el stock**. (2) **Reenvío:** una tanda a las 22:14:09 y su copia a las 22:14:38 (29,5 s), de la que se cobró una sola | **H2** y **H3** → M2. El **reenvío** lo cierra la clave por tanda del paso 2 |
+| Salchimelo #1342 | dos tandas idénticas a 27 s, descuento fijo 34.000, sin pagos: cortesía con una **tanda duplicada** (reenvío), no H2 | la duplicación la cierra la clave por tanda del paso 2 |
+
+**Qué va con M2:**
+- **H2:** `close_table_sale`, el cobro de mesa en una transacción: descuento, pago, número, delivered y mesa libre. Reemplaza los pasos sueltos de `TablesPage`, donde el descuento se escribe ANTES del pago y un reintento a medias deja total 0 con la plata ya entrada.
+- **H3 (el 3.5 del plan):** una RPC para quitar un ítem que devuelva el stock (movimiento `return`) y recalcule el total. `handleRemoveItem` hoy borra la línea directo (ver la fila de `order_items` arriba).
+
+Para ver si siguen apareciendo, se re-corre el bloque 2 de `mesas-total-anomalias.sql`.
 
 ### 🔴 POS: si el cobro falla DESPUÉS de crear la orden, queda una orden huérfana con stock descontado (medido 2026-09-30)
 
@@ -685,6 +711,35 @@ Paso D (`close_cash_shift`):
 - El residuo de mesas era real pero de otra causa: limpiezas al final de un `describe.serial` y
   sin aserción. Ahora mesa fija por spec + `afterAll` con aserción (`tests/helpers/lab.ts`).
 
+### 🔴 Suite: el proceso de WebKit (`m-iphone`) a veces no termina al cerrarse → exit 1 con todo verde (medido 2026-10-04)
+
+**Síntoma:** al final de la corrida, `Error: worker-N process did not exit within 300000ms after
+stop, force-killed it` y `PLAYWRIGHT_EXIT=1`, con **todos los tests pasados** ("329 passed"). Tarda
+5 minutos más. Lo emite Playwright 1.60 desde el PR microsoft/playwright#40637: antes un proceso
+así quedaba colgado sin avisar (issue #39753, "Playwright randomly not exiting").
+
+**Medido (Windows, Playwright 1.60.0, WebKit 2287):**
+- **2 de 9** corridas del proyecto `m-iphone` completo, más 1 en la suite completa. Siempre al
+  detener el proceso de WebKit, después del último test.
+- **0 de 8** con `DEBUG=pw:browser*`: el registro cambia los tiempos y lo esconde.
+- **0 de 8** corriendo por mitades (`--grep reintento` y el resto). No se pudo atribuir a un test.
+- **`m-android` (Chromium), con el mismo spec, nunca.**
+
+`PWTEST_CHILD_PROCESS_TIMEOUT=60000` lo hace fallar en 1 minuto en vez de 5, pero no lo arregla.
+
+**Decidido (2026-10-04): (a) primero, (b) solo si sigue, (c) NO.** Un exit 1 es rojo, aunque
+diga "N passed".
+- **(a) HECHO:** Playwright fijo en **1.63.0** (`package.json` sin `^`; WebKit 2359, Chromium 1243).
+  **Medido: 0 de 10** corridas de `m-iphone` con cuelgue (`PLAYWRIGHT_EXIT=0` leído en el archivo
+  de cada una, 17 pasados en las 10). Con la 1.60 eran ~1 de cada 4. Diez limpias no prueban que
+  no vuelva (con 1 de 4, la chance de 10 limpias por azar es ~6%), pero alcanzan para no
+  construir (b) todavía.
+- **(b), SI VUELVE A APARECER:** `m-iphone` en un paso aparte que cuenta como verde **SOLO** si
+  0 tests fallaron, 0 sin correr, **y** el único error fuera de los tests es el cierre colgado,
+  identificado por su mensaje **exacto** (`worker-N process did not exit within Nms after stop,
+  force-killed it`). Cualquier otra cosa es rojo. Se documenta en CLAUDE.md (R9) y en
+  `tests/README.md` al construirlo, no antes.
+
 ### `anon` tiene privilegios de escritura en TODAS las tablas de `public` (default de Supabase) — medido, NO barrido (2026-09-30)
 
 **No se barre ahora, a propósito:** revocar en bloque puede romper lecturas públicas (tienda,
@@ -979,6 +1034,74 @@ catálogo es la promesa; el `can()` es la cosa real. Es R4 —verificar contra l
 contra el proxy— aplicada al RBAC: que la clave figure en `PERMISSION_GROUPS` es exactamente
 el tipo de proxy que dice OK sin que nada funcione.
 
+### Textos en voseo que quedan FUERA de `/m` y del login (anotado 2026-10-08)
+
+La regla: todo texto que ve el usuario va en español neutro con "tú"/"usted". El 2026-10-08
+se barrieron `/m`, el login y el aviso de instalación (y en B, la pantalla de fiado y dos
+mensajes de `register_pos_sale`). **Queda voseo en el escritorio** (Configuración, Reportes,
+cierre y apertura de turno, abonos en lote, Mesas, POS…) y en UN mensaje del servidor:
+`register_sale_payment` → "Abrí el turno antes de cobrar" (`supabase/cobro-turno.sql`; se
+cambia la próxima vez que una migración redefina esa función, no se redefine solo por esto).
+
+**Para listarlos:** `node scripts/buscar-voseo.mjs src` (o una carpeta). Busca por FORMA
+(terminaciones -á/-é/-í con o sin pronombre, -ás/-és/-ís, y el imperativo con pronombre que
+pierde la tilde: "Pedile"), con regex Unicode — `grep` en esta máquina no trata la tilde como
+letra y devuelve vacío. Revisar a mano: también matchea futuros ("desactivará") y palabras como "está".
+
+### 🔴 A (permisos de cobro): `profiles.role` y `profiles.role_id` pueden divergir (anotado 2026-10-07)
+
+**La clase.** Dos columnas deciden cosas distintas del mismo usuario y nada en el servidor las
+ata: `role` (el enum viejo) decide quién entra a `/m` y quién cobra (`get_my_role()` en
+`register_pos_sale` / `register_sale_payment`, `ROLES_QUE_COBRAN` en `src/lib/posMovil.ts`);
+`role_id` decide los permisos (`has_permission`: fiado, descuento, anular…). Si divergen, alguien
+**entra a `/m` sin fiado** (el servidor le rechaza la venta fiada) o **tiene fiado y no puede
+cobrar**. No hay error en ningún lado: es fallo silencioso.
+
+**Lo que ya cierra B (`feat/m1-fiado`):** la app escribe los dos en la misma llamada con
+`rolLegacyDeRol` (`src/lib/rolLegacy.ts`) — al crear (`create-user`) y al cambiar el rol en la
+lista de usuarios (antes este camino escribía solo `role_id`). Además, en B: la fila de la lista
+muestra lo que devolvió la base apenas se guarda (antes mostraba el rol anterior hasta la recarga
+y un segundo cambio se perdía sin aviso), y un rol personalizado da `'waiter'` — falla cerrado —
+en vez de `'cashier'` (se cambió el 2026-10-08 con 0 perfiles activos con rol personalizado en
+prod). Lo vigila `tests/usuarios-cambio-rol.spec.ts`.
+
+**Lo que queda abierto, para A:**
+- **La Edge Function `create-user` no compara `role` con `role_id`.** Recibe los dos del
+  navegador y acepta cualquier par. Requiere `usuarios.gestionar`, así que el que puede
+  desalinearlos es un admin llamándola directo, no un cajero.
+- **Un usuario creado desde el Dashboard de Supabase nace sin `role_id`.** `handle_new_user`
+  toma `role` de la metadata (`'waiter'` si no viene) y no asigna rol RBAC: el usuario no tiene
+  ningún permiso de los nuevos, aunque su `role` diga `cashier`.
+- **Cualquier escritor futuro de `profiles`** (un seed, un script, una RPC) que toque una sola
+  de las dos columnas. Es la forma de R1: el sincronizador es quien se acuerde.
+
+**✅ DECIDIDO (2026-10-08): SIN trigger. En A, `/m` y el cobro pasan a PERMISOS y
+`profiles.role` deja de decidir.**
+- Se descartó un trigger de `profiles` que derive `role` de `role_id`: **R6 — un trigger de
+  invariante VALIDA, no fuerza.** Derivar reescribe en silencio lo que mandó el llamante.
+- Tampoco se vigila la pareja: se **elimina la razón de vigilarla**. Quién entra a `/m` y quién
+  cobra pasa a `has_permission('pos.vender')` (POS y `/m`) / `has_permission('mesas.cobrar')`
+  (Mesas), en el servidor (`register_pos_sale`, `register_sale_payment`) y en el cliente
+  (`ROLES_QUE_COBRAN` / `puedeCobrar` en `src/lib/posMovil.ts`). Con eso los dos caminos de
+  arriba dejan de importar para cobrar, y la traducción por NOMBRE de rol (`rolLegacyDeRol`,
+  que hoy es una allowlist de los 4 roles de sistema) queda sin consumidores que decidan.
+- Hasta A, la coherencia la sostienen solo los dos caminos de la app; la consulta de abajo
+  detecta lo que entre por otro lado.
+
+**Para detectar casos hoy** (solo lectura, por organización — fijar el UUID):
+
+```sql
+select p.full_name, p.email, p.is_active, p.role::text as rol_viejo, r.name as rol_rbac,
+       (r.id is not null and r.organization_id = s.organization_id
+        and p.role::text = case when r.name in ('owner','admin') then 'admin'
+                                when r.name = 'mozo' then 'waiter' else 'cashier' end) as coherente
+  from public.profiles p
+  join public.restaurants s on s.id = p.restaurant_id
+  left join public.roles r on r.id = p.role_id
+ where s.organization_id = '<uuid de la organización>'
+ order by coherente, p.is_active desc, p.full_name;
+```
+
 
 - **Regenerar `database.types.ts` con `supabase gen types`** cuando se resuelva el acceso
   de management del CLI. Hoy la entrada de `register_sale_payment` (Functions) está agregada
@@ -1000,8 +1123,13 @@ el tipo de proxy que dice OK sin que nada funcione.
   las listas org-wide (asignar usuarios a sedes, conteo de usuarios por rol) solo ven
   usuarios de la sede activa. Con 1 sede coincide con toda la org; al haber multi-sede
   real hay que ampliar ese SELECT a nivel organización.
-- **Edge Function `create-user` valida enum `role === 'admin'`**: cambiar a
-  `has_permission(...)` cuando se elimine el enum `profiles.role`.
+- **Edge Function `create-user`: el GATE ya es por permiso** (corregido 2026-10-08; esta nota
+  decía que validaba `role === 'admin'`, y era falso al menos desde `bbf75ff`, 2026-07-31). Hoy
+  exige `has_permission('usuarios.gestionar')` con el cliente del llamante, y `is_active`. Lo que
+  sí sigue dependiendo del enum: **recibe `role` del navegador** y lo pasa en la metadata a
+  `handle_new_user` — es uno de los caminos de la entrada *"A (permisos de cobro): `profiles.role`
+  y `profiles.role_id` pueden divergir"*. Para reconfirmar:
+  `grep -n "has_permission\|includes(role)" supabase/functions/create-user/index.ts`.
 - **Política vieja `"restaurants: admin actualiza"` (por enum `get_my_role()`)**: debe
   quitarse al eliminar el enum `role` (queda redundante con `"restaurants: editar sede
   con permiso"`).

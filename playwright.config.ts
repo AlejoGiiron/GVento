@@ -66,6 +66,9 @@ if (!HOSTS_LOCALES.includes(supabaseHost)) {
 export const E2E_PORT = 5180
 const BASE_URL = `http://localhost:${E2E_PORT}`
 
+// Specs del POS móvil (tests/m-*.spec.ts); el separador puede ser / o \ (Windows).
+const MOVIL = /[\\/]m-[^\\/]*\.spec\.ts$/
+
 export default defineConfig({
   testDir: './tests',
   // Health check (defensa en profundidad): aborta si el servidor no es G-Vento.
@@ -87,8 +90,14 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
   },
+  // POS móvil (/m): sus specs (tests/m-*.spec.ts) corren en DOS emulaciones,
+  // iPhone (WebKit, el motor de Safari) y Android (Chromium). Es la red, no la
+  // prueba: Wake Lock, el teclado, la barra de inicio y "Agregar a inicio" se
+  // verifican en equipos reales (lista en docs/). El escritorio no los corre.
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] }, testIgnore: MOVIL },
+    { name: 'm-android', use: { ...devices['Pixel 7'] }, testMatch: MOVIL },
+    { name: 'm-iphone', use: { ...devices['iPhone 13'] }, testMatch: MOVIL },
   ],
   // SIEMPRE levanta el dev server de gvento en el puerto dedicado. strictPort
   // hace que falle ruidosamente si el puerto está ocupado, en vez de servir/

@@ -10,5 +10,5 @@
     "composite": true,
     "strict": true
   },
-  "include": ["vite.config.ts"]
+  "include": ["vite.config.ts", "src/lib/identidadRutas.ts"]
 }

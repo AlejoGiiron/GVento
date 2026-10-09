@@ -1,8 +1,11 @@
-import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect, useRef } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { ShoppingCart, LayoutGrid, BarChart3, User, Lock, Eye, EyeOff, Check, X, ChevronRight } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
+import './login.css'
+import { esRutaMovil } from '@/lib/posMovil'
+import { clasificarFalloLogin, conTiempoMaximo, MENSAJE_FALLO_LOGIN, TIEMPO_MAXIMO_LOGIN_MS, type FalloLogin } from '@/lib/falloLogin'
 
 function Spinner() {
   return (
@@ -22,27 +25,64 @@ const FEATURES = [
 export function LoginPage() {
   const { user, isLoading } = useAuth()
   const navigate = useNavigate()
+  // /m/login (la app instalada) vuelve a /m SIN recargar: sigue en el documento de /m.
+  // /login va a /ventas, y desde ahí un dueño o cajero en el celular sigue cayendo en /m.
+  const destino = esRutaMovil(useLocation().pathname) ? '/m' : '/ventas'
 
   const [email, setEmail]       = useState('')
   const [password, setPassword] = useState('')
   const [remember, setRemember] = useState(true)
   const [showPwd, setShowPwd]   = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [error, setError]       = useState(false)
+  // null = sin error. El TIPO decide el mensaje: solo 'credenciales' culpa a la clave.
+  const [error, setError]       = useState<FalloLogin | null>(null)
+  const entrarRef = useRef<HTMLButtonElement>(null)
+
+  // Celular: con el teclado abierto, "Ingresar" no puede quedar debajo. Al abrirse
+  // el teclado se achica el viewport VISIBLE (visualViewport); si el botón quedó
+  // fuera, se desplaza la página hasta él. Solo en anchos de celular (el mismo
+  // corte que login.css): en el escritorio la página no se desplaza.
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+    const asegurarBoton = () => {
+      if (!window.matchMedia('(max-width: 767px)').matches) return
+      const activo = document.activeElement
+      if (!(activo instanceof HTMLInputElement) || !activo.form) return
+      const boton = entrarRef.current
+      if (!boton) return
+      const r = boton.getBoundingClientRect()
+      if (r.bottom > vv.offsetTop + vv.height || r.top < vv.offsetTop) boton.scrollIntoView({ block: 'end' })
+    }
+    // focusin: el teclado tarda en abrirse; resize: cuando termina de abrirse.
+    const alEnfocar = () => window.setTimeout(asegurarBoton, 350)
+    vv.addEventListener('resize', asegurarBoton)
+    document.addEventListener('focusin', alEnfocar)
+    return () => {
+      vv.removeEventListener('resize', asegurarBoton)
+      document.removeEventListener('focusin', alEnfocar)
+    }
+  }, [])
 
   useEffect(() => {
-    if (!isLoading && user) navigate('/ventas', { replace: true })
-  }, [user, isLoading, navigate])
+    if (!isLoading && user) navigate(destino, { replace: true })
+  }, [user, isLoading, navigate, destino])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setError(false)
+    setError(null)
     setSubmitting(true)
 
-    const { error: authError } = await supabase.auth.signInWithPassword({ email, password })
+    let authError: unknown = null
+    try {
+      // Tope de 15 s: sin respuesta, "No hay conexión…" y el botón vuelve a quedar disponible.
+      authError = (await conTiempoMaximo(supabase.auth.signInWithPassword({ email, password }), TIEMPO_MAXIMO_LOGIN_MS)).error
+    } catch (err) {
+      authError = err   // un fetch que tiró, o TiempoAgotado: sin conexión
+    }
 
     if (authError) {
-      setError(true)
+      setError(clasificarFalloLogin(authError))
       setSubmitting(false)
       return
     }
@@ -52,19 +92,19 @@ export function LoginPage() {
         if (key.startsWith('sb-')) localStorage.removeItem(key)
       }
     }
-    // Éxito: onAuthStateChange actualiza el user → useEffect redirige a /ventas
+    // Éxito: onAuthStateChange actualiza el user → useEffect redirige al destino (/ventas o /m)
   }
 
   if (isLoading) return null
 
   return (
     <div
-      className="flex overflow-hidden"
+      className="login-raiz flex overflow-hidden"
       style={{ width: '100vw', height: '100vh', fontFamily: 'Inter, system-ui, sans-serif', background: '#fff', color: '#0f172a' }}
     >
       {/* PANEL IZQUIERDO — 40% slate-900 */}
       <div
-        className="flex flex-col"
+        className="login-marca flex flex-col"
         style={{
           flex: '0 0 40%',
           background: '#0f172a',
@@ -134,15 +174,24 @@ export function LoginPage() {
       </div>
 
       {/* PANEL DERECHO — 60% blanco */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '40px 48px', background: '#fff' }}>
+      <div className="login-panel" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '40px 48px', background: '#fff' }}>
         {/* Ayuda */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', fontSize: 12.5, color: '#64748b' }}>
+        <div className="login-ayuda" style={{ display: 'flex', justifyContent: 'flex-end', fontSize: 12.5, color: '#64748b' }}>
           ¿Necesitas ayuda?
           <span style={{ color: '#10b981', fontWeight: 600, marginLeft: 6 }}>Contactar soporte</span>
         </div>
 
         {/* Formulario centrado */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', maxWidth: 400, width: '100%', margin: '0 auto' }}>
+        <div className="login-form-caja" style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', maxWidth: 400, width: '100%', margin: '0 auto' }}>
+          {/* Solo en el celular (login.css): el panel de marca no entra en 360–430 px. */}
+          <div className="login-logo-movil" aria-hidden="true">
+            <div style={{
+              width: 40, height: 40, borderRadius: 10,
+              background: 'linear-gradient(135deg, #10b981, #059669)',
+              display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 800, fontSize: 18,
+            }}>G</div>
+            <div style={{ fontWeight: 700, fontSize: 18, color: '#0f172a', letterSpacing: -0.3 }}>G-Vento</div>
+          </div>
           <form onSubmit={handleSubmit}>
             {/* Encabezado */}
             <div>
@@ -159,7 +208,7 @@ export function LoginPage() {
 
             {/* Banner de error */}
             {error && (
-              <div style={{
+              <div className="login-error" role="alert" data-testid="login-error" data-tipo={error} style={{
                 marginTop: 22, padding: '11px 13px',
                 background: '#fef2f2', border: '1px solid #fecaca',
                 borderRadius: 9, display: 'flex', alignItems: 'flex-start', gap: 10,
@@ -168,18 +217,19 @@ export function LoginPage() {
                   <X size={15} strokeWidth={2.5} />
                 </div>
                 <div>
-                  <div style={{ fontSize: 12.5, fontWeight: 600, color: '#991b1b' }}>Credenciales incorrectas</div>
-                  <div style={{ fontSize: 11.5, color: '#b91c1c', marginTop: 2 }}>Verifica tu correo y contraseña e intenta de nuevo.</div>
+                  <div className="login-error-titulo" style={{ fontSize: 12.5, fontWeight: 600, color: '#991b1b' }}>{MENSAJE_FALLO_LOGIN[error].titulo}</div>
+                  <div className="login-error-detalle" style={{ fontSize: 11.5, color: '#b91c1c', marginTop: 2 }}>{MENSAJE_FALLO_LOGIN[error].detalle}</div>
                 </div>
               </div>
             )}
 
             {/* Correo */}
             <div style={{ marginTop: 24 }}>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
+              <label htmlFor="login-correo" style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
                 Correo electrónico
               </label>
               <div
+                className="login-campo"
                 style={{
                   display: 'flex', alignItems: 'center', gap: 8,
                   border: `1.5px solid ${error ? '#ef4444' : '#e5e7eb'}`,
@@ -190,12 +240,20 @@ export function LoginPage() {
               >
                 <User size={16} style={{ color: '#94a3b8', flexShrink: 0 }} />
                 <input
+                  id="login-correo"
+                  name="email"
+                  className="login-input"
                   type="email"
+                  inputMode="email"
                   value={email}
-                  onChange={e => { setEmail(e.target.value); setError(false) }}
+                  onChange={e => { setEmail(e.target.value); setError(null) }}
                   placeholder="tu@restaurante.com"
                   autoFocus
-                  autoComplete="email"
+                  // "username": así lo reconocen las contraseñas guardadas del iPhone y de Android.
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                   style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontSize: 14, color: '#0f172a' }}
                 />
               </div>
@@ -203,10 +261,11 @@ export function LoginPage() {
 
             {/* Contraseña */}
             <div style={{ marginTop: 16 }}>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
+              <label htmlFor="login-clave" style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
                 Contraseña
               </label>
               <div
+                className="login-campo"
                 style={{
                   display: 'flex', alignItems: 'center', gap: 8,
                   border: `1.5px solid ${error ? '#ef4444' : '#e5e7eb'}`,
@@ -215,15 +274,23 @@ export function LoginPage() {
               >
                 <Lock size={16} style={{ color: '#94a3b8', flexShrink: 0 }} />
                 <input
+                  id="login-clave"
+                  name="password"
+                  className="login-input"
                   type={showPwd ? 'text' : 'password'}
                   value={password}
-                  onChange={e => { setPassword(e.target.value); setError(false) }}
+                  onChange={e => { setPassword(e.target.value); setError(null) }}
                   placeholder="••••••••"
                   autoComplete="current-password"
                   style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontSize: 14, color: '#0f172a' }}
                 />
                 <button
                   type="button"
+                  className="login-ojo"
+                  data-testid="login-ver-clave"
+                  aria-label={showPwd ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                  aria-pressed={showPwd}
+                  aria-controls="login-clave"
                   onClick={() => setShowPwd(p => !p)}
                   style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#94a3b8', padding: 0, display: 'grid', placeItems: 'center' }}
                 >
@@ -233,7 +300,7 @@ export function LoginPage() {
             </div>
 
             {/* Recordarme */}
-            <label style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 18, cursor: 'pointer', fontSize: 13, color: '#334155', fontWeight: 500 }}>
+            <label className="login-recordar" style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 18, cursor: 'pointer', fontSize: 13, color: '#334155', fontWeight: 500 }}>
               <div
                 onClick={() => setRemember(r => !r)}
                 style={{
@@ -251,7 +318,10 @@ export function LoginPage() {
 
             {/* Botón enviar */}
             <button
+              ref={entrarRef}
               type="submit"
+              className="login-entrar"
+              data-testid="login-entrar"
               disabled={submitting || !email || !password}
               style={{
                 marginTop: 24, width: '100%', padding: '13px 14px',

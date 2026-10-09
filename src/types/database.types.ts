@@ -1436,6 +1436,10 @@ export type Database = {
         Args: { p_invoice: Json; p_items: Json }
         Returns: Json
       }
+      update_restaurant_config: {
+        Args: { p_cambios: Json }
+        Returns: Json
+      }
       register_pos_sale: {
         Args: { p_items: Json; p_order: Json; p_payments?: Json; p_sale_id: string }
         Returns: Json

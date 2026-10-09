@@ -1,6 +1,7 @@
 import { useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { nuevoUuid } from '@/lib/uuid'
+import { useAuth } from '@/hooks/useAuth'
 import type { Json } from '@/types/database.types'
 import type { OrderItemPayload } from '@/lib/supabase-helpers'
 
@@ -23,8 +24,12 @@ import type { OrderItemPayload } from '@/lib/supabase-helpers'
 let pendiente: { lote: string; huella: string } | null = null
 
 export function useAgregarTanda() {
+  const { user } = useAuth()
+  const usuario = user?.id ?? null
   const agregar = useCallback(async (orderId: string, items: OrderItemPayload[]): Promise<void> => {
-    const huella = JSON.stringify({ orderId, items })
+    // El usuario es parte de la huella (igual que en useSaleCheckout): otro usuario
+    // en la misma pestaña no reusa la tanda pendiente del anterior.
+    const huella = JSON.stringify({ usuario, orderId, items })
     if (pendiente?.huella !== huella) pendiente = { lote: nuevoUuid(), huella }
     const { error } = await supabase.rpc('add_order_items_with_extras', {
       p_order_id: orderId,
@@ -33,7 +38,7 @@ export function useAgregarTanda() {
     })
     if (error) throw error
     pendiente = null
-  }, [])
+  }, [usuario])
 
   return { agregar }
 }

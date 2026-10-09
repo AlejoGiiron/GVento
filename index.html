@@ -3,12 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover: el POS móvil (/m) usa env(safe-area-inset-*) para que nada quede bajo la barra de inicio del iPhone. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#0f172a" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <link rel="manifest" href="/manifest.json" />
+    <!-- Identidad instalable (manifest, ícono, nombre) SEGÚN LA RUTA: /m y /cocina
+         reciben su propio documento con su manifest escrito; el resto, ninguno.
+         Lo llena el plugin de vite.config.ts (src/lib/identidadRutas.ts). -->
+    <!-- gvento:identidad -->
     <title>G-Vento POS</title>
   </head>
   <body>

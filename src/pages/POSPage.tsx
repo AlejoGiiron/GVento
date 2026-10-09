@@ -19,7 +19,8 @@ import { useCashShift } from '@/hooks/useCashShift'
 import { OpenShiftModal } from '@/components/shift/OpenShiftModal'
 import { ItemConfigModal } from '@/components/pos/ItemConfigModal'
 import { PaymentSplitEditor } from '@/components/pos/PaymentSplitEditor'
-import { useSaleCheckout } from '@/hooks/useSaleCheckout'
+import { useSaleCheckout, type VentaRegistrada } from '@/hooks/useSaleCheckout'
+import { metodoReal, avisoYaExistia } from '@/lib/metodoVenta'
 import type { SalePaymentPart } from '@/lib/supabase-helpers'
 import { captureError } from '@/lib/sentry'
 import { CustomerPicker } from '@/components/fiado/CustomerPicker'
@@ -852,7 +853,8 @@ function CheckoutModal({
   const [submitting, setSubmitting] = useState(false)
   const [orderId, setOrderId] = useState<string | null>(null)
   const [orderNumber, setOrderNumber] = useState<number | null>(null)
-  const [yaExistia, setYaExistia] = useState(false)
+  // Lo que devolvió el servidor: si la venta ya existía (reintento), su método REAL.
+  const [registrada, setRegistrada] = useState<VentaRegistrada | null>(null)
   const { cobrar } = useSaleCheckout()
   // Fiado: cliente seleccionado (solo aplica si method === 'fiado').
   const [customerId, setCustomerId] = useState<string | null>(null)
@@ -924,7 +926,7 @@ function CheckoutModal({
         payments,
       })
       setOrderNumber(venta.order_number)
-      setYaExistia(venta.ya_existia)
+      setRegistrada(venta)
 
       if (isFiado) queryClient.invalidateQueries({ queryKey: ['debts'] })
       refetchSales()
@@ -1216,9 +1218,10 @@ function CheckoutModal({
               {orderNumber != null ? `¡Venta #${orderNumber} registrada!` : '¡Cobro exitoso!'}
             </div>
             <div style={{ fontSize: 13, color: '#64748b', marginBottom: 4 }}>
-              {formatCOP(total)} · {methodLabel(method)}
+              {formatCOP(total)} · {(registrada && metodoReal(registrada)) ?? methodLabel(method)}
             </div>
-            {method === 'efectivo' && receivedNum > total && (
+            {/* El vuelto es de ESTE intento: si la venta ya existía, no se sabe qué se recibió. */}
+            {method === 'efectivo' && receivedNum > total && !registrada?.ya_existia && (
               <div style={{ fontSize: 12, color: '#10b981', fontWeight: 600, marginBottom: 4 }}>
                 Vuelto: {formatCOP(receivedNum - total)}
               </div>
@@ -1227,9 +1230,9 @@ function CheckoutModal({
               {orderNumber != null ? `Venta #${orderNumber}` : `#${orderId.slice(-8).toUpperCase()}`}
             </div>
 
-            {/* El reintento encontró la venta del intento anterior: se muestra
-                ESA (con su método de pago), no se cobró dos veces. */}
-            {yaExistia && (
+            {/* El reintento encontró la venta del intento anterior: se dice con qué
+                método quedó DE VERDAD (el del servidor), no el de este intento. */}
+            {registrada?.ya_existia && (
               <div
                 data-testid="success-ya-existia"
                 style={{
@@ -1238,7 +1241,7 @@ function CheckoutModal({
                   fontSize: 12, color: '#1e40af', lineHeight: 1.5,
                 }}
               >
-                Esta venta ya se había registrado en el intento anterior. No se cobró dos veces.
+                {avisoYaExistia(registrada)}
               </div>
             )}
             <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
