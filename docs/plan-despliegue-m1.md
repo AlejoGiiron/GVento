@@ -1256,24 +1256,119 @@ frontend del Paso 5 funciona con él.
 
 ---
 
-## Pasos 9 en adelante — "Mesas en el servidor" (ESQUEMA: se completa al construir cada uno)
+## Paso 9 — SQL de Mesas en el servidor (`mesas-servidor.sql`)
 
-Orden decidido el 2026-10-07 (y ajustado ese día): fiado en `/m` (M1.1, B) → permisos de cobro
-(A) → Mesas en el servidor → diseño de cuentas abiertas. El 2026-10-08 se decidió que **B sale
-dentro del Paso 5**, y que A son los **Pasos 7 (SQL) y 8 (frontend)**: 5.0 → Paso 5 → Paso 7 →
-Paso 8. Lo que sigue se numera desde el 9. Mismas reglas: SQL antes del frontend, cada SQL compatible
-con el frontend de producción, reversa con el mismo método. Los md5, verificaciones y pruebas de
-cada paso se escriben cuando el paso esté construido y probado en Docker.
+Diseño aprobado el 2026-10-08: [`docs/diseno-mesas-servidor.md`](diseno-mesas-servidor.md), con
+las decisiones de esa revisión: "Enviado" = opción (A) (todo ítem guardado está enviado);
+archivar y eliminar mesas con `config.acceder`; si OTRO equipo ya cobró la mesa se devuelve esa
+venta marcada como de otro (la pantalla dice *"Esta mesa ya la cobró <usuario> a las <hora> con
+<método>."*, nunca la presenta como propia); y `register_sale_void` pasa al camino de stock
+compartido en este mismo paso.
+
+- **Depende de:** Paso 8 estable. La precondición exige el `register_sale_payment` del Paso 7
+  (`3dbb2ea5…`): `close_table_sale` lo llama para el pago de contado.
+- **Qué lleva:** solo SQL, de la rama `feat/mesas-servidor`: `supabase/mesas-servidor.sql`. Nada
+  de frontend (eso es el Paso 10).
+- **Qué agrega (todo aditivo):** `merma` en el CHECK de `stock_movements.type`; `orders.close_id`
+  (único), `cobrada_por`, `cobrada_at`; `tables.archived_at`, `archived_by`; la tabla
+  `order_item_bajas` (lectura por sede, sin escritura directa); las funciones `close_table_sale`,
+  `quitar_item_mesa`, `cerrar_mesa_sin_consumo`, `eliminar_mesa` y las internas
+  `_stock_inverso_item`, `_mover_stock_inverso`, `_cierre_mesa_respuesta` (sin `execute` para
+  nadie de la app).
+- **Qué cambia de lo que ya existe:** solo `register_sale_void`, en dos cosas:
+  - **El stock, por la función compartida** con "quitar ítem": el mismo stock, las mismas notas, la
+    misma respuesta. Lo vigilan `tests/anular-venta.spec.ts` (regresión) y
+    `tests/mesas-servidor.spec.ts` (anular y quitar con "No se preparó" dejan el mismo inventario).
+  - **La orden bloqueada (arreglo, hallado al construir el paso):** la versión de producción
+    (`2e9d312e…`) comprueba "ya está anulada" sin bloquear la orden. Medido en Docker el
+    2026-10-08: dos anulaciones simultáneas de la misma venta pasan las dos, sin error, y el stock
+    vuelve **dos veces**. Ahora la orden se bloquea después del turno (el protocolo de locks) y la
+    segunda anulación espera y recibe "La venta ya está anulada". Lo vigila *"DOS anulaciones A LA
+    VEZ"* en `tests/mesas-servidor.spec.ts`. Si ya pasó en producción lo dice la consulta 5 del
+    pre-flight.
+- **Compatible con el frontend del Paso 8:** ese frontend no llama nada nuevo; cobra la mesa con
+  los pasos sueltos de siempre, que siguen funcionando. Las escrituras directas viejas se cierran
+  en el Paso 11.
+
+**9.1 — Pre-flight, JUSTO ANTES** (el mismo rato): `supabase/diag/mesas-preflight.sql`, cada
+consulta por separado.
+- **Consulta 3:** solo `sale`, `adjustment`, `return`, `purchase`, y el CHECK con esos cuatro. Si
+  aparece otro tipo, el CHECK nuevo fallaría: pégame la salida.
+- **Consulta 4:** `register_sale_void` `2e9d312e…`, `register_sale_payment` `3dbb2ea5…` (el Paso 7
+  ya aplicado), `_venta_pos_respuesta` presente, ninguna función nueva, ninguna columna y
+  `order_item_bajas | no existe`. Cualquier otra cosa: pégame la salida y no se aplica.
+- **Consulta 5:** ventas anuladas dos veces. Esperado: **ninguna fila**. Si aparece alguna, la
+  migración se aplica igual (cierra la puerta), pero el inventario de esos productos quedó inflado:
+  pégame la salida y se decide el ajuste con el dueño. *(Esta se puede correr ya, sin esperar al
+  Paso 9: es de solo lectura.)*
+
+**9.2 — Correr `supabase/mesas-servidor.sql`** (md5 con finales LF **`a4ac0bef6a80e61b1333a0365a206d9f`**;
+trae su `begin`/`commit`). Si la precondición o la comprobación de `order_item_bajas` fallan,
+**aborta sin cambiar nada**: pégame la salida. Re-aplicarlo después falla en la precondición
+(`register_sale_void` ya no es `2e9d312e…`) y no cambia nada.
+
+**9.3 — Verificación (Q-MESAS):**
+```sql
+select p.oid::regprocedure as funcion,
+       md5(regexp_replace(regexp_replace(pg_get_functiondef(p.oid), E'\r','','g'), E'[ \t]+\n', E'\n','g')) as md5,
+       has_function_privilege('authenticated', p.oid, 'execute') as auth_ejecuta
+  from pg_proc p where p.pronamespace = 'public'::regnamespace
+   and p.proname in ('register_sale_void', 'close_table_sale', 'quitar_item_mesa', 'cerrar_mesa_sin_consumo',
+                     'eliminar_mesa', '_stock_inverso_item', '_mover_stock_inverso', '_cierre_mesa_respuesta')
+ order by 1;
+```
+Esperado, **exacto** (medido en Docker el 2026-10-08):
+
+| función | md5 | auth_ejecuta |
+|---|---|---|
+| `register_sale_void(uuid,text)` | `f23b1a71764f6a37acfac373d0f65dbe` | t |
+| `_mover_stock_inverso(uuid,uuid,integer,uuid,text,uuid,boolean)` | `2ac58063480a1e04206daa4724751b4c` | f |
+| `_stock_inverso_item(uuid,uuid,uuid,uuid,text,boolean)` | `74502cb53259f19c5207208c8287966a` | f |
+| `_cierre_mesa_respuesta(uuid,boolean,boolean)` | `4826599568bb8d0008f85a4346f837cb` | f |
+| `close_table_sale(uuid,uuid,numeric,jsonb,jsonb,jsonb)` | `4380322652241d8ed7241fc724fd06d1` | t |
+| `quitar_item_mesa(uuid,uuid,text,boolean)` | `d6765c89592fd87bd07044f7c2a89830` | t |
+| `cerrar_mesa_sin_consumo(uuid)` | `f7386154b392c7972bc555ee2e3ab453` | t |
+| `eliminar_mesa(uuid)` | `6e3eb4e986d6f3a429dc4195ca5a0d43` | t |
+
+La tabla de bajas, encerrada (esperado **`t · 1 · f · f`**: RLS, una policy de lectura, anon sin
+nada, authenticated sin escritura):
+```sql
+select c.relrowsecurity as rls,
+       (select count(*) from pg_policies where schemaname = 'public' and tablename = 'order_item_bajas') as policies,
+       has_table_privilege('anon', c.oid, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+         or has_any_column_privilege('anon', c.oid, 'SELECT,INSERT,UPDATE,REFERENCES') as anon_algun_privilegio,
+       has_table_privilege('authenticated', c.oid, 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+         or has_any_column_privilege('authenticated', c.oid, 'INSERT,UPDATE,REFERENCES') as auth_escribe
+  from pg_class c where c.oid = 'public.order_item_bajas'::regclass;
+```
+Y la consulta 3 del pre-flight otra vez: el CHECK ahora con `merma`, los conteos iguales.
+
+**9.4 — Prueba en producción:** con `owner.test` en LAB, una venta de contado de un producto con
+control de stock y anularla desde Historial: el stock vuelve como antes y el movimiento dice
+"Anulación de venta". Anularla otra vez: "La venta ya está anulada". Una mesa cobrada con el frontend del Paso 8: como siempre. Lo nuevo no se
+ve hasta el Paso 10.
+
+**9.5 — Reversa:** `mesas-servidor-revertir.sql` (fuera de git, en la raíz; md5
+`bb6a53c27794ab602dcb13fdecb622ba`): devuelve `register_sale_void` a `2e9d312e…` (probado en
+Docker) y borra las funciones nuevas. **Deja** las columnas, `order_item_bajas` y `merma` en el
+CHECK: son aditivos y, si el Paso 10 llegó a usarse, tienen filas (quién cobró, las bajas). El
+frontend del Paso 8 funciona con o sin ellos. Solo antes del Paso 10: con el 10 en producción,
+la reversa del SQL va después del rollback del frontend.
+🔴 **No re-aplicar después** `close-cash-shift.sql` ni `register-sale-void.sql`:
+devolverían `register_sale_void` a la versión sin el camino compartido, en silencio (R5).
+
+---
+
+## Pasos 10 y 11 — Mesas (ESQUEMA: se completa al construir cada uno)
+
+Mismas reglas: SQL antes del frontend, cada SQL compatible con el frontend de producción,
+reversa con el mismo método. Los md5, verificaciones y pruebas se escriben cuando el paso esté
+construido y probado en Docker.
 
 | paso | qué | tipo | depende de |
 |---|---|---|---|
-| ~~7 / 7b~~ | ~~Permisos de cobro (A)~~ → **Pasos 7 y 8**, arriba, con su detalle. El rol "bartender" no se crea (igual al cajero). | — | — |
-| 9 | `close_table_sale` (con fiado: exige `fiado.gestionar`, y cierra el UPDATE directo de DEUDAS → *"Fiado en MESA"*) + quién cobró (el pago registra al usuario desde el servidor). Cierra H2. | SQL | 8 |
-| 9b | Mesas cobra con `close_table_sale`. | frontend | 9 |
-| 10 | "Enviado" = la tanda quedó confirmada, pase o no por cocina; y en el MISMO cambio, quitar ítem devolviendo stock (cierra H3 y el 3.5) + cerrar mesa sin consumo en una RPC. | SQL | 9 |
-| 10b | Mesas usa las dos RPC. | frontend | 10 |
-| 11 | Archivar mesas (`archived_at` + RPC de eliminar). | SQL + frontend | 10b |
-| — | ~~Fiado en `/m` (M1.1, B)~~ → **entró en el Paso 5** (decidido el 2026-10-08): ver 5.0 y 5.1. | — | — |
+| 10 | **Frontend de Mesas:** cobrar con `close_table_sale` (y el aviso *"Esta mesa ya la cobró…"*); quitar ítem con motivo y "¿Se alcanzó a preparar?"; cerrar sin consumo; archivar; "Ítems quitados de mesas" en Historial. ("Merma" en Inventario ya está en la rama desde el 9 —contrato de 3 lados con el CHECK, R1 #10—, pero llega a producción con este frontend, que es el primero que genera mermas.) | frontend | 9 |
+| 11 | **Fase 2:** sin DELETE directo en `order_items`; las columnas de cobro de `orders` fuera del UPDATE directo (allowlist de columnas); borrado de mesas solo por la función; DEUDAS → *"Fiado en MESA"*. | SQL | 10 en todos los equipos (`app_versiones`) |
 
 ## Calendario de releases (actualizado el 2026-10-13)
 
@@ -1309,3 +1404,4 @@ Los martes G-10 y Salchimelo no abren: los pasos con SQL van ese día.
 | 6 | fase 2 de D | `fase2-aplicar.sql` (`d66e8231…`) | — | `fase2-revertir.sql` (`034ec0a4…`) |
 | 7 | SQL de A (cobrar por permiso) | `permisos-cobro.sql` (`55be33e4…`) + `seed-system-roles.sql` (`83219f0e…`), con pre-flight 1, 3 y 4 justo antes | — | `permisos-cobro-revertir.sql` (`e5ac822d…`) |
 | 8 | frontend de A | — | `feat/a-permisos` | rollback (el SQL del 7 se queda) |
+| 9 | SQL de Mesas en el servidor | `mesas-servidor.sql` (`a4ac0bef…`), con pre-flight 3, 4 y 5 justo antes | — | `mesas-servidor-revertir.sql` (`bb6a53c2…`), solo antes del 10 |

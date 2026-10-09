@@ -1079,6 +1079,27 @@ supabase-js 2.104 le pasa a postgrest solo `schema`, `fetch`, `timeout` y `urlLe
 se prueba con la red cortada antes de soltarlo. Para reconfirmar la versión y el número:
 `grep -n "DEFAULT_MAX_RETRIES =" node_modules/.pnpm/@supabase+postgrest-js@*/node_modules/@supabase/postgrest-js/dist/index.mjs`.
 
+### 🔴 Una venta se anula DOS veces si dos anulaciones llegan juntas: el stock vuelve dos veces (hallado 2026-10-08)
+
+**La clase:** una guarda de estado leída SIN lock antes de escribir (*check-then-act*).
+`register_sale_void` (`2e9d312e…`, de `close-cash-shift.sql`) lee la orden sin bloquearla, comprueba
+"ya está anulada" y recién la bloquea en el `UPDATE` final. Dos anulaciones simultáneas de la misma
+venta (dos clics en "Anular", dos equipos) pasan las dos la guarda: la segunda espera el `UPDATE`
+de la primera y sigue, sin error.
+**Medido en Docker el 2026-10-08** (`tests/mesas-servidor.spec.ts`, *"DOS anulaciones A LA VEZ"*,
+con la versión de producción puesta a propósito): la segunda esperó 2,75 s, no dio error y el
+stock volvió dos veces (`insumo:6,simple:2` en vez de `insumo:3,simple:1`). La plata no se duplica
+(el segundo `DELETE` de `payments` borra 0 filas); el inventario sí, en lo que vendió esa venta.
+**Barrido de la clase (R3), por las tablas y no por nombres:** las funciones que tocan `stock_qty`
+o el estado de anulación son `add_order_items_with_extras` (bloquea la orden), `adjust_stock` y
+`register_purchase` (sin guarda de estado: `adjust_stock` suma de forma atómica),
+`close_cash_shift` (bloquea el turno) y `register_sale_void`, la única instancia.
+**Se cierra en el Paso 9** (`mesas-servidor.sql`): la orden `FOR UPDATE` después del turno y la
+guarda otra vez sobre la fila bloqueada. **Hasta entonces sigue abierto en producción.**
+**¿Ya pasó?** `supabase/diag/mesas-preflight.sql`, consulta 5 (solo lectura): una fila = una venta
+que devolvió su stock más de una vez. Señal verificada con contraste en Docker: 2 anulaciones con
+la versión de producción, 1 con la del Paso 9.
+
 ### 🔴 Fiado en MESA: cualquier usuario de la sede puede pasar una orden a fiado (hallado 2026-10-08)
 
 El cobro de mesa a fiado no pasa por ninguna función: `setOrderFiado` (`src/lib/supabase-helpers.ts`)

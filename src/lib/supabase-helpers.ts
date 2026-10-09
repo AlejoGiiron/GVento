@@ -204,7 +204,9 @@ export const adjustStock = (productId: string, qty: number, reason: string) =>
 
 // --- Inventario: movimientos de stock (auditoría append-only, paginada) ---
 
-export type StockMovementType = 'sale' | 'adjustment' | 'return' | 'purchase'
+// Contrato con el CHECK stock_movements_type_check (último: mesas-servidor.sql) y con
+// MOV_META / TYPES de InventoryPage: un tipo nuevo se agrega en los tres.
+export type StockMovementType = 'sale' | 'adjustment' | 'return' | 'purchase' | 'merma'
 
 export interface StockMovementsFilters {
   restaurantId: string

@@ -101,6 +101,7 @@ const ORDEN = [
   'pos-sale-metodo-real.sql',           // M1.1: register_pos_sale devuelve el método real (reintento con otro método → la venta existente)
   'arqueo-abonos.sql',                  // el esperado de tarjeta/transferencia/Nequi incluye los abonos de fiado del turno
   'permisos-cobro.sql',                 // A: cobrar por PERMISO (pos.vender / mesas.cobrar según el tipo de orden), no por el rol viejo
+  'mesas-servidor.sql',                 // Paso 9: cobro de mesa, quitar ítem, cerrar sin consumo y eliminar mesa en el servidor
 ]
 
 // ── QUIÉN GANA cuando una función está definida en más de un .sql ─────────────
@@ -147,7 +148,8 @@ const GANA = {
   'function close_cash_shift':             'arqueo-abonos.sql',
   // permisos-cobro.sql: cobrar por permiso (pos.vender / mesas.cobrar):
   'function register_sale_payment':        'permisos-cobro.sql',
-  'function register_sale_void':           'close-cash-shift.sql',
+  // mesas-servidor.sql (Paso 9): la misma anulación, con el stock por el camino compartido:
+  'function register_sale_void':           'mesas-servidor.sql',
 }
 
 const DEFINICIONES = [

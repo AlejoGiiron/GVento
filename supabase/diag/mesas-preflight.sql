@@ -87,3 +87,55 @@ select m.type,
  order by m.type;
 -- Esperado: solo sale, adjustment, return, purchase, y el CHECK con esos cuatro. Un valor
 -- fuera de esa lista haría fallar el nuevo CHECK: se decide antes de la migración.
+
+-- ── Consulta 4: las funciones de las que parte mesas-servidor.sql, y si ya hay algo con sus nombres ──
+-- md5 con la normalización de Q-FUNCIONES (sin CR ni espacios al final de línea).
+select 'funcion' as que, p.proname as nombre,
+       md5(regexp_replace(regexp_replace(pg_get_functiondef(p.oid), E'\r','','g'), E'[ \t]+\n', E'\n','g')) as estado
+  from pg_proc p
+ where p.pronamespace = 'public'::regnamespace
+   and p.proname in ('register_sale_void', 'register_sale_payment', '_venta_pos_respuesta',
+                     'close_table_sale', 'quitar_item_mesa', 'cerrar_mesa_sin_consumo', 'eliminar_mesa',
+                     '_stock_inverso_item', '_mover_stock_inverso', '_cierre_mesa_respuesta')
+union all
+select 'columna', c.table_name || '.' || c.column_name, c.data_type
+  from information_schema.columns c
+ where c.table_schema = 'public'
+   and ((c.table_name = 'orders' and c.column_name in ('close_id', 'cobrada_por', 'cobrada_at'))
+     or (c.table_name = 'tables' and c.column_name in ('archived_at', 'archived_by')))
+union all
+select 'tabla', 'order_item_bajas', coalesce(to_regclass('public.order_item_bajas')::text, 'no existe')
+ order by 1, 2;
+-- Esperado ANTES del Paso 7 (A):  register_sale_void 2e9d312e…, register_sale_payment 8fc041a9…,
+--   _venta_pos_respuesta presente (el 5.0), ninguna de las funciones nuevas, ninguna columna, y
+--   "tabla | order_item_bajas | no existe".
+-- Esperado DESPUÉS del Paso 7: lo mismo, pero register_sale_payment 3dbb2ea5… (es la que exige
+--   la precondición de mesas-servidor.sql: el Paso 9 va después del 7).
+-- Si register_sale_void NO es 2e9d312e…, alguien la redefinió en producción: la precondición
+--   de mesas-servidor.sql va a abortar. Se mira qué cambió ANTES de tocar la migración.
+-- Si aparece alguna función nueva, una columna o la tabla: algo con esos nombres ya existe en
+--   producción y la migración fallaría. Se para y se revisa.
+
+-- ── Consulta 5: ¿alguna venta se ANULÓ DOS VECES? (el stock habría vuelto dos veces) ──
+-- register_sale_void (2e9d312e…) lee "ya está anulada" sin bloquear la orden: dos anulaciones
+-- simultáneas pasan las dos (medido en Docker el 2026-10-08). Cada anulación escribe sus
+-- devoluciones en UNA transacción, así que comparten created_at (= now() de esa transacción):
+-- dos created_at distintos con la nota de anulación en la misma orden = dos anulaciones.
+-- (Señal verificada en Docker: 2 con la versión de producción, 1 con la de mesas-servidor.sql.)
+select coalesce(o.name, '(sin organización)') as organizacion,
+       x.order_number,
+       count(distinct m.created_at) as anulaciones_de_stock,
+       count(*) as movimientos,
+       (min(m.created_at) at time zone 'America/Bogota')::timestamp(0) as primera_bogota,
+       (max(m.created_at) at time zone 'America/Bogota')::timestamp(0) as ultima_bogota
+  from public.stock_movements m
+  join public.orders x on x.id = m.reference_id
+  join public.restaurants s on s.id = x.restaurant_id
+  left join public.organizations o on o.id = s.organization_id
+ where m.type = 'return' and m.notes like 'Anulación de venta%'
+ group by o.name, x.id, x.order_number
+having count(distinct m.created_at) > 1
+ order by organizacion, primera_bogota desc;
+-- Esperado: ninguna fila. Una fila = esa venta devolvió su stock más de una vez (dos clics en
+-- "Anular", o dos equipos): el inventario de esos productos quedó inflado en lo que vendió.
+-- No se corrige solo: pégame la salida y se decide el ajuste con el dueño.
