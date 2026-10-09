@@ -25,9 +25,13 @@ import { CapaMovil } from '@/components/movil/CapaMovil'
 
 
 export function MobileShell() {
-  const { profile, signOut } = useAuth()
+  const { user, profile, signOut, isLoading: authCargando, refreshProfile } = useAuth()
   // /m solo vende: entra quien tiene pos.vender (A), lo mismo que exige register_pos_sale.
-  const { can, isLoading: permisosCargando } = usePermissions()
+  const { can, isLoading: permisosCargando, isError: permisosError, reintentando, reintentar } = usePermissions()
+  // El perfil no cargó (el primer fetch falló: AuthContext lo deja en null) o el rol no
+  // cargó: no se sabe quién es ni qué puede. Ni la venta ni el "no puedes": el error.
+  const perfilFallo = !!user && !authCargando && !profile
+  const [reintentandoPerfil, setReintentandoPerfil] = useState(false)
   const { restaurant } = useRestaurantConfig()
   const { isOpen, isLoadingShift } = useCashShift()
   const pantalla = usePantallaEncendida()
@@ -51,6 +55,31 @@ export function MobileShell() {
   const irAVersionCompleta = (ruta: string) => {
     pedirVersionCompleta(true)
     cargarDocumento(ruta)   // carga completa: el documento del escritorio NO trae el manifest de /m
+  }
+
+  if (perfilFallo || permisosError) {
+    const ocupado = reintentandoPerfil || reintentando
+    return (
+      <div data-testid="m-error-usuario" role="alert" style={{ ...pantallaCompleta, justifyContent: 'center', alignItems: 'center', padding: 24, textAlign: 'center', gap: 16 }}>
+        <div style={{ fontSize: 18, fontWeight: 700 }}>No se pudo cargar tu usuario. Revisa el wifi.</div>
+        <button
+          type="button"
+          data-testid="m-reintentar"
+          disabled={ocupado}
+          onClick={async () => {
+            if (perfilFallo) {
+              setReintentandoPerfil(true)
+              try { await refreshProfile() } finally { setReintentandoPerfil(false) }
+            } else {
+              await reintentar()
+            }
+          }}
+          style={{ ...botonGrande(M.verde), minWidth: 200, opacity: ocupado ? 0.6 : 1 }}
+        >
+          {ocupado ? 'Reintentando…' : 'Reintentar'}
+        </button>
+      </div>
+    )
   }
 
   // Mientras se cargan los permisos no se muestra ni la venta ni el "no puedes": los dos

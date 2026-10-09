@@ -107,3 +107,49 @@ test('rol viejo cajero SIN pos.vender (incoherencia vieja): NO se lo manda a /m,
     psql(`update public.profiles set role = '${role}', role_id = '${roleId}' where email = '${email}';`)
   }
 })
+
+// ── La carga del usuario FALLA (sin red, timeout, error) ──────────────────────
+// serviceWorkers 'block': en WebKit, page.route no ve los pedidos de una página
+// controlada por el service worker (ver "reintento" en m-pos-movil.spec.ts).
+test.describe('la carga del usuario falla en /m', () => {
+  test.use({ serviceWorkers: 'block' })
+
+  async function entrarCajero(page: import('@playwright/test').Page) {
+    await page.goto('/login')
+    await page.locator('input[type="email"]').fill(cashierCreds().email)
+    await page.locator('input[autocomplete="current-password"]').fill(cashierCreds().password)
+    await page.getByRole('button', { name: 'Ingresar' }).click()
+    // Sin permisos cargados no se redirige a /m (la redirección exige pos.vender): falla cerrado.
+    await expect(page).toHaveURL(/\/ventas$/, { timeout: 30_000 })
+  }
+
+  test('se corta la red al cargar los PERMISOS: "No se pudo cargar tu usuario", y Reintentar lo arregla', async ({ page }) => {
+    test.setTimeout(90_000)
+    await page.route('**/rest/v1/roles?**', (r) => r.abort('internetdisconnected'))
+    await entrarCajero(page)
+    await page.goto('/m')
+    await expect(page.getByTestId('m-error-usuario')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByTestId('m-error-usuario')).toContainText('No se pudo cargar tu usuario. Revisa el wifi.')
+    // Ni la venta ni el "no puedes vender": los dos serían falsos.
+    await expect(page.getByTestId('m-sin-permiso')).toHaveCount(0)
+    await expect(page.getByTestId('m-shell')).toHaveCount(0)
+    // Vuelve la red: Reintentar carga los permisos y aparece la venta.
+    await page.unroute('**/rest/v1/roles?**')
+    await page.getByTestId('m-reintentar').click()
+    await expect(page.getByTestId('m-shell')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByTestId('m-error-usuario')).toHaveCount(0)
+  })
+
+  test('se corta la red al cargar el PERFIL: el mismo mensaje, y Reintentar lo arregla', async ({ page }) => {
+    test.setTimeout(90_000)
+    await page.route('**/rest/v1/profiles?**', (r) => r.abort('internetdisconnected'))
+    await entrarCajero(page)
+    await page.goto('/m')
+    await expect(page.getByTestId('m-error-usuario')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByTestId('m-sin-permiso')).toHaveCount(0)
+    await expect(page.getByTestId('m-shell')).toHaveCount(0)
+    await page.unroute('**/rest/v1/profiles?**')
+    await page.getByTestId('m-reintentar').click()
+    await expect(page.getByTestId('m-shell')).toBeVisible({ timeout: 15_000 })
+  })
+})

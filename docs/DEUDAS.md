@@ -1057,6 +1057,28 @@ cambia la próxima vez que una migración redefina esa función, no se redefine 
 pierde la tilde: "Pedile"), con regex Unicode — `grep` en esta máquina no trata la tilde como
 letra y devuelve vacío. Revisar a mano: también matchea futuros ("desactivará") y palabras como "está".
 
+### 🔴 Doble reintento: sin red, CADA consulta tarda ~35 s en dar error (medido 2026-10-08)
+
+**La clase.** postgrest-js 2.104 reintenta por su cuenta todo GET que falla por red (3 veces: 1 s,
+2 s, 4 s; `DEFAULT_MAX_RETRIES` en su `dist/index.mjs`), y React Query (sin configuración: 3
+reintentos, 1 s, 2 s, 4 s) reintenta el ciclo entero. Encadenados: 4 ciclos de ~7 s + 7 s de
+espera ≈ **35 s** hasta que una consulta da error. Mientras tanto la pantalla muestra "Cargando…".
+Medido en `/m` con la red cortada al cargar los permisos: el trace mostró los ciclos de 4 intentos
+repitiéndose, y en 20 s la consulta nunca llegó a error.
+
+**Lo que ya se arregló:** la carga de permisos (`usePermissions`, `retry: false`): da el error en
+~7 s y `/m` muestra "No se pudo cargar tu usuario. Revisa el wifi." con Reintentar.
+
+**Lo que queda:** el resto de las consultas de la app (productos, mesas, turno, reportes…). Sin red,
+cada pantalla tarda ~35 s en mostrar su error. **Opciones, a decidir:** (a) `retry: false` por
+defecto en el `QueryClient` (`src/App.tsx`), dejando el reintento a postgrest; (b) `retry` de React
+Query solo para errores que no son de red; (c) `.retry(false)` en cada consulta (el builder de
+postgrest lo tiene) y dejar React Query como está. **No hay opción global en el cliente:**
+supabase-js 2.104 le pasa a postgrest solo `schema`, `fetch`, `timeout` y `urlLengthLimit`
+(verificado en su `dist/index.mjs`, `new PostgrestClient`). Cualquiera cambia el comportamiento sin red de TODAS las pantallas:
+se prueba con la red cortada antes de soltarlo. Para reconfirmar la versión y el número:
+`grep -n "DEFAULT_MAX_RETRIES =" node_modules/.pnpm/@supabase+postgrest-js@*/node_modules/@supabase/postgrest-js/dist/index.mjs`.
+
 ### 🔴 Fiado en MESA: cualquier usuario de la sede puede pasar una orden a fiado (hallado 2026-10-08)
 
 El cobro de mesa a fiado no pasa por ninguna función: `setOrderFiado` (`src/lib/supabase-helpers.ts`)
