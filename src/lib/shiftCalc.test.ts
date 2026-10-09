@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { calcShiftBalance, availableCash } from './shiftCalc'
+import { calcShiftBalance, availableCash, esperadoMetodo } from './shiftCalc'
 
 describe('calcShiftBalance', () => {
   it('cuadrado: declarado coincide con el esperado', () => {
@@ -69,6 +69,14 @@ describe('calcShiftBalance', () => {
     })
     expect(r.expectedCash).toBe(70_000)
     expect(r.status).toBe('exact')
+  })
+})
+
+describe('esperadoMetodo (tarjeta, transferencia, Nequi)', () => {
+  it('ventas + abonos de fiado del turno, igual que close_cash_shift (arqueo-abonos.sql)', () => {
+    expect(esperadoMetodo(8000, 3000)).toBe(11000)
+    expect(esperadoMetodo(8000, 0)).toBe(8000)
+    expect(esperadoMetodo(0, 3000)).toBe(3000)
   })
 })
 

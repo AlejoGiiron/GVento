@@ -99,6 +99,7 @@ const ORDEN = [
   'pos-sale-lotes.sql',                 // paso 2: register_pos_sale + clave por tanda y total desde las líneas en add_order_items_with_extras
   'restaurant-config-rpc.sql',          // M1: restaurants.config se fusiona en el servidor, clave por clave (update_restaurant_config)
   'pos-sale-metodo-real.sql',           // M1.1: register_pos_sale devuelve el método real (reintento con otro método → la venta existente)
+  'arqueo-abonos.sql',                  // el esperado de tarjeta/transferencia/Nequi incluye los abonos de fiado del turno
 ]
 
 // ── QUIÉN GANA cuando una función está definida en más de un .sql ─────────────
@@ -137,8 +138,11 @@ const GANA = {
   'policy "profiles: editar el propio" on profiles': 'profiles-active-store-rls.sql',
   // close-cash-shift.sql les agrega el protocolo de locks del turno (FOR SHARE):
   // cobro-turno.sql (cambio 1) les suma turno obligatorio en efectivo + lock de la orden:
-  'function register_debt_payment':        'cobro-turno.sql',
-  'function register_debt_payments_batch': 'cobro-turno.sql',
+  // arqueo-abonos.sql: toman el turno con cualquier método y guardan debt_payments.shift_id;
+  // el cierre suma los abonos no efectivo del turno:
+  'function register_debt_payment':        'arqueo-abonos.sql',
+  'function register_debt_payments_batch': 'arqueo-abonos.sql',
+  'function close_cash_shift':             'arqueo-abonos.sql',
   'function register_sale_payment':        'cobro-turno.sql',
   'function register_sale_void':           'close-cash-shift.sql',
 }

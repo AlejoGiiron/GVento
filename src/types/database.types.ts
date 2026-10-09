@@ -276,11 +276,13 @@ export type Database = {
           order_id: string
           payment_method: string
           restaurant_id: string
+          shift_id: string | null
         }
         Insert: {
           amount: number
           batch_id?: string | null
           cash_movement_id?: string | null
+          shift_id?: string | null
           created_at?: string
           created_by?: string | null
           id?: string

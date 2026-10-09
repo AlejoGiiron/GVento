@@ -158,9 +158,10 @@ test.describe.serial('Arqueo multi-método', () => {
     // Snapshot persistido (leído directo, sin recomputar nada en el test).
     const { rec, comment } = await reconciliationOf(shiftId)
     expect(rec.methods.cash).toEqual({ expected: EXP_CASH, declared: 80000, difference: -3000 })
-    expect(rec.methods.nequi).toEqual({ expected: EXP_NEQUI, declared: EXP_NEQUI, difference: 0 })
-    expect(rec.methods.card).toEqual({ expected: 0, declared: 0, difference: 0 })
-    expect(rec.methods.transfer).toEqual({ expected: 0, declared: 0, difference: 0 })
+    // Los métodos no efectivo traen sus abonos de fiado del turno (arqueo-abonos.sql); acá no hay.
+    expect(rec.methods.nequi).toEqual({ expected: EXP_NEQUI, declared: EXP_NEQUI, difference: 0, abonos: 0 })
+    expect(rec.methods.card).toEqual({ expected: 0, declared: 0, difference: 0, abonos: 0 })
+    expect(rec.methods.transfer).toEqual({ expected: 0, declared: 0, difference: 0, abonos: 0 })
     expect(rec.expected_total).toBe(EXP_CASH + EXP_NEQUI)        // 109.000
     expect(rec.declared_total).toBe(80000 + EXP_NEQUI)           // 106.000
     expect(rec.difference_total).toBe(-3000)
@@ -186,7 +187,7 @@ test.describe.serial('Arqueo multi-método', () => {
     await expect(page.getByText('Sin turno')).toBeVisible({ timeout: 15_000 })
 
     const { rec } = await reconciliationOf(shiftId)
-    expect(rec.methods.nequi).toEqual({ expected: 18000, declared: 0, difference: -18000 })
+    expect(rec.methods.nequi).toEqual({ expected: 18000, declared: 0, difference: -18000, abonos: 0 })
   })
 
   test('reimpresión desde P3 arma el comprobante desde el snapshot (sin recomputar)', async ({ page }) => {

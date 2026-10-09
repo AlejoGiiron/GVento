@@ -3,7 +3,7 @@ import { X, DollarSign, TrendingUp, TrendingDown, Minus, AlertTriangle, Bike } f
 import { useCashShift } from '@/hooks/useCashShift'
 import { useDeliveryCount } from '@/hooks/useDeliveryCount'
 import { useRestaurantConfig } from '@/hooks/useRestaurantConfig'
-import { calcShiftBalance } from '@/lib/shiftCalc'
+import { calcShiftBalance, esperadoMetodo } from '@/lib/shiftCalc'
 import { printCashReport, buildCashReportData } from '@/lib/printer'
 
 const formatCOP = (n: number) =>
@@ -29,7 +29,7 @@ interface CloseShiftModalProps {
 }
 
 export function CloseShiftModal({ onClose }: CloseShiftModalProps) {
-  const { currentShift, salesSummary, movements, vouchersTotal, closeShift, isClosingShift } = useCashShift()
+  const { currentShift, salesSummary, abonosSummary, movements, vouchersTotal, closeShift, isClosingShift } = useCashShift()
   const { restaurant } = useRestaurantConfig()
   // Deliveries sin entregar (pending/preparing/ready) de la sede. MISMO hook que
   // el badge del sidebar: un segundo conteo escrito acá sería una copia que se
@@ -56,12 +56,14 @@ export function CloseShiftModal({ onClose }: CloseShiftModalProps) {
     declared,
   })
 
-  // Arqueo por método: efectivo = expectedCash (apertura+ventas+ing−egr, ya calculado);
-  // los demás = solo ventas de ese método. Diferencia = declarado − esperado (informativa).
+  // Arqueo por método: efectivo = expectedCash (apertura+ventas+ing−egr, ya calculado; sus
+  // abonos ya son ingresos de caja); los demás = ventas + abonos de fiado del turno
+  // (esperadoMetodo, el mismo cálculo que congela close_cash_shift).
   const otherRows = OTHER_METHODS.map((m) => {
-    const expected = salesSummary?.[m] ?? 0
+    const abonos = abonosSummary?.[m] ?? 0
+    const expected = esperadoMetodo(salesSummary?.[m] ?? 0, abonos)
     const declaredM = parseInt(declaredOther[m].replace(/\D/g, ''), 10) || 0
-    return { method: m, expected, declared: declaredM, difference: declaredM - expected }
+    return { method: m, expected, abonos, declared: declaredM, difference: declaredM - expected }
   })
   const expectedTotal = expectedCash + otherRows.reduce((s, r) => s + r.expected, 0)
   const declaredTotal = declared + otherRows.reduce((s, r) => s + r.declared, 0)
@@ -343,7 +345,14 @@ export function CloseShiftModal({ onClose }: CloseShiftModalProps) {
               </div>
               {otherRows.map((r) => (
                 <div key={r.method} style={{ display: 'grid', gridTemplateColumns: '1fr 82px 86px 76px', gap: 6, alignItems: 'center', padding: '7px 0', borderBottom: '1px solid #f1f5f9' }}>
-                  <span style={{ fontSize: 13, fontWeight: r.expected > 0 ? 500 : 400, color: r.expected > 0 ? '#334155' : '#94a3b8' }}>{METHOD_LABELS[r.method]}</span>
+                  <span style={{ fontSize: 13, fontWeight: r.expected > 0 ? 500 : 400, color: r.expected > 0 ? '#334155' : '#94a3b8' }}>
+                    {METHOD_LABELS[r.method]}
+                    {r.abonos > 0 && (
+                      <span data-testid={`pay-abonos-${r.method}`} style={{ display: 'block', fontSize: 11, fontWeight: 500, color: '#64748b' }}>
+                        incluye abonos {formatCOP(r.abonos)}
+                      </span>
+                    )}
+                  </span>
                   <span style={{ fontSize: 13, fontFamily: 'monospace', textAlign: 'right', fontWeight: r.expected > 0 ? 600 : 400, color: r.expected > 0 ? '#0f172a' : '#94a3b8' }}>
                     {formatCOP(r.expected)}
                   </span>

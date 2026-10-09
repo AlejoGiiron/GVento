@@ -40,12 +40,14 @@ export interface ShiftBalance {
 export type ArqueoMethod = 'cash' | 'card' | 'transfer' | 'nequi'
 
 export interface MethodReconciliation {
-  /** cash = apertura + ventas efectivo + ingresos − egresos; otros = ventas del método. */
+  /** cash = apertura + ventas efectivo + ingresos − egresos; otros = ventas + abonos del método (esperadoMetodo). */
   expected: number
   /** Declarado por el cajero (blanco = 0). */
   declared: number
   /** declared − expected. Negativo = faltante, positivo = sobrante. */
   difference: number
+  /** Solo tarjeta, transferencia y Nequi (desde arqueo-abonos.sql): abonos de fiado del turno ya sumados en expected. */
+  abonos?: number
 }
 
 export interface ShiftReconciliation {
@@ -69,6 +71,16 @@ export function availableCash(
 }
 
 /** Calcula el cuadre del turno a partir de los montos del turno. */
+/**
+ * Esperado de un método NO efectivo: sus ventas del turno + sus abonos de fiado del turno.
+ * Es el mismo cálculo que congela close_cash_shift (supabase/arqueo-abonos.sql): si cambia
+ * uno, cambia el otro (R1). El EFECTIVO no usa esto: un abono en efectivo ya entra como
+ * ingreso de caja (movementsIn), y sumarlo acá lo contaría dos veces.
+ */
+export function esperadoMetodo(ventas: number, abonos: number): number {
+  return ventas + abonos
+}
+
 export function calcShiftBalance(input: ShiftBalanceInput): ShiftBalance {
   const expectedCash = availableCash(input)
   const difference = input.declared - expectedCash

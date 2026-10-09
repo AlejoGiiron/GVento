@@ -78,6 +78,27 @@ commit;`
  * Cada suma se coalesce POR SEPARADO (sum() sin filas es NULL, y NULL − egresos
  * = NULL: un coalesce de afuera se tragaba los egresos).
  */
+/**
+ * El invariante de los métodos NO efectivo (supabase/arqueo-abonos.sql): el esperado congelado
+ * de cada uno = sus pagos en la ventana del turno + sus abonos ligados al turno (shift_id).
+ */
+export function invarianteMetodos(shiftId: string): Record<'card' | 'transfer' | 'nequi', { congelado: number; recalculado: number }> {
+  const filas = psql(`
+    select m.metodo,
+           (s.close_reconciliation->'methods'->m.metodo->>'expected')::numeric,
+           coalesce((select sum(p.amount) from public.payments p
+                      where p.restaurant_id = s.restaurant_id and p.method::text = m.metodo
+                        and p.created_at >= s.opened_at and p.created_at <= s.closed_at), 0)
+         + coalesce((select sum(d.amount) from public.debt_payments d
+                      where d.shift_id = s.id and d.payment_method = m.metodo), 0)
+      from public.cash_shifts s, (values ('card'), ('transfer'), ('nequi')) m(metodo)
+     where s.id = '${shiftId}';`).split('\n')
+  return Object.fromEntries(filas.map((f) => {
+    const [metodo, congelado, recalculado] = f.split('|')
+    return [metodo, { congelado: Number(congelado), recalculado: Number(recalculado) }]
+  })) as Record<'card' | 'transfer' | 'nequi', { congelado: number; recalculado: number }>
+}
+
 export function invarianteTurno(shiftId: string): { congelado: number; recalculado: number } {
   const [congelado, recalculado] = psql(`
     select s.expected_amount,

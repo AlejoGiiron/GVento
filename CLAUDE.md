@@ -298,10 +298,16 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    cada uno exista en `src/`.
 
 6. **La fórmula del arqueo de turno — 2 lados (agregado 2026-09-30).** La vista previa del
-   modal de cierre la calcula `src/lib/shiftCalc.ts` (`availableCash` / `calcShiftBalance`) y la
-   que se CONGELA la calcula `close_cash_shift` (`supabase/close-cash-shift.sql`). Si divergen, el
-   cajero ve un número y se guarda otro. Lo vigila `tests/cierre-turno-servidor.spec.ts` (el
-   arqueo congelado = el recalculado desde la base). Tocar uno obliga a tocar el otro.
+   modal de cierre la calcula `src/lib/shiftCalc.ts` (`availableCash` / `calcShiftBalance`, y
+   `esperadoMetodo` para tarjeta, transferencia y Nequi) y la que se CONGELA la calcula
+   `close_cash_shift` (último que la define: `supabase/arqueo-abonos.sql`). Si divergen, el
+   cajero ve un número y se guarda otro. Lo vigilan `tests/cierre-turno-servidor.spec.ts` y
+   `tests/arqueo-abonos.spec.ts` (el arqueo congelado = el recalculado desde la base, también por
+   método). Tocar uno obliga a tocar el otro. **Desde arqueo-abonos.sql** el esperado de cada
+   método no efectivo es ventas + abonos de fiado ligados al turno (`debt_payments.shift_id`); el
+   efectivo no suma abonos aparte (ya son ingresos de caja). El precheck de la fase 2
+   (`fase2-precheck.sql`, raíz) reconoce un cierre del servidor por los 2 decimales de
+   `close_reconciliation`: el cierre tiene que seguir usando `numeric(12,2)`.
    Y **todo camino que cambie las cifras de un turno sigue el PROTOCOLO DE LOCKS** del encabezado
    de ese `.sql`: su primer lock o escritura es la fila del turno (`for share`; el cierre
    `for update`). Un escritor nuevo que no lo siga reabre la carrera en silencio.

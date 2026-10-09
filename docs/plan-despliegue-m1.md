@@ -1025,6 +1025,46 @@ abierto).
 
 ---
 
+## Paso propio — el arqueo cuenta los abonos de fiado (`arqueo-abonos.sql`)
+
+Diseño: [`docs/diseno-arqueo-abonos.md`](diseno-arqueo-abonos.md). Rama `feat/arqueo-abonos`.
+
+- **Qué lleva:** el SQL (`supabase/arqueo-abonos.sql`) y el frontend del cierre, que van **en la
+  misma ventana, SQL primero**: con el SQL y el frontend viejo, la pantalla muestra el esperado sin
+  abonos y el servidor congela el esperado con abonos (los dos lados de R1 #6 divergen) hasta que
+  entra el frontend. Al revés (frontend primero) la pantalla consultaría una columna que todavía no
+  existe cada 5 s.
+- **Mejor con los turnos cerrados:** un turno abierto durante la migración cierra con la regla nueva,
+  pero sus abonos de antes no tienen `shift_id` y no entran a su esperado (como hoy).
+
+**AA.1 — Pre-flight, justo antes:** `supabase/diag/arqueo-abonos-preflight.sql`. Consulta 1:
+`close_cash_shift` `433e2d781efb73df033b58d549dc3d5b`, `register_debt_payment`
+`f90d210f8f69c53ba809440933f0d29c`, `register_debt_payments_batch` `d6d090a2df4e0589d4b279ad3b4742f8`
+y la columna `no existe`. Consulta 2: los turnos abiertos.
+
+**AA.2 — Correr `supabase/arqueo-abonos.sql`** (md5 con finales LF **`f6ae954940e3078176c1dd392cafaef1`**).
+Si la precondición falla, aborta sin cambiar nada; re-aplicarlo también aborta.
+
+**AA.3 — Verificación:** la consulta 1 del pre-flight otra vez. Esperado (medido en Docker el
+2026-10-09): `close_cash_shift` `a395c0a1f04cf6405c461887f508115f`, `register_debt_payment`
+`e75fd428dc199fa4f92b72040c5bd9fa`, `register_debt_payments_batch` `e9c9743ce3d37d3194515eca343ea750`,
+y `debt_payments.shift_id | uuid`.
+
+**AA.4 — Frontend:** `feat/arqueo-abonos` → `develop` (sale de `b9f5797`; si `develop` ya tiene otro
+release encima, se integra con merge y suite completa). Título:
+`release: el arqueo cuenta los abonos de fiado por método`.
+
+**AA.5 — Prueba en producción** con `owner.test` en LAB: turno abierto, un abono de fiado por Nequi,
+y en "Cerrar turno" el renglón de Nequi dice "incluye abonos $…" y su esperado lo suma.
+
+**AA.6 — Reversa:** `arqueo-abonos-revertir.sql` (fuera de git, en la raíz; md5
+`b6ebb3fb43b4214899930b9e6aeb80a0`): devuelve las tres funciones exactas a `433e2d78…`, `f90d210f…`
+y `d6d090a2…` (probado en Docker). **Deja** `debt_payments.shift_id` (tiene datos; las funciones
+viejas no la llenan). Con el frontend nuevo en producción, primero el rollback del frontend.
+🔴 No re-aplicar después `close-cash-shift.sql` ni `cobro-turno.sql` (R5).
+
+---
+
 ## Paso 6 — Fase 2 de D (cerrar el UPDATE directo de `cash_shifts`)
 
 - **Depende de:** Paso 1 (para ver qué versión tiene cada equipo) y de que **G-10 cierre por el
@@ -1132,4 +1172,5 @@ Los martes G-10 y Salchimelo no abren: los pasos con SQL van ese día.
 | H | hotfix: Mesas relee la orden antes de cobrar, cerrar o agregar | — | sale dentro de HC | — |
 | HC | hotfix combinado: relee la orden + mesas pegadas + varias cuentas vivas | — | `hotfix/mesas-13-10` | rollback |
 | R | Cocina, Mesas y Delivery se recargan solas | — | `feat/cocina-refresco` | rollback (vuelve al hotfix combinado) |
+| AA | el arqueo cuenta los abonos de fiado | `arqueo-abonos.sql` (`f6ae9549…`), pre-flight justo antes | `feat/arqueo-abonos` | `arqueo-abonos-revertir.sql` (`b6ebb3fb…`) + rollback |
 | 6 | fase 2 de D | `fase2-aplicar.sql` (`d66e8231…`) | — | `fase2-revertir.sql` (`034ec0a4…`) |
