@@ -1050,8 +1050,10 @@ Si la precondición falla, aborta sin cambiar nada; re-aplicarlo también aborta
 `e75fd428dc199fa4f92b72040c5bd9fa`, `register_debt_payments_batch` `e9c9743ce3d37d3194515eca343ea750`,
 y `debt_payments.shift_id | uuid`.
 
-**AA.4 — Frontend:** `feat/arqueo-abonos` → `develop` (sale de `b9f5797`; si `develop` ya tiene otro
-release encima, se integra con merge y suite completa). Título:
+**AA.4 — Frontend:** `feat/arqueo-abonos` → `develop` por **fast-forward**. Rebasada el 2026-10-13
+sobre `develop` = `c3a00c5` (hotfix combinado, cocina-refresco y `fix/cocina-avisos` ya publicados).
+El rebase solo chocó en este plan (secciones y filas agregadas en el mismo lugar, conservadas todas;
+el calendario viejo del 9/10 se descartó). El código y el SQL del arqueo no cambiaron. Título:
 `release: el arqueo cuenta los abonos de fiado por método`.
 
 **AA.5 — Prueba en producción** con `owner.test` en LAB: turno abierto, un abono de fiado por Nequi,
@@ -1151,7 +1153,7 @@ Los martes G-10 y Salchimelo no abren: los pasos con SQL van ese día.
 |---|---|---|---|
 | mar 13/10 | hotfix combinado de Mesas (HC) | `hotfix/mesas-13-10` | fast-forward desde `fab23b0` (si la suite no está verde a las 12:30: mié 14/10, 7:00) |
 | mar 13/10 (adelantado; HC ya salió: `main` = `976c2ec`) | Cocina, Mesas y Delivery se recargan solas | `feat/cocina-refresco` | rebasada sobre el hotfix combinado (`09945b2`), suite completa y fast-forward (si la suite no está verde a las 18:00: mié 14/10, 7:00) |
-| mar 20/10 | el arqueo cuenta los abonos de fiado (AA) | `feat/arqueo-abonos` | rebasada sobre cocina-refresco, suite completa y fast-forward |
+| mar 13/10 (adelantado; R y `fix/cocina-avisos` ya salieron: `develop` = `c3a00c5`) | el arqueo cuenta los abonos de fiado (AA) | `feat/arqueo-abonos` | rebasada sobre `develop` (`c3a00c5`), suite completa y fast-forward; SQL antes del frontend (AA.1–AA.4) |
 | un martes después del arqueo | Paso 6, fase 2 de D | — | parte de la versión de `close_cash_shift` que deja el arqueo (`a395c0a1…`), no de la de hoy |
 | martes siguientes | Pasos 7-8 (permisos de cobro, A) y después 9-10 (Mesas en el servidor) | `feat/a-permisos`, `feat/mesas-servidor` | se fija al llegar |
 | al final | Realtime | `feat/realtime` | después del paquete de Mesas |
