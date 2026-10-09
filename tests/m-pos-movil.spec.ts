@@ -487,6 +487,11 @@ test.describe('nada nuestro tapa la acción principal', () => {
   test('Vender → carrito → EFECTIVO → venta exitosa', async ({ page }, info) => {
     await turnoAbierto()
     await conAvisos(page, info)
+    // La primera tarjeta de la grilla puede quedar más abajo del borde según cuántos
+    // "Más vendidos" haya arriba (con 3 son dos filas y, con los dos avisos, la tarjeta
+    // queda bajo la barra: medido el 2026-10-09). Lo que se prueba es que, a la vista,
+    // nada nuestro la tape; no cuánto contenido hay encima.
+    await page.getByTestId('m-producto').first().scrollIntoViewIfNeeded()
     await usable(page, 'm-producto', false)                     // contenido bajo los avisos
     await agregar(page, 'Lab Cerveza')
     await usable(page, 'm-carrito-abrir', true)

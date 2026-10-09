@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
-import { loginAsOwner } from './helpers/auth'
+import { loginAsOwner, ownerCreds } from './helpers/auth'
+import { psql } from './helpers/db-local'
 import { waitPosReady } from './helpers/pos'
 import { openShiftIfClosed } from './helpers/shift'
 
@@ -27,6 +28,23 @@ async function setTipo(page: Page, label: 'Para llevar' | 'Delivery') {
   throw new Error(`No se pudo seleccionar el tipo "${label}"`)
 }
 
+// La venta de DELIVERY del primer test queda en "Nuevos" del tablero de delivery. En
+// una corrida siguiente sobre la misma base, delivery-turno.spec ("sin deliveries
+// abiertos el cierre NO muestra el aviso") la encontraba y fallaba (medido el
+// 2026-10-09). Se marca entregada al final, por su id, con aserción.
+let numeroDelivery: number | null = null
+
+test.afterAll(() => {
+  if (numeroDelivery === null) return
+  const ids = psql(`select o.id from public.orders o
+                      join public.profiles p on p.restaurant_id = o.restaurant_id
+                     where p.email = '${ownerCreds().email}' and o.type = 'delivery'
+                       and o.order_number = ${numeroDelivery};`).split('\n').filter(Boolean)
+  expect(ids, 'la venta de delivery del spec').toHaveLength(1)
+  psql(`update public.orders set status = 'delivered' where id = '${ids[0]}';`)
+  expect(psql(`select status from public.orders where id = '${ids[0]}';`)).toBe('delivered')
+})
+
 test.describe.serial('Reset del tipo de venta', () => {
   test('tras cobrar una venta de DELIVERY vuelve al tipo por defecto', async ({ page }) => {
     await loginAsOwner(page)
@@ -44,6 +62,7 @@ test.describe.serial('Reset del tipo de venta', () => {
     await page.getByTestId('checkout-received').fill(String(PRICE))
     await page.getByRole('button', { name: /Confirmar cobro/ }).click()
     await expect(page.getByText(/Venta #\d+ registrada/)).toBeVisible({ timeout: 15_000 })
+    numeroDelivery = Number(((await page.getByText(/Venta #\d+ registrada/).textContent()) ?? '').match(/#(\d+)/)?.[1])
     await page.getByRole('button', { name: 'Nueva venta' }).click()
 
     // EL ASSERT DEL BUG: el tipo volvió solo, sin recargar la página.
