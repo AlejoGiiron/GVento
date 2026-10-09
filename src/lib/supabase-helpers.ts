@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import { captureIssue } from './sentry'
+import type { OrdenFresca } from './mesaFresca'
 import type { Enums, Json, Tables, TablesInsert, TablesUpdate } from '@/types/database.types'
 
 // --- Profiles ---
@@ -355,6 +356,24 @@ export const getOrderById = (orderId: string) =>
 
 export const createOrder = (order: TablesInsert<'orders'>) =>
   supabase.from('orders').insert(order).select().single()
+
+// Relee una orden de mesa COMO ESTÁ EN LA BASE: estado, total, descuento y la suma de
+// sus líneas (con extras). La usan las guardas de src/lib/mesaFresca.ts antes de cobrar
+// o cerrar una mesa, porque la pantalla trabaja sobre una copia que puede estar vieja.
+export const getOrdenFresca = async (orderId: string): Promise<OrdenFresca> => {
+  const { data, error } = await supabase
+    .from('orders')
+    .select('status, total, discount_amount, order_items(qty, unit_price, order_item_extras(qty, unit_price))')
+    .eq('id', orderId)
+    .single()
+  if (error) throw error
+  const items = data.order_items ?? []
+  const lineas = items.reduce(
+    (a, i) => a + i.qty * i.unit_price + (i.order_item_extras ?? []).reduce((b, e) => b + e.qty * e.unit_price, 0),
+    0,
+  )
+  return { status: data.status, total: data.total, discount_amount: data.discount_amount, lineas, items: items.length }
+}
 
 export const updateOrderStatus = (orderId: string, status: Tables<'orders'>['status']) =>
   supabase.from('orders').update({ status }).eq('id', orderId).select().single()

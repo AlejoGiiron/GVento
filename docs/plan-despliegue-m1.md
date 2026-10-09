@@ -804,6 +804,47 @@ solo si el problema es el propio `register_pos_sale`. El rollback también devue
 
 ---
 
+## Hotfix — Mesas cerraba sin cobrar con la copia vieja (`hotfix/mesa-total-cero`)
+
+- **Por qué no espera al Paso 9:** el pre-flight de Mesas (2026-10-09) encontró en producción mesas
+  cerradas como pagadas sin filas en `payments` (G-10: 20, $613.800; Salchimelo: 18, $419.000). El
+  cobro de mesa trabaja sobre la copia de la orden tomada al tocar "Cobrar"; si otro equipo agrega
+  una tanda o cierra la mesa mientras tanto, cobrar con esa copia deja consumo sin cobrar.
+- **Qué lleva:** solo frontend, desde `develop` (`fab23b0`). **Nada de SQL.** Antes de escribir, la
+  pantalla relee la orden (`getOrdenFresca`) y decide con `src/lib/mesaFresca.ts`:
+  - **Cobrar:** no cobra si la orden ya no está abierta, si cambió desde que se abrió el modal
+    ("La mesa cambió desde que abriste el cobro…"), o si va a cerrar en $0 con líneas que el
+    descuento no cubre ("La mesa tiene consumo por $X sin cobrar…").
+  - **"Cerrar mesa" (sin consumo):** no la cancela si ya tiene ítems o ya no está abierta.
+  - **Agregar ítems:** no agrega a una orden que ya se cobró o se cerró.
+  - Si la relectura falla (sin red), no se escribe nada.
+- **Qué NO cierra:** entre releer y escribir queda una ventana de milisegundos (dos equipos en el
+  mismo instante). La cierra el servidor en el Paso 9 (`close_table_sale` y la guarda de
+  `add_order_items_with_extras`). Tampoco corrige las ventas que ya quedaron mal: para medirlas,
+  `supabase/diag/mesas-sin-pagos.sql` (en `feat/mesas-servidor`).
+- **Pruebas:** `tests/mesa-total-cero.spec.ts` (los dos equipos: uno agrega una tanda con el cobro del
+  otro abierto, con cortesía y con descuento parcial; "Cerrar mesa" sobre una mesa a la que otro le
+  acaba de agregar; la tanda con el selector abierto y la mesa ya cobrada; el total guardado en 0;
+  y los contrastes). Contra el código SIN el arreglo, los 5 casos reproducen el daño en la base.
+
+**H.1 — Merge** (`develop` = `fab23b0`, el hotfix sale de ahí: fast-forward):
+```bash
+git fetch origin
+git checkout develop
+git merge-base --is-ancestor develop hotfix/mesa-total-cero && echo FF   # tiene que decir FF
+git merge --ff-only hotfix/mesa-total-cero
+```
+**H.2 — Release.** Título: `release: Mesas relee la orden antes de cobrar, cerrar o agregar`.
+
+**H.3 — Verificación** con `owner.test` en LAB (producción), dos pestañas: en la A abrir una mesa,
+agregar un producto y tocar "Cobrar" (dejar el modal abierto); en la B agregar otro producto a la
+misma mesa; en la A confirmar: tiene que decir "La mesa cambió desde que abriste el cobro" y la mesa
+sigue abierta con los dos productos. Cerrar el modal, volver a "Cobrar" y cobrar: "Venta #N".
+
+**H.4 — Reversa:** rollback del frontend (vuelve al release del Paso 5). No hay SQL que revertir.
+
+---
+
 ## Paso 6 — Fase 2 de D (cerrar el UPDATE directo de `cash_shifts`)
 
 - **Depende de:** Paso 1 (para ver qué versión tiene cada equipo) y de que **G-10 cierre por el
@@ -895,4 +936,5 @@ cada paso se escriben cuando el paso esté construido y probado en Docker.
 | 4c | avisar a quien usa celular | — (consulta) | — | — |
 | 4b | equipos reales | — | vista previa de `feat/m1-pos-movil` | — |
 | 5 | M1 + config | — | `feat/m1-pos-movil` | rollback |
+| H | hotfix: Mesas relee la orden antes de cobrar, cerrar o agregar | — | `hotfix/mesa-total-cero` | rollback |
 | 6 | fase 2 de D | `fase2-aplicar.sql` (`d66e8231…`) | — | `fase2-revertir.sql` (`034ec0a4…`) |

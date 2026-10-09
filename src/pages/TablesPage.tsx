@@ -22,8 +22,10 @@ import {
   updateOrderTotal, updateOrderStatus, registerSalePayment,
   getTableActiveOrderCount, removeOrderItem, markItemsSentToKitchen,
   assignOrderNumber, retryOrderNumber, setOrderFiado, applyOrderDiscount,
+  getOrdenFresca,
 } from '@/lib/supabase-helpers'
 import type { SalePaymentPart } from '@/lib/supabase-helpers'
+import { motivoParaNoCobrar, motivoParaNoCerrarVacia } from '@/lib/mesaFresca'
 import { OpenShiftModal } from '@/components/shift/OpenShiftModal'
 import { ItemConfigModal } from '@/components/pos/ItemConfigModal'
 import { PaymentSplitEditor } from '@/components/pos/PaymentSplitEditor'
@@ -704,6 +706,13 @@ function TableCheckoutModal({
     if (isFiado && !customerId) { toast.error('Selecciona un cliente para la venta a fiado'); return }
     setSubmitting(true)
     try {
+      // La copia del modal se tomó al tocar "Cobrar": si otro equipo agregó una tanda o
+      // cerró la mesa desde entonces, cobrar con ella deja consumo sin cobrar (cerrar en
+      // $0, o un descuento calculado sobre lo viejo que pisa el total). Se relee la orden
+      // ANTES de escribir nada; si la relectura falla, no se cobra. hotfix/mesa-total-cero.
+      const motivo = motivoParaNoCobrar(await getOrdenFresca(order.id), subtotal, total, isFiado)
+      if (motivo) { toast.error(motivo); return }
+
       // Descuento/vale ANTES del cobro. IDEMPOTENTE: `total` se computó desde el
       // subtotal invariante, así que reintentar no doble-descuenta. Alimenta tanto
       // el pago (la RPC valida Σ contra order.total) como el fiado (saldo). Se
@@ -1368,6 +1377,10 @@ function TableSidePanel({
     if (!window.confirm(`¿Cerrar ${table.name} sin consumo? Se cancelará la orden vacía y la mesa quedará libre.`)) return
     setClosingTable(true)
     try {
+      // El panel puede mostrar la mesa vacía y vieja: si otro equipo ya le agregó una
+      // tanda (o la cerró), cancelarla dejaría ese consumo sin cobrar. Se relee primero.
+      const motivo = motivoParaNoCerrarVacia(await getOrdenFresca(order.id))
+      if (motivo) { toast.error(motivo); onRefresh(); return }
       const { error: orderErr } = await updateOrderStatus(order.id, 'cancelled')
       if (orderErr) throw orderErr
       const { error: tableErr } = await updateTableStatus(table.id, 'free')
