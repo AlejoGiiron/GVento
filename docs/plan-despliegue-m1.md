@@ -1309,7 +1309,7 @@ consulta por separado.
   pégame la salida y se decide el ajuste con el dueño. *(Esta se puede correr ya, sin esperar al
   Paso 9: es de solo lectura.)*
 
-**9.2 — Correr `supabase/mesas-servidor.sql`** (md5 con finales LF **`c95a49a115d5e28bf714c63ce25b6c7a`**;
+**9.2 — Correr `supabase/mesas-servidor.sql`** (md5 con finales LF **`4adc0197e0784dd0fd4d6849a202c4f5`**;
 trae su `begin`/`commit`). Si la precondición o la comprobación de `order_item_bajas` fallan,
 **aborta sin cambiar nada**: pégame la salida. Re-aplicarlo después falla en la precondición
 (`register_sale_void` ya no es `2e9d312e…`) y no cambia nada.
@@ -1463,5 +1463,5 @@ Los martes G-10 y Salchimelo no abren: los pasos con SQL van ese día.
 | 6 | fase 2 de D | `fase2-aplicar.sql` (`d66e8231…`) | — | `fase2-revertir.sql` (`034ec0a4…`) |
 | 7 | SQL de A (cobrar por permiso) | `permisos-cobro.sql` (`55be33e4…`) + `seed-system-roles.sql` (`83219f0e…`), con pre-flight 1, 3 y 4 justo antes | — | `permisos-cobro-revertir.sql` (`e5ac822d…`) |
 | 8 | frontend de A | — | `feat/a-permisos` | rollback (el SQL del 7 se queda) |
-| 9 | SQL de Mesas en el servidor | `mesas-servidor.sql` (`c95a49a1…`), con pre-flight 3, 4 y 5 justo antes | — | `mesas-servidor-revertir.sql` (`2f557c6d…`), solo antes del 10 |
+| 9 | SQL de Mesas en el servidor | `mesas-servidor.sql` (`4adc0197…`), con pre-flight 3, 4 y 5 justo antes | — | `mesas-servidor-revertir.sql` (`2f557c6d…`), solo antes del 10 |
 | 10 | frontend de Mesas | — | `feat/mesas-servidor` | rollback (el SQL del 9 se queda) |
