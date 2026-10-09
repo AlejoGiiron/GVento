@@ -22,6 +22,12 @@ import { cliente, psql } from './helpers/db-local'
 // operación que se prueba. Base LOCAL de Docker.
 // ============================================================================
 
+// Los contadores de pedidos (llamadasRpc, escriturasDirectas) leen page.on('request'):
+// una página controlada por el service worker de la app reporta sus pedidos al worker,
+// no a la página, y el contador daba 0 con la llamada hecha (visto en el trace el
+// 2026-10-09). Igual que en m-pos-movil.spec.
+test.use({ serviceWorkers: 'block' })
+
 let owner: SupabaseClient
 let cajero: SupabaseClient
 let OWNER_ID = ''
@@ -161,6 +167,24 @@ test.describe('Mesas: cobro por close_table_sale', () => {
     expect(directas, 'quedó un paso suelto escribiendo directo a la base').toEqual([])
   })
 
+  test('cobrar con descuento: el servidor recibe el total de la pantalla y guarda el descuento', async ({ page }) => {
+    const { orden, nombre } = await mesaConConsumo(2)
+    const cobros = llamadasRpc(page, 'close_table_sale')
+    await abrirMesa(page, nombre)
+    await page.getByTestId('mesa-cobrar').click()
+    await page.getByTestId('discount-amount').fill('1000')
+    await page.getByTestId('discount-reason').fill('E2E cliente frecuente')
+    await page.getByTestId('pay-method-efectivo').click()
+    await page.getByTestId('checkout-continue').click()
+    await page.getByTestId('checkout-received').fill('9000')
+    await page.getByRole('button', { name: /Confirmar cobro/ }).click()
+    await expect(page.getByTestId('success-order-number')).toBeVisible()
+    expect(JSON.parse(cobros[0])).toMatchObject({ p_total_esperado: 9000, p_descuento: { amount: 1000, kind: 'normal', reason: 'E2E cliente frecuente' } })
+    expect(psql(`select o.discount_amount || '|' || o.total || '|' || o.discount_reason || '|' ||
+                   (select string_agg(method::text || ':' || amount, ',') from public.payments where order_id = o.id)
+                   from public.orders o where o.id = '${orden}';`)).toBe('1000.00|9000.00|E2E cliente frecuente|cash:9000.00')
+  })
+
   test('otro equipo la cobró con el modal abierto: "Esta mesa ya la cobró…", no un éxito propio, y un solo pago', async ({ page }) => {
     const { orden, nombre } = await mesaConConsumo(1)
     await hastaConfirmar(page, nombre)
@@ -169,8 +193,10 @@ test.describe('Mesas: cobro por close_table_sale', () => {
       p_order_id: orden, p_close_id: randomUUID(), p_total_esperado: 5000, p_payments: [{ method: 'card', amount: 5000 }],
     })
     expect(r.error, r.error?.message).toBeNull()
-    // Realtime marca la mesa libre: el modal tiene que SEGUIR (su mesa es una copia).
-    await expect(page.getByRole('button', { name: new RegExp(nombre) })).toContainText('Libre', { timeout: 15_000 })
+    // En producción Realtime marca la mesa libre y el modal tiene que SEGUIR (su mesa es una
+    // copia). La base LOCAL no publica tablas en Realtime (pg_publication_tables vacía,
+    // medido el 2026-10-09), así que acá la pantalla se queda con la copia vieja: lo que se
+    // prueba es la respuesta del servidor y el aviso.
     await page.getByRole('button', { name: /Confirmar cobro/ }).click()
     await expect(page.getByTestId('mesa-ya-cobrada')).toBeVisible()
     await expect(page.getByTestId('mesa-ya-cobrada-mensaje'))
@@ -209,7 +235,9 @@ test.describe('Mesas: cobro por close_table_sale', () => {
     })
     expect(t.error, t.error?.message).toBeNull()
     await page.getByRole('button', { name: /Confirmar cobro/ }).click()
-    await expect(page.getByText(/^No se cobró:.*no coincide/)).toBeVisible()
+    // Lo frena primero la relectura del navegador (hotfix/mesa-total-cero); la del
+    // servidor (B1) la prueba mesas-servidor.spec por la API.
+    await expect(page.getByText(/La mesa cambió desde que abriste el cobro/)).toBeVisible()
     expect(huella(orden)).toBe('pending|paid|0|-|occupied')
   })
 })
@@ -270,10 +298,13 @@ test.describe('Mesas: cerrar sin consumo y eliminar', () => {
     page.on('dialog', (d) => d.accept())
     await abrirMesa(page, nombre)
     await page.getByRole('button', { name: 'Cerrar mesa' }).click()
-    await expect(page.getByRole('button', { name: 'Cerrar mesa' })).toHaveCount(0)
+    // El final REAL: el aviso sale con la respuesta del servidor. (El botón cambia a
+    // "Cerrando..." al tocarlo, así que esperar a que desaparezca no esperaba nada.)
+    await expect(page.getByText(new RegExp(`Mesa ${nombre} liberada`))).toBeVisible()
+    // psql (spawnSync) bloquea el event loop: el evento 'request' se lee con poll.
+    await expect.poll(() => llamadas.length, { message: 'cerrar sin consumo tiene que ser UNA llamada' }).toBe(1)
     expect(psql(`select o.status || '|' || (o.cancelled_at is null) || '|' || t.status
                    from public.orders o join public.tables t on t.id = o.table_id where o.id = '${orden}';`)).toBe('cancelled|true|free')
-    expect(llamadas).toHaveLength(1)
     expect(directas).toEqual([])
     expect(mesa).toBeTruthy()
   })
@@ -298,7 +329,7 @@ test.describe('Mesas: cerrar sin consumo y eliminar', () => {
     await page.getByRole('button', { name: 'Configurar' }).click()
     await fila(vendida.nombre).getByTitle('Eliminar mesa').click()
     await expect(page.getByText(`Mesa ${vendida.nombre} archivada`)).toBeVisible()
-    expect(psql(`select (archived_at is not null) from public.tables where id = '${vendida.mesa}';`)).toBe('true')
+    expect(psql(`select (archived_at is not null) from public.tables where id = '${vendida.mesa}';`)).toBe('t')
     await expect(page.getByRole('button', { name: new RegExp(vendida.nombre) }), 'la mesa archivada sigue en el mapa').toHaveCount(0)
   })
 
@@ -325,7 +356,8 @@ test('Historial: "Ítems quitados de mesas" con quién, el motivo y el destino; 
   await login(page, ownerCreds())
   await page.goto('/historial')
   await page.getByTestId('items-quitados-toggle').click()
-  const merma = page.getByTestId('item-quitado-row').filter({ hasText: new RegExp(`${motivo}$`) })
+  const merma = page.getByTestId('item-quitado-row')
+    .filter({ has: page.getByTestId('item-quitado-motivo').filter({ hasText: new RegExp(`${motivo}$`) }) })
   await expect(merma).toContainText(NOMBRE_CAJERO)
   await expect(merma.getByTestId('item-quitado-destino')).toHaveText('Merma')
   await expect(page.getByTestId('item-quitado-row').filter({ hasText: `${motivo} B` }).getByTestId('item-quitado-destino'))

@@ -26,7 +26,7 @@ import {
   getOrdenFresca,
 } from '@/lib/supabase-helpers'
 import type { SalePaymentPart } from '@/lib/supabase-helpers'
-import { motivoParaNoCobrar, motivoParaNoCerrarVacia } from '@/lib/mesaFresca'
+import { motivoParaNoCobrar, motivoParaNoCerrarVacia, estaAbierta } from '@/lib/mesaFresca'
 import { motivoSinCocina, MESA_VACIA } from '@/lib/cocinaMesa'
 import { OpenShiftModal } from '@/components/shift/OpenShiftModal'
 import { ItemConfigModal } from '@/components/pos/ItemConfigModal'
@@ -754,10 +754,13 @@ function TableCheckoutModal({
     if (isFiado && !customerId) { toast.error('Selecciona un cliente para la venta a fiado'); return }
     setSubmitting(true)
     try {
-      // La copia del modal se tomó al tocar "Cobrar": si otro equipo agregó una tanda o
-      // cerró la mesa desde entonces, se avisa ANTES de llamar al servidor (que igual lo
-      // rechaza: B1 en close_table_sale). hotfix/mesa-total-cero.
-      const motivo = motivoParaNoCobrar(await getOrdenFresca(order.id), subtotal, total, isFiado)
+      // La copia del modal se tomó al tocar "Cobrar": si otro equipo agregó una tanda,
+      // se avisa ANTES de llamar al servidor (que igual lo rechaza: B1 en
+      // close_table_sale). hotfix/mesa-total-cero. Si la orden YA NO está abierta, no se
+      // corta acá: decide el servidor, que con la misma clave devuelve la venta propia
+      // (un reintento tras perder la respuesta) y con otra dice quién la cobró.
+      const fresca = await getOrdenFresca(order.id)
+      const motivo = estaAbierta(fresca.status) ? motivoParaNoCobrar(fresca, subtotal, total, isFiado) : null
       if (motivo) { toast.error(motivo); return }
 
       // Simple = una parte al total; dividir = las partes del editor. Fiado y
