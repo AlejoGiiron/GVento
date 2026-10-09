@@ -1106,6 +1106,14 @@ los equipos y el Paso 11 cierre el UPDATE directo de `orders.status`.
 cada orden y el turno en que cayó; la 2, cada turno con su sobrante y lo que esas ventas explicarían
 (una mesa cobrada en efectivo sin `payments` deja la plata en el cajón sin que el sistema la
 espere: sobrante por ese monto); la 3, las de total 0.
+**RESULTADO en producción (corrido por el dueño del repo el 2026-10-09):** en G-10 las 25 son clase
+**A, fiado saldado con abonos: ninguna mesa cobrada sin pago**, y la consulta 2 da 0 ventas sin pago
+en todos los turnos: **el bug no explica ningún sobrante**. Los números de la 2b no eran el bug: la
+2b no separaba los fiados saldados. En Salchimelo, la consulta 3: 54 cortesías del 100 % hechas por
+el dueño ($1.131.500 desde el 1/8) y **una sola clase 4** (sin descuento y con consumo): la orden
+1811 (12/9, $16.000). La consulta 1 de Salchimelo no está corrida. El camino del código sigue siendo
+real (`tests/mesa-total-cero.spec.ts` lo reproduce contra el código anterior y lo cierra el hotfix),
+pero en G-10 no hay rastro de que haya pasado.
 
 ### 🔴 Una tanda entra a una orden YA cobrada o cancelada (hallado 2026-10-09)
 
@@ -1126,14 +1134,18 @@ filas** en el Supabase de Docker: localmente la pantalla nunca se entera de camb
 (Mesas, cocina, delivery). Ningún test lo notaba porque ninguno dependía de eso; lo hizo visible
 `tests/mesas-frontend.spec.ts` (*"otro equipo la cobró"*), que esperaba ver la mesa "Libre". Lo que
 NO se puede probar localmente hoy: que el modal de cobro siga abierto cuando Realtime libera la mesa
-(el arreglo existe en el Paso 10, `checkoutTable`). **En producción no está medido:** la misma
-consulta en el SQL Editor lo dice. Si producción sí publica, conviene que `pnpm e2e:preparar` replique
-la publicación para que la suite pruebe lo mismo que se usa.
+(el arreglo existe en el Paso 10, `checkoutTable`). **Producción tampoco publica ninguna tabla**
+(la misma consulta, corrida por el dueño del repo el 2026-10-09: 0 filas): lo que ve la suite es lo
+que pasa en producción. Consecuencias y propuesta para activarlo (inventario, RLS medido, carga,
+riesgos, SQL con su reversa): `docs/diseno-realtime.md` en la rama `feat/realtime`. Lo más visible:
+Cocina no recibe comandas nuevas sola y su indicador dice "En línea" igual (el canal informa
+`SUBSCRIBED` aunque no llegue nada, medido).
 
 ### Diseño C — cuentas abiertas: lo que hay que preservar (anotado 2026-10-09)
 
 G-10 usa mesas con nombre de persona como cuentas abiertas (a la fecha: Camelo $221.000 desde el 3/9,
-Sebastian $126.500, Isabella $47.500, Katerine $23.000). Es el flujo intencional de CLAUDE.md
+Sebastian $126.500, Isabella $47.500, Katerine $23.000; el 2026-10-09 siguen vivas, Camelo con
+consumo hasta el 7/10). Es el flujo intencional de CLAUDE.md
 (*"Mesas abiertas de larga duración"*): **cualquier cambio se habla con el cliente primero.** Para
 migrarlas sin perder lo que deben, el diseño tiene que decidir y probar:
 - **El monto:** `orders.total` contra la suma de las líneas (`supabase/diag/mesas-sin-pagos.sql`,
