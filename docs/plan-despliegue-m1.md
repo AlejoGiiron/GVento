@@ -845,6 +845,104 @@ sigue abierta con los dos productos. Cerrar el modal, volver a "Cobrar" y cobrar
 
 ---
 
+## Hotfix combinado del 13/10 — `hotfix/mesa-total-cero` + `hotfix/mesa-pegada` (`hotfix/mesas-13-10`)
+
+**Reemplaza a H.1 y H.2:** el hotfix de arriba no sale solo, sale en esta rama junto con el de mesas
+pegadas. Martes 13/10, con G-10 y Salchimelo cerrados. Si la suite no estaba verde antes de las
+12:30, pasa al miércoles 14/10 a las 7:00.
+
+- **Qué lleva, además de lo de arriba:** solo frontend, **nada de SQL**.
+  - **Mesa pegada** ("Ocupada" o "Pide cuenta" sin cuenta viva): la tarjeta dice "Sin cuenta abierta ·
+    tócala para liberarla", y el panel trae el botón **Liberar mesa**. Antes de liberar, relee en la
+    base que no haya una cuenta abierta.
+  - **"Pide cuenta"** solo cambia una mesa que sigue ocupada. Si otro equipo ya la cobró, avisa.
+  - **"Abrir mesa"** primero ocupa la mesa, y solo si sigue libre. Así no nacen huérfanas ni se abre
+    dos veces la misma mesa.
+  - **Si falla la carga de las cuentas, no ofrece liberar** (fail-closed).
+  - **Varias cuentas vivas en una mesa** (MESA 12 de Salchimelo): aviso en la tarjeta ("2 cuentas
+    abiertas") y en el panel, con la lista. Las cuentas salen siempre en el mismo orden: la más
+    antigua primero, y es la que se muestra.
+- **Pruebas:** `tests/mesa-pegada.spec.ts` (9 casos), además de `tests/mesa-total-cero.spec.ts`.
+  Mutantes de las dos mejoras: 6 de 6 muertos.
+- **Lo que NO arregla:** los datos que ya quedaron mal (las mesas se limpian con SQL aparte) y la
+  ventana de milisegundos entre releer y escribir, que cierra el servidor en el Paso 9.
+
+**HC.1 — Merge** (`develop` = `fab23b0`; la rama sale de ahí, así que es fast-forward):
+```bash
+git fetch origin
+git checkout develop
+git merge-base --is-ancestor origin/develop hotfix/mesas-13-10 && echo FF   # tiene que decir FF
+git merge --ff-only hotfix/mesas-13-10
+```
+**HC.2 — Release.** Título: `release: Mesas relee la orden antes de cobrar y no deja mesas pegadas`.
+
+**HC.3 — Verificación en producción con `demo@demo.com`**, en dos pestañas del escritorio (A y B),
+cada escenario desde una mesa libre. En esa organización `demo@demo.com` es el dueño de **Café
+Aroma**, así que:
+- se usa una mesa propia de prueba: en Mesas → Configurar, "Nueva mesa" → **"PRUEBA HOTFIX"**;
+- el escenario 2 hace una venta real: necesita un turno abierto y al final la venta se anula
+  desde Historial con el motivo "prueba hotfix 13/10".
+
+**Escenario 1 — mesa pegada simulada.** Como ya no se puede pegar una mesa desde la app, se pega
+con SQL, **por UUID**:
+```sql
+-- Q-MESA-PRUEBA (solo lectura): el UUID de la mesa de prueba.
+select t.id, t.name, t.status::text
+  from public.tables t
+  join public.profiles p on p.restaurant_id = t.restaurant_id
+  join auth.users u on u.id = p.id
+ where u.email = 'demo@demo.com' and t.name = 'PRUEBA HOTFIX';
+-- Esperado: UNA fila, status 'free'. Copia el id.
+
+-- PEGAR (escribe UNA fila): pega el id en la línea marcada.
+update public.tables t set status = 'waiting_bill'
+ where t.id = 'PEGA-AQUI-EL-ID'::uuid          -- con el texto de ejemplo FALLA a propósito
+   and t.status = 'free'
+   and not exists (select 1 from public.orders o
+                    where o.table_id = t.id and o.status in ('pending', 'preparing', 'ready'))
+returning t.id, t.name, t.status;
+-- Esperado: UNA fila con 'waiting_bill'. Cero filas = la mesa no estaba libre o tenía
+-- cuenta: no sigas, revisa.
+```
+En la pestaña A, tocar el botón de actualizar (↻). La tarjeta dice "Pide cuenta" y **"Sin cuenta abierta · tócala
+para liberarla"**. Al tocarla, el panel dice "Esta mesa no tiene una cuenta abierta". Tocar **Liberar
+mesa**, aceptar, y debe salir "Mesa PRUEBA HOTFIX liberada", con la tarjeta en "Libre".
+
+**Escenario 2 — dos pestañas cobrando la misma mesa.**
+- En A, abrir PRUEBA HOTFIX, agregar el producto más barato y tocar "Cobrar".
+- En B, tocar el botón de actualizar (↻), abrir la misma mesa y tocar "Cobrar".
+- En A, cobrar en efectivo: debe salir "Venta #N".
+- En B, confirmar el cobro. Tiene que decir **"Esta mesa ya no está abierta: la cobró o la cerró otro
+  equipo. Actualiza la pantalla."**, y no se cobra dos veces.
+- Q-COBRO-UNA-VEZ (solo lectura):
+  ```sql
+  select o.order_number, o.status::text, o.total,
+         (select count(*) from public.payments p where p.order_id = o.id) as pagos
+    from public.orders o
+    join public.tables t on t.id = o.table_id
+   where t.id = 'PEGA-AQUI-EL-ID'::uuid
+   order by o.created_at desc limit 1;
+  ```
+  Esperado: `delivered`, el total del producto y **`pagos` = 1**.
+- Después, anular esa venta desde Historial.
+
+**Escenario 3 — abrir la misma mesa desde dos pestañas.**
+- A y B con la mesa libre en pantalla (tocar el botón de actualizar (↻) en las dos).
+- En A, tocar la mesa → "Abrir mesa": debe salir "Mesa PRUEBA HOTFIX abierta".
+- En B, sin actualizar, tocar la mesa → "Abrir mesa". Tiene que decir **"PRUEBA HOTFIX ya no está
+  libre: otro equipo la abrió"**.
+- Q-UNA-CUENTA (solo lectura):
+  ```sql
+  select count(*) as cuentas_vivas from public.orders
+   where table_id = 'PEGA-AQUI-EL-ID'::uuid and status in ('pending', 'preparing', 'ready');
+  ```
+  Esperado: **1**. Con el código viejo eran 2.
+- Al final, en A: "Cerrar mesa" (sin consumo). Después, en Configurar, "Eliminar mesa" sobre "PRUEBA HOTFIX".
+
+**HC.4 — Reversa:** rollback del frontend (vuelve al release del Paso 5). No hay SQL que revertir.
+
+---
+
 ## Paso 6 — Fase 2 de D (cerrar el UPDATE directo de `cash_shifts`)
 
 - **Depende de:** Paso 1 (para ver qué versión tiene cada equipo) y de que **G-10 cierre por el
@@ -923,6 +1021,19 @@ cada paso se escriben cuando el paso esté construido y probado en Docker.
 | 10 | Archivar mesas (`archived_at` + RPC de eliminar). | SQL + frontend | 9b |
 | 11 | ~~Fiado en `/m` (M1.1, B)~~ → **entra en el Paso 5** (decidido el 2026-10-08): ver 5.0 y 5.1. | — | — |
 
+## Calendario de releases (actualizado el 2026-10-13)
+
+Los martes G-10 y Salchimelo no abren: los pasos con SQL van ese día.
+
+| fecha | release | rama | cómo entra a `develop` |
+|---|---|---|---|
+| mar 13/10 | hotfix combinado de Mesas (HC) | `hotfix/mesas-13-10` | fast-forward desde `fab23b0` (si la suite no está verde a las 12:30: mié 14/10, 7:00) |
+| mié 14/10 | Cocina, Mesas y Delivery se recargan solas | `feat/cocina-refresco` | rebasada sobre el hotfix combinado, suite completa y fast-forward |
+| mar 20/10 | el arqueo cuenta los abonos de fiado (AA) | `feat/arqueo-abonos` | rebasada sobre cocina-refresco, suite completa y fast-forward |
+| un martes después del arqueo | Paso 6, fase 2 de D | — | parte de la versión de `close_cash_shift` que deja el arqueo (`a395c0a1…`), no de la de hoy |
+| martes siguientes | Pasos 7-8 (permisos de cobro, A) y después 9-10 (Mesas en el servidor) | `feat/a-permisos`, `feat/mesas-servidor` | se fija al llegar |
+| al final | Realtime | `feat/realtime` | después del paquete de Mesas |
+
 ## Resumen
 
 | paso | qué | SQL | frontend | reversa |
@@ -936,5 +1047,6 @@ cada paso se escriben cuando el paso esté construido y probado en Docker.
 | 4c | avisar a quien usa celular | — (consulta) | — | — |
 | 4b | equipos reales | — | vista previa de `feat/m1-pos-movil` | — |
 | 5 | M1 + config | — | `feat/m1-pos-movil` | rollback |
-| H | hotfix: Mesas relee la orden antes de cobrar, cerrar o agregar | — | `hotfix/mesa-total-cero` | rollback |
+| H | hotfix: Mesas relee la orden antes de cobrar, cerrar o agregar | — | sale dentro de HC | — |
+| HC | hotfix combinado: relee la orden + mesas pegadas + varias cuentas vivas | — | `hotfix/mesas-13-10` | rollback |
 | 6 | fase 2 de D | `fase2-aplicar.sql` (`d66e8231…`) | — | `fase2-revertir.sql` (`034ec0a4…`) |
