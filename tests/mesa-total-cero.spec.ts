@@ -162,8 +162,11 @@ test.describe('"Cerrar mesa" y la tanda: releen el estado', () => {
     page.on('dialog', (d) => d.accept())
     await abrirPanel(page, nombre)
     await page.getByRole('button', { name: 'Cerrar mesa' }).click()
-    await expect(page.getByRole('button', { name: 'Cerrar mesa' })).toHaveCount(0)
-    expect(huella(orden)).toBe('cancelled|0.00|0.00|0|0|free')
+    // NO esperar a que desaparezca "Cerrar mesa": pasa a "Cerrando..." ANTES de escribir, y la
+    // base se leía a mitad del cierre (suite del 13/10: pending|occupied). La señal de que
+    // terminó es el aviso; la base se relee con reintento.
+    await expect(page.getByText(`Mesa ${nombre} liberada`)).toBeVisible()
+    await expect.poll(() => huella(orden)).toBe('cancelled|0.00|0.00|0|0|free')
   })
 
   test('DOS EQUIPOS — el selector abierto y otro cobra la mesa: la tanda NO entra a la orden cobrada', async ({ page }) => {
