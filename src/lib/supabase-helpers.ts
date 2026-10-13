@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import { captureIssue } from './sentry'
+import type { OrdenFresca } from './mesaFresca'
 import type { Enums, Json, Tables, TablesInsert, TablesUpdate } from '@/types/database.types'
 
 // --- Profiles ---
@@ -300,6 +301,47 @@ export const getTableActiveOrderCount = (tableId: string) =>
     .eq('table_id', tableId)
     .in('status', ['pending', 'preparing', 'ready'])
 
+// ── Cambios de estado de mesa CONDICIONADOS al estado actual ──
+// Realtime no entrega nada en producción (DEUDAS), así que otro equipo puede estar
+// mirando una mesa vieja. Estas escrituras solo aplican si la mesa sigue en el
+// estado esperado; si no, devuelven 0 filas y la pantalla lo avisa. Sin esto, un
+// "Pide cuenta" tocado en una mesa que otro equipo ya cobró la dejaba "Pide
+// cuenta" sin orden y sin forma de liberarla (Salchimelo, 2026-10-10).
+
+/** "Pide cuenta": solo sobre una mesa que SIGUE ocupada. */
+export const pedirCuentaMesa = (tableId: string) =>
+  supabase.from('tables').update({ status: 'waiting_bill' })
+    .eq('id', tableId).eq('status', 'occupied').select('id')
+
+/** Abrir mesa, paso 1: ocuparla solo si SIGUE libre (dos equipos no la abren a la vez). */
+export const ocuparMesaLibre = (tableId: string) =>
+  supabase.from('tables').update({ status: 'occupied' })
+    .eq('id', tableId).eq('status', 'free').select('id')
+
+/** Deshace `ocuparMesaLibre` si no se pudo crear la orden. */
+export const desocuparMesa = (tableId: string) =>
+  supabase.from('tables').update({ status: 'free' })
+    .eq('id', tableId).eq('status', 'occupied').select('id')
+
+/**
+ * Libera una mesa que quedó marcada como ocupada sin cuenta abierta (un cobro o un
+ * "Cerrar mesa" que no alcanzó a liberarla, o un "Pide cuenta" desde una pantalla
+ * vieja). Relee en la base que no tenga orden viva ANTES de liberar: la pantalla
+ * puede estar desactualizada. Fail-closed: si no puede contar, no libera.
+ */
+export async function liberarMesaSinCuenta(
+  tableId: string,
+): Promise<'liberada' | 'tiene_cuenta' | 'ya_libre'> {
+  const { count, error } = await getTableActiveOrderCount(tableId)
+  if (error) throw error
+  if (count == null) throw new Error('No se pudo verificar si la mesa tiene una cuenta abierta')
+  if (count > 0) return 'tiene_cuenta'
+  const { data, error: e2 } = await supabase.from('tables').update({ status: 'free' })
+    .eq('id', tableId).in('status', ['occupied', 'waiting_bill']).select('id')
+  if (e2) throw e2
+  return (data ?? []).length > 0 ? 'liberada' : 'ya_libre'
+}
+
 const ORDER_ITEMS_WITH_EXTRAS = `
   id, qty, unit_price, notes, sent_to_kitchen,
   products(id, name, price, routes_to_kitchen),
@@ -322,6 +364,10 @@ export const getActiveOrdersForTables = (tableIds: string[]) =>
     .select(`*, order_items(${ORDER_ITEMS_WITH_EXTRAS})`)
     .in('table_id', tableIds)
     .in('status', ['pending', 'preparing', 'ready'])
+    // Orden ESTABLE: con dos cuentas vivas en la misma mesa (MESA 12 de G-10), sin
+    // esto la que se mostraba dependía del orden físico y podía cambiar entre recargas.
+    .order('created_at', { ascending: true })
+    .order('id', { ascending: true })
 
 export const markItemsSentToKitchen = (itemIds: string[]) =>
   supabase
@@ -355,6 +401,24 @@ export const getOrderById = (orderId: string) =>
 
 export const createOrder = (order: TablesInsert<'orders'>) =>
   supabase.from('orders').insert(order).select().single()
+
+// Relee una orden de mesa COMO ESTÁ EN LA BASE: estado, total, descuento y la suma de
+// sus líneas (con extras). La usan las guardas de src/lib/mesaFresca.ts antes de cobrar
+// o cerrar una mesa, porque la pantalla trabaja sobre una copia que puede estar vieja.
+export const getOrdenFresca = async (orderId: string): Promise<OrdenFresca> => {
+  const { data, error } = await supabase
+    .from('orders')
+    .select('status, total, discount_amount, order_items(qty, unit_price, order_item_extras(qty, unit_price))')
+    .eq('id', orderId)
+    .single()
+  if (error) throw error
+  const items = data.order_items ?? []
+  const lineas = items.reduce(
+    (a, i) => a + i.qty * i.unit_price + (i.order_item_extras ?? []).reduce((b, e) => b + e.qty * e.unit_price, 0),
+    0,
+  )
+  return { status: data.status, total: data.total, discount_amount: data.discount_amount, lineas, items: items.length }
+}
 
 export const updateOrderStatus = (orderId: string, status: Tables<'orders'>['status']) =>
   supabase.from('orders').update({ status }).eq('id', orderId).select().single()

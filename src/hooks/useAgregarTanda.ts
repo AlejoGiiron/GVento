@@ -4,6 +4,7 @@ import { nuevoUuid } from '@/lib/uuid'
 import { useAuth } from '@/hooks/useAuth'
 import type { Json } from '@/types/database.types'
 import type { OrderItemPayload } from '@/lib/supabase-helpers'
+import { motivoParaNoAgregar } from '@/lib/mesaFresca'
 
 // ============================================================================
 // Agrega una TANDA de ítems a una orden abierta (Mesas), con CLAVE por tanda
@@ -29,6 +30,15 @@ export function useAgregarTanda() {
   const agregar = useCallback(async (orderId: string, items: OrderItemPayload[]): Promise<void> => {
     // El usuario es parte de la huella (igual que en useSaleCheckout): otro usuario
     // en la misma pestaña no reusa la tanda pendiente del anterior.
+    // La pantalla puede tener la mesa vieja (otro equipo la cobró o la cerró): se
+    // relee el estado y a una orden que ya no está abierta no se le agrega nada.
+    // Si la relectura falla, tampoco (fail-closed). hotfix/mesa-total-cero.
+    const { data: orden, error: errorEstado } = await supabase
+      .from('orders').select('status').eq('id', orderId).single()
+    if (errorEstado) throw errorEstado
+    const motivo = motivoParaNoAgregar(orden.status)
+    if (motivo) throw new Error(motivo)
+
     const huella = JSON.stringify({ usuario, orderId, items })
     if (pendiente?.huella !== huella) pendiente = { lote: nuevoUuid(), huella }
     const { error } = await supabase.rpc('add_order_items_with_extras', {
