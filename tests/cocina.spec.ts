@@ -146,8 +146,9 @@ test.describe.serial('Cocina por sede y por producto', () => {
       // El panel cargó (Agregar ítems visible) pero el botón "Cocina" no existe.
       await expect(page.getByRole('button', { name: 'Agregar ítems' })).toBeVisible()
       await expect(page.getByRole('button', { name: /^Cocina/ })).toHaveCount(0)
-      // Sin botón, pero no mudo: dice por qué (fix/cocina-avisos, 2026-10-13).
-      await expect(page.getByTestId('mesa-cocina-motivo')).toHaveText('La sede no usa cocina; recarga si lo acabas de cambiar')
+      // Ni botón ni motivo: una sede sin cocina (G-10) no tiene que ver la línea en cada mesa
+      // (decidido el 2026-10-13). El motivo es solo para sedes CON cocina.
+      await expect(page.getByTestId('mesa-cocina-motivo')).toHaveCount(0)
 
       // Liberar la mesa (orden vacía → "Cerrar mesa").
       const cerrar = page.getByRole('button', { name: 'Cerrar mesa' })

@@ -1741,8 +1741,9 @@ function TableSidePanel({
           )}
         </div>
 
-        {/* Con la mesa vacía no hace falta: el panel ya dice "Sin ítems". */}
-        {motivoCocina && motivoCocina !== MESA_VACIA && (
+        {/* Solo en sedes CON cocina y con el botón deshabilitado. En una sede sin cocina
+            (G-10) saldría en todas las mesas; con la mesa vacía, el panel ya dice "Sin ítems". */}
+        {sedeUsesKitchen && motivoCocina && motivoCocina !== MESA_VACIA && (
           <div data-testid="mesa-cocina-motivo" style={{ fontSize: 11.5, color: '#64748b', textAlign: 'center', marginTop: -2 }}>
             {motivoCocina}
           </div>

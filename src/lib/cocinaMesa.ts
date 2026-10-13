@@ -1,5 +1,7 @@
 // Por qué el botón "Cocina" de una mesa no tiene nada que enviar. Antes quedaba gris y
-// mudo (o desaparecía), y en producción se tomó por una falla del KDS (2026-10-13).
+// mudo, y en producción se tomó por una falla del KDS (2026-10-13). En una sede SIN
+// cocina la pantalla no muestra el motivo (ni el botón); SEDE_SIN_COCINA solo se usa
+// como defensa si igual se intenta enviar.
 //
 // Qué va a cocina (supabase/cocina-por-sede.sql): sede.uses_kitchen AND
 // producto.routes_to_kitchen AND la línea todavía no se envió.
