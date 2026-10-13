@@ -3,7 +3,7 @@ import {
   UtensilsCrossed, Plus, Users, X, Check, Search,
   ChevronRight, Banknote, CreditCard, Building2, Smartphone,
   Trash, Minus, Settings, Pencil, StickyNote,
-  ReceiptText, RefreshCw, ChefHat, HandCoins, SplitSquareHorizontal,
+  ReceiptText, RefreshCw, ChefHat, HandCoins, SplitSquareHorizontal, AlertTriangle,
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { useQueryClient } from '@tanstack/react-query'
@@ -21,6 +21,7 @@ import {
   updateTableStatus, createOrder,
   updateOrderTotal, updateOrderStatus, registerSalePayment,
   getTableActiveOrderCount, removeOrderItem, markItemsSentToKitchen,
+  pedirCuentaMesa, ocuparMesaLibre, desocuparMesa, liberarMesaSinCuenta,
   assignOrderNumber, retryOrderNumber, setOrderFiado, applyOrderDiscount,
   getOrdenFresca,
 } from '@/lib/supabase-helpers'
@@ -71,6 +72,11 @@ function formatElapsed(dateStr: string): string {
 
 const ZONES = ['Salón', 'Terraza', 'Barra']
 
+// Hora de apertura de una cuenta, en Bogotá (R7).
+const HORA_CUENTA = new Intl.DateTimeFormat('es-CO', {
+  hour: '2-digit', minute: '2-digit', timeZone: 'America/Bogota',
+})
+
 const STATUS_CONFIG: Record<TableStatus, { bg: string; border: string; fg: string; dot: string; label: string }> = {
   free:         { bg: '#f8fafc', border: '#e2e8f0', fg: '#64748b', dot: '#cbd5e1',  label: 'Libre'           },
   occupied:     { bg: '#ecfdf5', border: '#a7f3d0', fg: '#065f46', dot: '#10b981',  label: 'Ocupada'         },
@@ -83,11 +89,17 @@ const STATUS_CONFIG: Record<TableStatus, { bg: string; border: string; fg: strin
 function TableCard({
   table,
   order,
+  sinCuenta,
+  cuentasVivas,
   selected,
   onClick,
 }: {
   table: TableRow
   order?: ActiveOrder
+  /** Ocupada o "Pide cuenta" sin orden viva (y las órdenes cargaron bien). */
+  sinCuenta: boolean
+  /** Cuántas cuentas vivas tiene la mesa. Con más de una, se avisa. */
+  cuentasVivas: number
   selected: boolean
   onClick: () => void
 }) {
@@ -178,6 +190,21 @@ function TableCard({
         </div>
       )}
 
+      {sinCuenta && (
+        <div data-testid="table-sin-cuenta" style={{ fontSize: 11.5, color: '#64748b' }}>
+          Sin cuenta abierta · tócala para liberarla
+        </div>
+      )}
+
+      {cuentasVivas > 1 && (
+        <div data-testid="table-varias-cuentas" style={{
+          display: 'flex', alignItems: 'center', gap: 4,
+          fontSize: 11.5, fontWeight: 600, color: '#b45309',
+        }}>
+          <AlertTriangle size={12} /> {cuentasVivas} cuentas abiertas
+        </div>
+      )}
+
       {/* Order total */}
       {order && (
         <div style={{
@@ -212,6 +239,20 @@ function OpenTableModal({
     if (!profile) return
     setSubmitting(true)
     try {
+      // Primero se ocupa la mesa, y solo si sigue libre. Antes se creaba la orden
+      // y DESPUÉS se ocupaba: si lo segundo no llegaba, la mesa se veía libre con
+      // una orden viva escondida, y abrirla otra vez creaba una segunda orden
+      // (medido en prod el 2026-10-10: 3 mesas así). Ahora, si falla la orden, se
+      // deshace; y si tampoco llega eso, la mesa queda ocupada SIN cuenta, que la
+      // pantalla sí deja liberar.
+      const { data: ocupada, error: statusErr } = await ocuparMesaLibre(table.id)
+      if (statusErr) throw statusErr
+      if (!ocupada?.length) {
+        toast.error(`${table.name} ya no está libre: otro equipo la abrió`)
+        onOpened()
+        return
+      }
+
       const { data: order, error: orderErr } = await createOrder({
         type: 'dine_in',
         status: 'pending',
@@ -221,10 +262,10 @@ function OpenTableModal({
         restaurant_id: profile.restaurant_id,
         created_by: profile.id,
       })
-      if (orderErr || !order) throw orderErr ?? new Error('Error al crear la orden')
-
-      const { error: statusErr } = await updateTableStatus(table.id, 'occupied')
-      if (statusErr) throw statusErr
+      if (orderErr || !order) {
+        await desocuparMesa(table.id)
+        throw orderErr ?? new Error('Error al crear la orden')
+      }
 
       toast.success(`Mesa ${table.name} abierta`)
       onOpened()
@@ -1341,6 +1382,8 @@ function TableConfigModal({
 function TableSidePanel({
   table,
   order,
+  cuentas,
+  ordenesCargadas,
   onClose,
   onAddItems,
   onRequestBill,
@@ -1349,6 +1392,9 @@ function TableSidePanel({
 }: {
   table: TableRow
   order: ActiveOrder | null
+  /** Todas las cuentas vivas de la mesa, de la más antigua a la más nueva. */
+  cuentas: ActiveOrder[]
+  ordenesCargadas: boolean
   onClose: () => void
   onAddItems: () => void
   onRequestBill: () => void
@@ -1358,6 +1404,33 @@ function TableSidePanel({
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null)
   const [sendingToKitchen, setSendingToKitchen] = useState(false)
   const [closingTable, setClosingTable] = useState(false)
+  const [liberando, setLiberando] = useState(false)
+  // Sin orden viva y con las órdenes bien cargadas: la mesa quedó pegada. Con la
+  // carga fallida NO se ofrece liberar (podría tener cuenta y no la vimos).
+  // Solo los estados que EXIGEN orden: una mesa reservada no tiene cuenta a propósito.
+  const sinCuenta = !order && ordenesCargadas
+    && (table.status === 'occupied' || table.status === 'waiting_bill')
+
+  const handleLiberar = async () => {
+    if (!window.confirm(`¿Liberar ${table.name}? No tiene una cuenta abierta; quedará libre para usarla de nuevo.`)) return
+    setLiberando(true)
+    try {
+      const r = await liberarMesaSinCuenta(table.id)
+      if (r === 'tiene_cuenta') {
+        toast.error(`${table.name} tiene una cuenta abierta: no se liberó`)
+        onRefresh()
+        return
+      }
+      toast.success(r === 'liberada' ? `Mesa ${table.name} liberada` : `${table.name} ya estaba libre`)
+      onClose()
+      onRefresh()
+    } catch (err) {
+      const msg = mensajeDeError(err, 'Error desconocido')
+      toast.error(`Error al liberar la mesa: ${msg}`)
+    } finally {
+      setLiberando(false)
+    }
+  }
   const { restaurant } = useRestaurantConfig()
   const cfg = STATUS_CONFIG[table.status]
 
@@ -1489,9 +1562,35 @@ function TableSidePanel({
         </button>
       </div>
 
+      {cuentas.length > 1 && (
+        <div data-testid="table-varias-cuentas-panel" style={{
+          margin: '12px 18px 0', padding: '10px 12px', borderRadius: 10,
+          background: '#fffbeb', border: '1px solid #fcd34d', color: '#92400e', fontSize: 12.5,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, marginBottom: 4 }}>
+            <AlertTriangle size={14} /> Esta mesa tiene {cuentas.length} cuentas abiertas
+          </div>
+          <div style={{ marginBottom: 6 }}>
+            Se muestra la más antigua. Antes de cobrar, revisa con el administrador cuál es la correcta.
+          </div>
+          {cuentas.map((c, i) => (
+            <div key={c.id} data-testid="table-cuenta-viva" style={{ fontFamily: 'monospace' }}>
+              {i + 1}. abierta {HORA_CUENTA.format(new Date(c.created_at))} · {formatCOP(c.total)}
+              {i === 0 ? ' · la que ves' : ''}
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Items list */}
       <div style={{ flex: 1, overflow: 'auto' }}>
-        {!order ? (
+        {sinCuenta ? (
+          <div data-testid="table-sin-cuenta-panel" style={{ padding: 32, textAlign: 'center', color: '#64748b', fontSize: 13 }}>
+            <UtensilsCrossed size={20} style={{ margin: '0 auto 10px', display: 'block', opacity: 0.4 }} />
+            <div style={{ fontWeight: 600, color: '#0f172a', marginBottom: 4 }}>Esta mesa no tiene una cuenta abierta</div>
+            Quedó marcada como ocupada, pero no hay consumo pendiente. Libérala para volver a usarla.
+          </div>
+        ) : !order ? (
           <div style={{ padding: 32, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>
             <RefreshCw size={20} style={{ margin: '0 auto 10px', display: 'block', opacity: 0.4 }} />
             Cargando orden...
@@ -1566,6 +1665,26 @@ function TableSidePanel({
       )}
 
       {/* Actions */}
+      {sinCuenta ? (
+        <div style={{ padding: '14px 18px 18px', borderTop: '1px solid #e5e7eb' }}>
+          <button
+            data-testid="table-release"
+            disabled={liberando}
+            onClick={handleLiberar}
+            style={{
+              width: '100%', padding: '14px',
+              background: liberando ? '#cbd5e1' : '#10b981',
+              border: 'none', borderRadius: 10,
+              cursor: liberando ? 'not-allowed' : 'pointer',
+              fontSize: 15, fontWeight: 700, color: '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              boxShadow: liberando ? 'none' : '0 6px 16px rgba(16,185,129,.35)',
+            }}
+          >
+            <Check size={16} strokeWidth={2.5} /> {liberando ? 'Liberando...' : 'Liberar mesa'}
+          </button>
+        </div>
+      ) : (
       <div style={{ padding: '14px 18px 18px', borderTop: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', gap: 8 }}>
         <button
           onClick={onAddItems}
@@ -1642,6 +1761,7 @@ function TableSidePanel({
           </button>
         )}
       </div>
+      )}
     </div>
   )
 }
@@ -1650,7 +1770,7 @@ function TableSidePanel({
 
 export function TablesPage() {
   const { profile } = useAuth()
-  const { tables, activeOrders, loading, refetch } = useTables()
+  const { tables, activeOrders, cuentasPorMesa, ordenesCargadas, loading, refetch } = useTables()
 
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null)
   const [activeZone, setActiveZone] = useState<string | null>(null)
@@ -1712,8 +1832,15 @@ export function TablesPage() {
 
   const handleRequestBill = async () => {
     if (!selectedTableId) return
-    const { error } = await updateTableStatus(selectedTableId, 'waiting_bill')
+    const { data, error } = await pedirCuentaMesa(selectedTableId)
     if (error) { toast.error('Error al actualizar estado'); return }
+    if (!data?.length) {
+      // La pantalla estaba vieja: otro equipo ya la cobró o la cerró.
+      toast.error('La mesa ya no está ocupada: otro equipo la cobró o la cerró')
+      setSelectedTableId(null)
+      refetch()
+      return
+    }
     toast.success('Estado actualizado a "Pide cuenta"')
     refetch()
   }
@@ -1830,6 +1957,11 @@ export function TablesPage() {
                   key={table.id}
                   table={table}
                   order={activeOrders[table.id]}
+                  sinCuenta={
+                    ordenesCargadas && !activeOrders[table.id]
+                    && (table.status === 'occupied' || table.status === 'waiting_bill')
+                  }
+                  cuentasVivas={cuentasPorMesa[table.id]?.length ?? 0}
                   selected={selectedTableId === table.id}
                   onClick={() => handleTableClick(table)}
                 />
@@ -1844,6 +1976,8 @@ export function TablesPage() {
         <TableSidePanel
           table={selectedTable}
           order={selectedOrder}
+          cuentas={cuentasPorMesa[selectedTable.id] ?? []}
+          ordenesCargadas={ordenesCargadas}
           onClose={() => setSelectedTableId(null)}
           onAddItems={() => setShowProductPicker(true)}
           onRequestBill={handleRequestBill}
