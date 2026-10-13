@@ -146,10 +146,18 @@ test.describe.serial('Cocina por sede y por producto', () => {
       // El panel cargó (Agregar ítems visible) pero el botón "Cocina" no existe.
       await expect(page.getByRole('button', { name: 'Agregar ítems' })).toBeVisible()
       await expect(page.getByRole('button', { name: /^Cocina/ })).toHaveCount(0)
+      // Sin botón, pero no mudo: dice por qué (fix/cocina-avisos, 2026-10-13).
+      await expect(page.getByTestId('mesa-cocina-motivo')).toHaveText('La sede no usa cocina; recarga si lo acabas de cambiar')
 
       // Liberar la mesa (orden vacía → "Cerrar mesa").
       const cerrar = page.getByRole('button', { name: 'Cerrar mesa' })
-      if (await cerrar.count()) await cerrar.click()
+      // Esperar a que TERMINE antes del finally: cambiar de sede a mitad del cierre dejaba
+      // la orden cancelada y la mesa ocupada (RLS ya no deja liberar una mesa de otra sede),
+      // y la corrida siguiente fallaba con "Mesa 1" pegada (2026-10-13).
+      if (await cerrar.count()) {
+        await cerrar.click()
+        await expect(page.getByText('Mesa Mesa 1 liberada')).toBeVisible()
+      }
     } finally {
       // Restaurar SIEMPRE la sede activa a Norte y confirmar que vuelve "Cocina".
       await page.getByTestId('store-selector').selectOption({ label: NORTE })

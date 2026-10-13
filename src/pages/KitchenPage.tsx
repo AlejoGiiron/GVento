@@ -4,6 +4,7 @@ import type { RealtimeChannel } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import { updateOrderStatus } from '@/lib/supabase-helpers'
 import { useRecargaPeriodica } from '@/hooks/useRecargaPeriodica'
+import { decidirSedeCocina, type Perfil } from '@/lib/cocinaSede'
 import type { Tables } from '@/types/database.types'
 import {
   ChefHat, Check, RefreshCw, UtensilsCrossed,
@@ -444,7 +445,9 @@ const HORA_KDS = new Intl.DateTimeFormat('es-CO', {
   timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
 })
 
-function KDSBoard({ restaurantId, onLogout }: { restaurantId: string; onLogout: () => void }) {
+function KDSBoard({ restaurantId, onLogout, aviso, onCerrarAviso }: {
+  restaurantId: string; onLogout: () => void; aviso: string | null; onCerrarAviso: () => void
+}) {
   const [orders, setOrders]       = useState<KDSOrder[]>([])
   const [loading, setLoading]     = useState(true)
   const [filter, setFilter]       = useState<KDSFilter>('todas')
@@ -597,6 +600,19 @@ function KDSBoard({ restaurantId, onLogout }: { restaurantId: string; onLogout: 
       display: 'flex', flexDirection: 'column',
       fontFamily: 'Inter, system-ui, sans-serif',
     }}>
+      {aviso && (
+        <div data-testid="kds-aviso-sede" role="status" style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+          padding: '10px 20px', background: '#422006', borderBottom: '1px solid #a16207',
+          color: '#fde68a', fontSize: 13, fontWeight: 500,
+        }}>
+          <span>{aviso}</span>
+          <button onClick={onCerrarAviso} aria-label="Cerrar aviso" style={{
+            background: 'transparent', border: 'none', color: '#fde68a', cursor: 'pointer', fontSize: 18, lineHeight: 1,
+          }}>×</button>
+        </div>
+      )}
+
       {/* ── Top bar ─────────────────────────────────────────────────────── */}
       <div style={{
         height: 64, flexShrink: 0, padding: '0 20px',
@@ -750,6 +766,7 @@ export function KitchenPage() {
   const [pageState, setPageState] = useState<KDSPageState>('loading')
   const [restaurantId, setRestaurantId] = useState<string | null>(null)
   const [kitchenPin, setKitchenPin] = useState<string | null>(null)
+  const [avisoSede, setAvisoSede] = useState<string | null>(null)
 
   // Fetch restaurant config and decide: pin screen or board
   const checkPinAndProceed = useCallback(async (rid: string) => {
@@ -767,42 +784,53 @@ export function KitchenPage() {
     }
   }, [])
 
-  // Initialization: localStorage → sesión Supabase activa → pantalla de setup
+  // Initialization: sede guardada (validada contra la organización de la sesión) →
+  // sede del perfil → pantalla de setup. Ver src/lib/cocinaSede.ts.
   useEffect(() => {
     ;(async () => {
-      // 1. Restaurant ID ya guardado localmente
-      let rid = localStorage.getItem('kds_restaurant_id')
+      const guardada = localStorage.getItem('kds_restaurant_id')
 
-      // 2. Sesión de esta pestaña ya autenticada → ir directo al board
-      if (rid && sessionStorage.getItem('kds_auth') === '1') {
-        setRestaurantId(rid)
-        setPageState('board')
-        return
-      }
-
-      // 3. Sin restaurant ID local → detectar sesión Supabase activa (admin logueado)
-      if (!rid) {
-        const { data: { session } } = await supabase.auth.getSession()
-        if (session?.user) {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('restaurant_id')
-            .eq('id', session.user.id)
-            .single()
-          if (profile?.restaurant_id) {
-            rid = profile.restaurant_id
-            localStorage.setItem('kds_restaurant_id', rid)
-          }
+      // Con sesión, la sede guardada se compara con la organización del perfil. Sin
+      // sesión (tableta que entra con PIN) no hay con qué compararla: se usa como antes.
+      let perfil: Perfil | null = null
+      let orgDeLaGuardada: string | null | 'error' = null
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session?.user) {
+        const { data } = await supabase
+          .from('profiles')
+          .select('restaurant_id, organization_id')
+          .eq('id', session.user.id)
+          .single()
+        perfil = data ?? null
+        if (perfil?.restaurant_id && guardada && guardada !== perfil.restaurant_id) {
+          const { data: sede, error } = await supabase
+            .from('restaurants')
+            .select('organization_id')
+            .eq('id', guardada)
+            .maybeSingle()
+          orgDeLaGuardada = error ? 'error' : (sede?.organization_id ?? null)
         }
       }
 
-      // 4. Sin ningún restaurant ID → mostrar setup manual
+      const { sede: rid, aviso } = decidirSedeCocina({ guardada, perfil, orgDeLaGuardada })
+      if (rid && rid !== guardada) {
+        localStorage.setItem('kds_restaurant_id', rid)
+        sessionStorage.removeItem('kds_auth')   // otra sede: se entra con SU PIN
+      }
+      setAvisoSede(aviso)
+
+      // Sin ningún restaurant ID → mostrar setup manual
       if (!rid) {
         setPageState('setup')
         return
       }
 
       setRestaurantId(rid)
+      // Sesión de esta pestaña ya autenticada con PIN → directo al board
+      if (sessionStorage.getItem('kds_auth') === '1') {
+        setPageState('board')
+        return
+      }
       await checkPinAndProceed(rid)
     })()
   }, [checkPinAndProceed])
@@ -840,5 +868,8 @@ export function KitchenPage() {
     return <PinScreen pin={kitchenPin} onAuthenticated={handleAuthenticated} />
   }
 
-  return <KDSBoard restaurantId={restaurantId!} onLogout={handleLogout} />
+  return (
+    <KDSBoard restaurantId={restaurantId!} onLogout={handleLogout}
+      aviso={avisoSede} onCerrarAviso={() => setAvisoSede(null)} />
+  )
 }

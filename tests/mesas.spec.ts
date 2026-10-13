@@ -59,8 +59,10 @@ test.describe.serial('Mesas', () => {
     await page.getByRole('button', { name: new RegExp(TABLE) }).click()
     // Panel lateral de la mesa ocupada → "Cerrar mesa" (sin ítems).
     await page.getByRole('button', { name: 'Cerrar mesa' }).click()
-    // El panel se cierra (mesa liberada).
-    await expect(page.getByRole('button', { name: 'Cerrar mesa' })).toHaveCount(0)
+    // La señal de que TERMINÓ es el aviso: "Cerrar mesa" pasa a "Cerrando..." antes de
+    // escribir, y si el test acaba ahí la mesa puede quedar ocupada sin cuenta (pegada).
+    await expect(page.getByText(`Mesa ${TABLE} liberada`)).toBeVisible()
+    await expect(page.getByRole('button', { name: new RegExp(TABLE) })).toContainText('Libre')
   })
 
   test('eliminar una mesa sin historial la quita de la lista', async ({ page }) => {

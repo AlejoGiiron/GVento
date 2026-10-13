@@ -28,6 +28,7 @@ import {
 } from '@/lib/supabase-helpers'
 import type { SalePaymentPart } from '@/lib/supabase-helpers'
 import { motivoParaNoCobrar, motivoParaNoCerrarVacia } from '@/lib/mesaFresca'
+import { motivoSinCocina, MESA_VACIA } from '@/lib/cocinaMesa'
 import { OpenShiftModal } from '@/components/shift/OpenShiftModal'
 import { ItemConfigModal } from '@/components/pos/ItemConfigModal'
 import { PaymentSplitEditor } from '@/components/pos/PaymentSplitEditor'
@@ -1444,6 +1445,15 @@ function TableSidePanel({
     ? unsentItems.filter((i) => i.products?.routes_to_kitchen)
     : []
   const isEmptyOrder = !!order && order.order_items.length === 0
+  // Por qué no hay nada que enviar (null = sí hay). Antes el botón quedaba gris y mudo.
+  const motivoCocina = order
+    ? motivoSinCocina({
+        sedeUsaCocina: sedeUsesKitchen,
+        lineas: order.order_items.length,
+        sinEnviar: unsentItems.length,
+        paraCocina: itemsForKitchen.length,
+      })
+    : null
 
   // Fix 4 — Cerrar mesa sin consumo: cancela la orden vacía y libera la mesa.
   const handleCloseEmptyTable = async () => {
@@ -1499,8 +1509,8 @@ function TableSidePanel({
   }
 
   const handleSendToKitchen = async () => {
-    // Defensa: una sede sin cocina nunca envía comanda (la UI ocultará el botón).
-    if (restaurant && !restaurant.uses_kitchen) return
+    // Defensa: una sede sin cocina nunca envía comanda. Nunca en silencio: el motivo.
+    if (motivoCocina) { toast.error(motivoCocina); return }
     if (!order || itemsForKitchen.length === 0) return
     setSendingToKitchen(true)
     try {
@@ -1701,7 +1711,9 @@ function TableSidePanel({
         <div style={{ display: 'flex', gap: 8 }}>
           {sedeUsesKitchen && (
             <button
+              data-testid="mesa-enviar-cocina"
               disabled={sendingToKitchen || itemsForKitchen.length === 0}
+              title={motivoCocina ?? undefined}
               onClick={handleSendToKitchen}
               style={{
                 flex: 1, padding: '10px',
@@ -1728,6 +1740,13 @@ function TableSidePanel({
             </button>
           )}
         </div>
+
+        {/* Con la mesa vacía no hace falta: el panel ya dice "Sin ítems". */}
+        {motivoCocina && motivoCocina !== MESA_VACIA && (
+          <div data-testid="mesa-cocina-motivo" style={{ fontSize: 11.5, color: '#64748b', textAlign: 'center', marginTop: -2 }}>
+            {motivoCocina}
+          </div>
+        )}
 
         {isEmptyOrder ? (
           <button
