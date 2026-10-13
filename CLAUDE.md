@@ -126,9 +126,16 @@ select name, (config->>'es_laboratorio')::bool as es_lab, created_at
 |---|---|---|
 | **G-10** | 🟢 cliente real | producción, anterior a la migración multi-tenant |
 | **Salchimelo** | 🟢 cliente real | producción |
-| **Café Aroma** | 🟢 cliente real | `onboard-org-paso1.sql` → `paso3.sql` (+ `demo-seed-cafeteria.sql`) |
+| **Café Aroma** | 🔬 demo (como LAB) — `992420af-4484-4b69-8fbb-547a69c137af` | `onboard-org-paso1.sql` → `paso3.sql` (+ `demo-seed-cafeteria.sql`); dueño `demo@demo.com`, con el que se hacen las verificaciones en producción |
 | **LAB** | 🔬 laboratorio | `lab-seed.sql` — 2 sedes, `owner.test` y `cajero.test`; contra esto corre la suite E2E |
 | **LabCentro** | 🔬 laboratorio | `labcentro-org.sql` — **solo la fila de `organizations`**, sin sede, sin roles, sin usuarios |
+
+🔴 **Corregido el 2026-10-13: Café Aroma NO es un cliente real**, es una organización DEMO, igual
+que LAB (lo aclaró el usuario). Esta tabla la listaba como "🟢 cliente real" desde el 2026-08-31, y
+por eso una sesión trató la verificación con `demo@demo.com` como si tocara a un cliente. **Clientes
+reales: G-10 y Salchimelo.** Lo mismo se corrigió en `docs/DEUDAS.md` y `docs/RESUMEN-GENERAL.md`.
+Que Café Aroma sea demo **no lo dice la base**: G-Vento no tiene marcador de organización de prueba
+(ver abajo), así que esto vive solo en este documento.
 
 **LabCentro existe por una restricción de G-Centro**, no de G-Vento: su esquema tiene un
 unique `(producto_id, organizacion_externa_id)` que impide vincular dos contratos al mismo

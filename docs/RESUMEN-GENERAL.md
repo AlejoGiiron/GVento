@@ -88,7 +88,7 @@ select name, (config->>'es_laboratorio')::bool as es_lab, created_at
 |---|---|
 | **G-10** | cliente real, coctelería sin cocina. El primero, anterior al multi-tenant |
 | **Salchimelo** | cliente real, con cocina |
-| **Café Aroma** | cliente real, cafetería de mostrador sin mesas. Onboardeado el 2026-08-25 |
+| **Café Aroma** | demo (como LAB), cafetería de mostrador sin mesas. Creada el 2026-08-25. Hasta el 2026-10-13 este resumen la listaba como cliente real |
 | **LAB** | laboratorio. 2 sedes, `owner.test` y `cajero.test`. Contra esto corre la suite E2E |
 | **LabCentro** | laboratorio. Solo la fila de `organizations`, para que G-Centro pruebe un segundo contrato |
 

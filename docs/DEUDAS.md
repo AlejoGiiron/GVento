@@ -169,6 +169,46 @@ ni relajar el check (deja órdenes de mesa sin mesa).
 **Para reconfirmar el comportamiento actual** (lectura):
 `select conname, pg_get_constraintdef(oid) from pg_constraint where conrelid = 'public.orders'::regclass and pg_get_constraintdef(oid) ilike '%table_id%';`
 
+### Mesas con el mismo nombre salvo mayúsculas en la misma sede (anotado 2026-10-13)
+
+**Qué pasa.** Salchimelo tiene mesas cuyos nombres solo difieren en mayúsculas: **"mesa 10" y "MESA
+10" son dos mesas distintas** (lo reportó el usuario el 2026-10-13, limpiando las mesas pegadas). En
+el mapa se ven como dos tarjetas con "el mismo" nombre, y un diagnóstico que nombra la mesa en vez de
+dar su UUID es ambiguo: hay que decir siempre `mesa_id`.
+
+**Por qué puede pasar.** Nada lo impide:
+- crear o renombrar en Mesas → Configurar (`handleSave` de `TableConfigModal`, en `TablesPage.tsx`)
+  solo hace `trim()` del nombre, sin buscar repetidos;
+- en la base local no hay índice único sobre el nombre: solo `tables_pkey`,
+  `idx_tables_restaurant_id` e `idx_tables_restaurant_status` (medido el 2026-10-13 con
+  `select indexdef from pg_indexes where tablename = 'tables'`). En producción no se ha mirado: es
+  esa misma consulta.
+
+**Qué hacer (decidido el 2026-10-13):**
+1. **Cuando salga archivar mesas (Paso 10), unificarlas.** Se archiva la repetida, y el dueño
+   decide qué nombre queda. Antes de archivar, la que se archiva no puede tener una cuenta viva.
+2. **Crear o renombrar una mesa tiene que rechazar un nombre que ya existe en la misma sede,
+   ignorando mayúsculas.** La validación en pantalla es un proxy (R4): la protección real es un
+   índice único en la base, por ejemplo sobre `(restaurant_id, lower(btrim(name)))` y solo para
+   las mesas no archivadas. Ese índice **no se puede crear mientras existan las repetidas**: falla.
+   Por eso va después del punto 1. Queda por decidir si los espacios también cuentan ("Mesa 10"
+   contra "Mesa  10").
+
+**Para reconfirmar** (solo lectura; arranca de `organizations`, caso #12):
+```sql
+select org.name as organizacion, s.name as sede, lower(btrim(t.name)) as nombre_sin_mayusculas,
+       string_agg(t.name || ' [' || t.status::text || ']', ' · ' order by t.created_at) as mesas,
+       count(*) as cuantas
+  from public.organizations org
+  join public.restaurants s on s.organization_id = org.id
+  join public.tables t on t.restaurant_id = s.id
+ group by org.name, s.id, s.name, lower(btrim(t.name))
+having count(*) > 1
+ order by 1, 2, 3;
+```
+Probada en local con una fixture y `rollback` (junta "mesa 10", "MESA 10" y " Mesa 10 "; sin la
+fixture, 0 filas). En producción no se ha corrido.
+
 ### 🔴 "Cerrar mesa sin consumo" son DOS escrituras de cliente no atómicas (anotado 2026-09-30)
 
 **Precondición de M2.** No se arregló en el Paso C.
@@ -1199,7 +1239,8 @@ select p.full_name, p.email, p.is_active, p.role::text as rol_viejo, r.name as r
   clientes reales, así que **nunca debe entrar a un cobro, a una métrica de negocio ni a
   un conteo de clientes activos.**
   🔄 **Actualizado 2026-08-31: ahora son CINCO organizaciones, no tres.** Clientes reales:
-  **G-10, Salchimelo y Café Aroma**. Laboratorio: **LAB** y **LabCentro** — esta última creada
+  **G-10 y Salchimelo**. Demo: **Café Aroma** (corregido el 2026-10-13: aquí figuraba como
+  cliente real y no lo es). Laboratorio: **LAB** y **LabCentro** — esta última creada
   con `labcentro-org.sql` para que G-Centro pueda vincular un segundo contrato; solo tiene la
   fila de `organizations`, sin sede ni usuarios, así que nadie puede iniciar sesión ahí.
   La tabla con el origen de cada una está en `CLAUDE.md` → *"Las organizaciones de la BD"*.
