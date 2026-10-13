@@ -7,6 +7,7 @@ import { toast } from 'react-hot-toast'
 import { useAuth } from '@/hooks/useAuth'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useScrollOverflow } from '@/hooks/useScrollOverflow'
+import { useRecargaPeriodica } from '@/hooks/useRecargaPeriodica'
 import {
   useDelivery,
   getDeliveryColumn,
@@ -740,6 +741,10 @@ export function DeliveryPage() {
   // Patrón checkoutOrder: orden capturada al abrir modal, aislada del Realtime
   const [assigningOrder, setAssigningOrder] = useState<DeliveryOrder | null>(null)
   const [showCourierConfig, setShowCourierConfig] = useState(false)
+
+  // Pedidos nuevos o cambiados por otro equipo, sin recargar a mano: cada 45 s y al
+  // volver a la pestaña; pausada con un modal abierto.
+  useRecargaPeriodica(refetch, { cadaMs: 45_000, pausada: !!assigningOrder || showCourierConfig })
 
   const ADVANCE_STATUS: Record<DeliveryColumn, DeliveryOrder['status'] | null> = {
     new:        'ready',      // Nuevos → En camino

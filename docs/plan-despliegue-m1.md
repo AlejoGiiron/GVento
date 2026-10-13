@@ -943,6 +943,81 @@ mesa**, aceptar, y debe salir "Mesa PRUEBA HOTFIX liberada", con la tarjeta en "
 
 ---
 
+## Release chico — Cocina, Mesas y Delivery se recargan solas (`feat/cocina-refresco`)
+
+- **Por qué:** Realtime no entrega nada en producción (la publicación `supabase_realtime` está vacía,
+  medido el 2026-10-09). Cocina solo mostraba una comanda nueva si alguien tocaba "Actualizar", y su
+  indicador decía "En línea" igual (el canal informa `SUBSCRIBED` aunque no llegue nada).
+- **Qué lleva:** solo frontend, **nada de SQL**. Rebasada el 2026-10-13 sobre el hotfix combinado
+  (`develop` = `09945b2`): entra por fast-forward.
+  - **Cocina:** recarga cada 30 s y al volver a la pestaña. El indicador dice "Se actualiza cada 30 s
+    · HH:MM:SS" (la hora de la última carga); "En línea" solo si llegó un evento real de Realtime en
+    los últimos 2 minutos.
+  - **Mesas y Delivery:** recargan cada 45 s mientras la pestaña está visible y al volver a ella.
+    **Pausadas con cualquier modal abierto** (el cobro, el selector de productos, abrir mesa,
+    configurar, abrir turno; en Delivery, asignar repartidor y repartidores): una recarga de fondo no
+    cambia ni cierra lo que el usuario está haciendo. El modal de cobro, además, guarda su copia de
+    la mesa (la misma que el Paso 10).
+- **Pruebas:** `tests/recarga-pantallas.spec.ts` (comanda nueva en Cocina sin tocar nada en ≤ 35 s;
+  al volver a la pestaña; Mesas y Delivery reciben lo de otro equipo; con el cobro o el selector
+  abiertos, la recarga no los cierra ni los cambia). Mutantes: 7 de 7 muertos.
+
+**R.1 — Merge** (después del hotfix combinado, `develop` = `09945b2`; sale el martes 13/10, con
+los locales cerrados):
+```bash
+git fetch origin
+git checkout develop
+git merge-base --is-ancestor origin/develop feat/cocina-refresco && echo FF   # tiene que decir FF
+git merge --ff-only feat/cocina-refresco
+```
+**R.2 — Release.** Título: `release: Cocina, Mesas y Delivery se actualizan solas`.
+
+**R.3 — Verificación en producción con `demo@demo.com` en Café Aroma** (demo), en dos pestañas del
+escritorio (A y B).
+
+**Antes: encender la cocina.** Café Aroma nació **sin cocina** (`uses_kitchen = false` en
+`onboard-org-paso1.sql`, y todos sus productos con `routes_to_kitchen = false` en
+`demo-seed-cafeteria.sql`). Así, Cocina no aparece en el menú y ninguna comanda llega. Primero se
+anota cómo está hoy, para dejarlo igual al final:
+```sql
+-- Q-COCINA-AROMA (solo lectura)
+select r.name as sede, r.uses_kitchen,
+       (select count(*) from public.products p where p.restaurant_id = r.id and p.routes_to_kitchen) as productos_a_cocina
+  from public.restaurants r
+ where r.organization_id = '992420af-4484-4b69-8fbb-547a69c137af';
+```
+- Si `uses_kitchen` = `false`: Configuración → Cocina → encender **"Esta sede usa cocina"**.
+- Si `productos_a_cocina` = 0: Productos → editar uno (el más barato) → encender **"Va a cocina"**.
+- Mesas → Configurar → "Nueva mesa" → **"PRUEBA COCINA"**.
+
+**1 — La comanda aparece sola en ≤ 35 s, y el indicador no dice "En línea" falso.**
+- En A: abrir **Cocina** (si pide PIN, el de Configuración → Cocina) y no tocarla más.
+- El indicador tiene que decir **"Se actualiza cada 30 s · HH:MM:SS"**. **No** puede decir "En línea":
+  Realtime no publica nada en producción, así que no hay eventos reales.
+- En B: Mesas → "PRUEBA COCINA" → "Abrir mesa" → "Agregar ítems" → el producto que va a cocina →
+  **"Cocina (1)"**. Anotar la hora.
+- En A, sin tocar nada: la comanda aparece **en ≤ 35 s**, y la hora del indicador avanza.
+
+**2 — Una recarga de fondo no cierra ni cambia la ventana de cobro de Mesas** (necesita un turno
+abierto).
+- En A: Mesas → "PRUEBA COCINA" → **"Cobrar"**. Anotar el total y dejar la ventana abierta.
+- En B: agregar otro producto a la misma mesa.
+- En A: esperar **60 s** sin tocar (la recarga es cada 45 s). La ventana de cobro **sigue abierta, con
+  el mismo total y lo que se había escrito**.
+- En A, confirmar el cobro: tiene que decir **"La mesa cambió desde que abriste el cobro…"** (el
+  hotfix). Cerrar la ventana, volver a "Cobrar" (ahora con los dos productos) y cobrar: "Venta #N".
+- Contraste, sin ventana abierta: en B agregar algo más. En A, con el mapa a la vista, el total de
+  la tarjeta se actualiza solo en ≤ 50 s.
+
+**Al final, dejarlo como estaba:**
+- anular desde Historial la venta de prueba (motivo "prueba cocina-refresco 13/10");
+- en Configurar, "Eliminar mesa" sobre "PRUEBA COCINA";
+- apagar "Va a cocina" y "Esta sede usa cocina" **solo si estaban apagados** en Q-COCINA-AROMA.
+
+**R.4 — Reversa:** rollback del frontend (vuelve al hotfix combinado, `09945b2`). No hay SQL.
+
+---
+
 ## Paso 6 — Fase 2 de D (cerrar el UPDATE directo de `cash_shifts`)
 
 - **Depende de:** Paso 1 (para ver qué versión tiene cada equipo) y de que **G-10 cierre por el
@@ -1028,7 +1103,7 @@ Los martes G-10 y Salchimelo no abren: los pasos con SQL van ese día.
 | fecha | release | rama | cómo entra a `develop` |
 |---|---|---|---|
 | mar 13/10 | hotfix combinado de Mesas (HC) | `hotfix/mesas-13-10` | fast-forward desde `fab23b0` (si la suite no está verde a las 12:30: mié 14/10, 7:00) |
-| mié 14/10 | Cocina, Mesas y Delivery se recargan solas | `feat/cocina-refresco` | rebasada sobre el hotfix combinado, suite completa y fast-forward |
+| mar 13/10 (adelantado; HC ya salió: `main` = `976c2ec`) | Cocina, Mesas y Delivery se recargan solas | `feat/cocina-refresco` | rebasada sobre el hotfix combinado (`09945b2`), suite completa y fast-forward (si la suite no está verde a las 18:00: mié 14/10, 7:00) |
 | mar 20/10 | el arqueo cuenta los abonos de fiado (AA) | `feat/arqueo-abonos` | rebasada sobre cocina-refresco, suite completa y fast-forward |
 | un martes después del arqueo | Paso 6, fase 2 de D | — | parte de la versión de `close_cash_shift` que deja el arqueo (`a395c0a1…`), no de la de hoy |
 | martes siguientes | Pasos 7-8 (permisos de cobro, A) y después 9-10 (Mesas en el servidor) | `feat/a-permisos`, `feat/mesas-servidor` | se fija al llegar |
@@ -1049,4 +1124,5 @@ Los martes G-10 y Salchimelo no abren: los pasos con SQL van ese día.
 | 5 | M1 + config | — | `feat/m1-pos-movil` | rollback |
 | H | hotfix: Mesas relee la orden antes de cobrar, cerrar o agregar | — | sale dentro de HC | — |
 | HC | hotfix combinado: relee la orden + mesas pegadas + varias cuentas vivas | — | `hotfix/mesas-13-10` | rollback |
+| R | Cocina, Mesas y Delivery se recargan solas | — | `feat/cocina-refresco` | rollback (vuelve al hotfix combinado) |
 | 6 | fase 2 de D | `fase2-aplicar.sql` (`d66e8231…`) | — | `fase2-revertir.sql` (`034ec0a4…`) |
