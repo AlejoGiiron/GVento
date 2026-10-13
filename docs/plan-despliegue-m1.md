@@ -990,6 +990,13 @@ select r.name as sede, r.uses_kitchen,
 - Si `productos_a_cocina` = 0: Productos → editar uno (el más barato) → encender **"Va a cocina"**.
 - Mesas → Configurar → "Nueva mesa" → **"PRUEBA COCINA"**.
 
+⚠️ **El POS (escritorio y `/m`) NO envía a cocina**, en ninguna versión: `register_pos_sale` deja
+las líneas con `sent_to_kitchen = false` y el KDS solo muestra órdenes con al menos una línea
+enviada. Una venta del POS **no** aparece en Cocina, y no es una falla (verificado en local el
+2026-10-13 con `976c2ec` y con `ee59708`). La prueba se hace **solo desde Mesas**, con el botón
+**"Cocina (1)"** (con número). Si dice "Cocina" sin número, debajo dice por qué (desde
+`fix/cocina-avisos`).
+
 **1 — La comanda aparece sola en ≤ 35 s, y el indicador no dice "En línea" falso.**
 - En A: abrir **Cocina** (si pide PIN, el de Configuración → Cocina) y no tocarla más.
 - El indicador tiene que decir **"Se actualiza cada 30 s · HH:MM:SS"**. **No** puede decir "En línea":
