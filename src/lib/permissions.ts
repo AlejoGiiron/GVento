@@ -115,5 +115,6 @@ export const SYSTEM_ROLES: Record<string, readonly string[]> = {
     'mesas.cobrar', 'delivery.gestionar',
     'fiado.gestionar', 'ventas.historial',
   ],
-  mozo: ['pos.vender', 'mesas.gestionar', 'cocina.acceder'],
+  // mesas.cobrar (A, 2026-10-08): el mozo cobra la mesa que atiende. pos.vender se queda (decidido 2026-10-07).
+  mozo: ['pos.vender', 'mesas.gestionar', 'mesas.cobrar', 'cocina.acceder'],
 }

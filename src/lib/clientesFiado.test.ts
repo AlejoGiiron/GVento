@@ -21,6 +21,11 @@ describe('coincide', () => {
     expect(coincide(ANA, '30')).toBe(false)          // 2 dígitos: no busca en el teléfono
     expect(coincide(CARLA, '300')).toBe(false)       // sin teléfono
   })
+  it('un nombre con dígitos sueltos NO busca por teléfono (contraste: los mismos dígitos solos, sí)', () => {
+    const conTel = c('x', 'Otro', '3209990123')
+    expect(coincide(conTel, 'E2E Fiado mv0b9fvx Mis ventas')).toBe(false)   // "2"+"0"+"9" no es un teléfono
+    expect(coincide(conTel, '209')).toBe(true)
+  })
   it('vacío = todos', () => {
     expect(coincide(CARLA, '  ')).toBe(true)
   })

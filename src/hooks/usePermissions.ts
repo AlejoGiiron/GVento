@@ -17,7 +17,7 @@ export function usePermissions() {
   const { profile, isLoading: authLoading } = useAuth()
   const roleId = profile?.role_id ?? null
 
-  const { data: role, isLoading: roleLoading } = useQuery({
+  const { data: role, isLoading: roleLoading, isError: roleError, isFetching: roleFetching, refetch } = useQuery({
     queryKey: ['my_role', roleId],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -30,6 +30,11 @@ export function usePermissions() {
     },
     enabled: !!roleId,
     staleTime: 30 * 60_000, // 30 min — los permisos cambian poco
+    // Sin reintentos de React Query: postgrest-js 2.104 YA reintenta cada GET que falla por
+    // red (3 veces: 1 s, 2 s, 4 s). Con los dos encadenados, sin red esto tardaba ~35 s en
+    // dar error, y /m quedaba en "Cargando…" todo ese rato (medido el 2026-10-08). Así da
+    // el error en ~7 s y la pantalla ofrece Reintentar. DEUDAS → "Doble reintento".
+    retry: false,
   })
 
   const permissions = useMemo<string[]>(() => {
@@ -55,5 +60,11 @@ export function usePermissions() {
     roleName: role?.name ?? null,
     permissions,
     isLoading,
+    // La carga del rol FALLÓ (sin red, timeout, error) después de los reintentos de
+    // React Query. Con esto, `permissions` vacío NO significa "no tiene permisos": quien
+    // decide con can() tiene que mostrar el error, no un "no puedes" falso.
+    isError: !!roleId && roleError,
+    reintentando: roleFetching,
+    reintentar: refetch,
   }
 }

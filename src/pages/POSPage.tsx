@@ -793,22 +793,29 @@ function CartPanel({
             <Pause size={16} /> En espera
           </button>
           <button
-            disabled={items.length === 0}
+            data-testid="pos-cobrar"
+            disabled={items.length === 0 || !can('pos.vender')}
             onClick={onCheckout}
             style={{
               flex: 1, padding: '15px 16px',
-              background: items.length === 0 ? '#cbd5e1' : '#10b981',
+              background: items.length === 0 || !can('pos.vender') ? '#cbd5e1' : '#10b981',
               border: 'none', borderRadius: 10,
-              cursor: items.length === 0 ? 'not-allowed' : 'pointer',
+              cursor: items.length === 0 || !can('pos.vender') ? 'not-allowed' : 'pointer',
               fontSize: 15, fontWeight: 700, color: '#fff',
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-              boxShadow: items.length === 0 ? 'none' : '0 6px 16px rgba(16,185,129,.35)',
+              boxShadow: items.length === 0 || !can('pos.vender') ? 'none' : '0 6px 16px rgba(16,185,129,.35)',
               letterSpacing: 0.2,
             }}
           >
             Cobrar <ChevronRight size={17} strokeWidth={2.5} />
           </button>
         </div>
+        {/* A: vender exige pos.vender, lo mismo que register_pos_sale. */}
+        {!can('pos.vender') && (
+          <div data-testid="pos-sin-permiso" style={{ marginTop: 8, fontSize: 12, color: '#b45309', textAlign: 'center' }}>
+            Tu usuario no tiene permiso para vender.
+          </div>
+        )}
       </div>
     </div>
   )
@@ -1518,8 +1525,12 @@ export function POSPage() {
   const { isOpen: isShiftOpen } = useCashShift()
   const { isLoading: extrasLoading, requiereConfig, tieneExtras } = useProductsWithExtras()
 
-  // Cobrar exige turno abierto: si no hay, abre el modal de apertura primero.
+  const { can } = usePermissions()
+
+  // Cobrar exige pos.vender (A; el botón ya está deshabilitado sin él) y turno abierto:
+  // si no hay turno, abre el modal de apertura primero.
   const handleCheckout = () => {
+    if (!can('pos.vender')) return
     if (!isShiftOpen) { setShowOpenShift(true); return }
     setCheckout(true)
   }

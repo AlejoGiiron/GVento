@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { leerPosMovil, POS_MOVIL_DEFAULT, esRutaMovil, puedeCobrar, debeIrAMovil, traerTodo, diaBogota, pidioVersionCompleta, pedirVersionCompleta } from './posMovil'
+import { leerPosMovil, POS_MOVIL_DEFAULT, esRutaMovil, seRedirigeAMovil, debeIrAMovil, traerTodo, diaBogota, pidioVersionCompleta, pedirVersionCompleta } from './posMovil'
 
 const COCTEL = '3f1c2a9e-0b7d-4c55-9a21-6c0f8d2e4b17'
 
@@ -32,12 +32,12 @@ describe('esRutaMovil', () => {
   })
 })
 
-describe('puedeCobrar (mismo criterio que register_pos_sale)', () => {
+describe('seRedirigeAMovil (solo la redirección; quién cobra lo decide el permiso)', () => {
   it('admin y cashier sí; waiter y sin rol no', () => {
-    expect(puedeCobrar('admin')).toBe(true)
-    expect(puedeCobrar('cashier')).toBe(true)
-    expect(puedeCobrar('waiter')).toBe(false)
-    expect(puedeCobrar(null)).toBe(false)
+    expect(seRedirigeAMovil('admin')).toBe(true)
+    expect(seRedirigeAMovil('cashier')).toBe(true)
+    expect(seRedirigeAMovil('waiter')).toBe(false)
+    expect(seRedirigeAMovil(null)).toBe(false)
   })
 })
 

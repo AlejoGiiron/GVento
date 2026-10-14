@@ -45,15 +45,17 @@ export function leerPosMovil(raw: unknown): PosMovilConfig {
   }
 }
 
-// ── Quién cobra ─────────────────────────────────────────────────────────────
-// 🔴 CONTRATO DE DOS LADOS (R1): register_pos_sale y register_sale_payment
-// aceptan `get_my_role() in ('admin', 'cashier')` (supabase/pos-sale-lotes.sql,
-// supabase/cobro-turno.sql). Si cambia allá, cambia acá: un rol que el servidor
-// rechaza no se manda a una pantalla cuyo único fin es cobrar.
+// ── Quién se REDIRIGE a /m (no quién cobra) ─────────────────────────────────
+// Desde A (supabase/permisos-cobro.sql) QUIÉN COBRA lo decide el permiso, en el
+// servidor y en la pantalla: pos.vender (POS y /m) y mesas.cobrar (Mesas), con
+// has_permission / can(). El rol viejo queda SOLO para la redirección automática
+// a /m en un celular: dueño, admin y cajero; el mozo entra a /m solo por URL.
+// TRANSITORIO hasta M2 (decidido 2026-10-07/08). ProtectedRoute además exige
+// pos.vender: nunca se manda a /m a quien no puede vender.
 type RolLegacy = Database['public']['Enums']['user_role']
-export const ROLES_QUE_COBRAN: readonly RolLegacy[] = ['admin', 'cashier']
-export const puedeCobrar = (rol: RolLegacy | null | undefined): boolean =>
-  !!rol && ROLES_QUE_COBRAN.includes(rol)
+export const ROLES_QUE_SE_REDIRIGEN: readonly RolLegacy[] = ['admin', 'cashier']
+export const seRedirigeAMovil = (rol: RolLegacy | null | undefined): boolean =>
+  !!rol && ROLES_QUE_SE_REDIRIGEN.includes(rol)
 
 // ── Dispositivo ─────────────────────────────────────────────────────────────
 
@@ -129,7 +131,7 @@ export function pedirVersionCompleta(si: boolean): void {
 
 /** ¿Hay que mandar a /m a este usuario, en esta ruta, en este equipo? */
 export function debeIrAMovil(rol: RolLegacy | null | undefined, path: string): boolean {
-  return puedeCobrar(rol) && !esRutaMovil(path) && esCelular() && !pidioVersionCompleta()
+  return seRedirigeAMovil(rol) && !esRutaMovil(path) && esCelular() && !pidioVersionCompleta()
 }
 
 // ── Lectura de datos (puro: se prueba sin Supabase) ──────────────────────────

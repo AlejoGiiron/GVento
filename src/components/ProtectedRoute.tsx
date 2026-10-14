@@ -26,11 +26,19 @@ export function ProtectedRoute({ permission }: ProtectedRouteProps) {
   // de /m, que está dentro del alcance de la app instalada; desde el resto, al de siempre.
   if (!user) return <Navigate to={esRutaMovil(location.pathname) ? '/m/login' : '/login'} replace />
 
-  // En un CELULAR, quien cobra va al POS móvil (/m). Solo en el nivel de arriba
-  // (sin permiso): los ProtectedRoute anidados ya pasaron por acá. Un mozo no se
-  // redirige (/m solo cobra y él no puede); Cocina está fuera de ProtectedRoute.
+  // En un CELULAR, dueño, admin y cajero van al POS móvil (/m) — y solo si tienen
+  // pos.vender (A): nunca se manda a /m a quien el servidor no deja vender. El mozo
+  // no se redirige hasta M2 (entra a /m por URL). Solo en el nivel de arriba (sin
+  // permiso): los ProtectedRoute anidados ya pasaron por acá. Cocina está fuera.
   if (!permission && debeIrAMovil(profile?.role, location.pathname)) {
-    return <CargarMovil />
+    if (permsLoading) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-white">
+          <div className="w-6 h-6 border-2 border-slate-200 border-t-slate-700 rounded-full animate-spin" />
+        </div>
+      )
+    }
+    if (can('pos.vender')) return <CargarMovil />
   }
 
   if (permission && !can(permission)) {

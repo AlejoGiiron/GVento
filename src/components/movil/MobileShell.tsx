@@ -6,7 +6,8 @@ import { useCashShift } from '@/hooks/useCashShift'
 import { useRestaurantConfig } from '@/hooks/useRestaurantConfig'
 import { usePantallaEncendida, useInstalacion } from '@/hooks/useDispositivoMovil'
 import { useVersionCheck } from '@/hooks/useVersionCheck'
-import { pedirVersionCompleta, puedeCobrar, cargarDocumento } from '@/lib/posMovil'
+import { pedirVersionCompleta, cargarDocumento } from '@/lib/posMovil'
+import { usePermissions } from '@/hooks/usePermissions'
 import { M, botonGrande } from '@/components/movil/estilo'
 import { ContextoShellMovil } from '@/components/movil/contextoShell'
 import { CapaMovil } from '@/components/movil/CapaMovil'
@@ -24,7 +25,13 @@ import { CapaMovil } from '@/components/movil/CapaMovil'
 
 
 export function MobileShell() {
-  const { profile, signOut } = useAuth()
+  const { user, profile, signOut, isLoading: authCargando, refreshProfile } = useAuth()
+  // /m solo vende: entra quien tiene pos.vender (A), lo mismo que exige register_pos_sale.
+  const { can, isLoading: permisosCargando, isError: permisosError, reintentando, reintentar } = usePermissions()
+  // El perfil no cargó (el primer fetch falló: AuthContext lo deja en null) o el rol no
+  // cargó: no se sabe quién es ni qué puede. Ni la venta ni el "no puedes": el error.
+  const perfilFallo = !!user && !authCargando && !profile
+  const [reintentandoPerfil, setReintentandoPerfil] = useState(false)
   const { restaurant } = useRestaurantConfig()
   const { isOpen, isLoadingShift } = useCashShift()
   const pantalla = usePantallaEncendida()
@@ -50,14 +57,49 @@ export function MobileShell() {
     cargarDocumento(ruta)   // carga completa: el documento del escritorio NO trae el manifest de /m
   }
 
-  // /m solo cobra. Un rol que el servidor rechaza (register_pos_sale) no tiene
-  // nada que hacer acá: se le dice y se le ofrece la versión completa.
-  if (profile && !puedeCobrar(profile.role)) {
+  if (perfilFallo || permisosError) {
+    const ocupado = reintentandoPerfil || reintentando
+    return (
+      <div data-testid="m-error-usuario" role="alert" style={{ ...pantallaCompleta, justifyContent: 'center', alignItems: 'center', padding: 24, textAlign: 'center', gap: 16 }}>
+        <div style={{ fontSize: 18, fontWeight: 700 }}>No se pudo cargar tu usuario. Revisa el wifi.</div>
+        <button
+          type="button"
+          data-testid="m-reintentar"
+          disabled={ocupado}
+          onClick={async () => {
+            if (perfilFallo) {
+              setReintentandoPerfil(true)
+              try { await refreshProfile() } finally { setReintentandoPerfil(false) }
+            } else {
+              await reintentar()
+            }
+          }}
+          style={{ ...botonGrande(M.verde), minWidth: 200, opacity: ocupado ? 0.6 : 1 }}
+        >
+          {ocupado ? 'Reintentando…' : 'Reintentar'}
+        </button>
+      </div>
+    )
+  }
+
+  // Mientras se cargan los permisos no se muestra ni la venta ni el "no puedes": los dos
+  // serían un dato falso (DEUDAS → "Ausencias y ceros que la UI muestra mientras carga").
+  if (profile && permisosCargando) {
+    return (
+      <div data-testid="m-cargando" style={{ ...pantallaCompleta, justifyContent: 'center', alignItems: 'center', color: M.suave }}>
+        Cargando…
+      </div>
+    )
+  }
+
+  // /m solo vende. Sin pos.vender, el servidor (register_pos_sale) rechaza la venta: se
+  // le dice y se le ofrece la versión completa.
+  if (profile && !can('pos.vender')) {
     return (
       <div data-testid="m-sin-permiso" style={{ ...pantallaCompleta, justifyContent: 'center', padding: 24, textAlign: 'center', gap: 16 }}>
-        <div style={{ fontSize: 20, fontWeight: 700 }}>Tu usuario no puede cobrar</div>
-        <div style={{ color: M.suave, fontSize: 15 }}>Para vender desde el celular hace falta un usuario de caja.</div>
-        <button type="button" onClick={() => irAVersionCompleta('/mesas')} style={botonGrande(M.verde)}>
+        <div style={{ fontSize: 20, fontWeight: 700 }}>Tu usuario no puede vender</div>
+        <div style={{ color: M.suave, fontSize: 15 }}>Para vender desde el celular hace falta el permiso de vender. Pídeselo al administrador.</div>
+        <button type="button" data-testid="m-sin-permiso-version-completa" onClick={() => irAVersionCompleta('/mesas')} style={botonGrande(M.verde)}>
           Ir a la versión completa
         </button>
       </div>

@@ -20,8 +20,11 @@ export function coincide(c: ClienteFiado, busqueda: string): boolean {
   const q = normalizar(busqueda)
   if (!q) return true
   if (normalizar(c.name).includes(q)) return true
+  // Por TELÉFONO solo si lo escrito no tiene letras y trae 3 dígitos o más: con letras es un
+  // nombre ("E2E Fiado 09", "Mesa 2 de Juan"), y sus dígitos sueltos no son un teléfono; con
+  // menos de 3 dígitos, "1" coincidiría con casi todos.
+  if (/\p{L}/u.test(busqueda)) return false
   const d = digitos(busqueda)
-  // Desde 3 dígitos se busca en el teléfono: con menos, "1" coincidiría con casi todos.
   return d.length >= 3 && digitos(c.phone).includes(d)
 }
 

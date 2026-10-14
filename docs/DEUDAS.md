@@ -1002,7 +1002,13 @@ archivo. Es una pasada propia, no un arrastre de otra tarea.
 de defecto que va a volver cada vez que se agregue un permiso, y porque su modo de fallo es
 el opuesto —y peor— que el de `ventas.anular`.
 
-**Los 6, medidos:** `pos.vender`, `caja.abrir`, `mesas.cobrar`, `productos.ver`,
+**Actualizado con A (2026-10-08): quedan 4.** `pos.vender` y `mesas.cobrar` dejaron de ser
+inertes: los exigen `register_pos_sale` / `register_sale_payment` (`supabase/permisos-cobro.sql`) y
+la pantalla (`can()` en `/m`, el POS y Mesas). Siguen inertes `caja.abrir`, `productos.ver`,
+`reportes.stock` y `reportes.consolidado`. El comando de abajo lo reconfirma (las dos de cobro ya
+dan usos reales).
+
+**Los 6, medidos el 2026-08-31:** `pos.vender`, `caja.abrir`, `mesas.cobrar`, `productos.ver`,
 `reportes.stock`, `reportes.consolidado`. Están en `PERMISSION_GROUPS` —o sea, la matriz de
 Roles les dibuja su checkbox— y **no aparecen en un solo `can()` ni `has_permission()` del
 repo**: solo en seeds y en comentarios de catálogo. Para reconfirmar la lista:
@@ -1050,6 +1056,42 @@ cambia la próxima vez que una migración redefina esa función, no se redefine 
 (terminaciones -á/-é/-í con o sin pronombre, -ás/-és/-ís, y el imperativo con pronombre que
 pierde la tilde: "Pedile"), con regex Unicode — `grep` en esta máquina no trata la tilde como
 letra y devuelve vacío. Revisar a mano: también matchea futuros ("desactivará") y palabras como "está".
+
+### 🔴 Doble reintento: sin red, CADA consulta tarda ~35 s en dar error (medido 2026-10-08)
+
+**La clase.** postgrest-js 2.104 reintenta por su cuenta todo GET que falla por red (3 veces: 1 s,
+2 s, 4 s; `DEFAULT_MAX_RETRIES` en su `dist/index.mjs`), y React Query (sin configuración: 3
+reintentos, 1 s, 2 s, 4 s) reintenta el ciclo entero. Encadenados: 4 ciclos de ~7 s + 7 s de
+espera ≈ **35 s** hasta que una consulta da error. Mientras tanto la pantalla muestra "Cargando…".
+Medido en `/m` con la red cortada al cargar los permisos: el trace mostró los ciclos de 4 intentos
+repitiéndose, y en 20 s la consulta nunca llegó a error.
+
+**Lo que ya se arregló:** la carga de permisos (`usePermissions`, `retry: false`): da el error en
+~7 s y `/m` muestra "No se pudo cargar tu usuario. Revisa el wifi." con Reintentar.
+
+**Lo que queda:** el resto de las consultas de la app (productos, mesas, turno, reportes…). Sin red,
+cada pantalla tarda ~35 s en mostrar su error. **Opciones, a decidir:** (a) `retry: false` por
+defecto en el `QueryClient` (`src/App.tsx`), dejando el reintento a postgrest; (b) `retry` de React
+Query solo para errores que no son de red; (c) `.retry(false)` en cada consulta (el builder de
+postgrest lo tiene) y dejar React Query como está. **No hay opción global en el cliente:**
+supabase-js 2.104 le pasa a postgrest solo `schema`, `fetch`, `timeout` y `urlLengthLimit`
+(verificado en su `dist/index.mjs`, `new PostgrestClient`). Cualquiera cambia el comportamiento sin red de TODAS las pantallas:
+se prueba con la red cortada antes de soltarlo. Para reconfirmar la versión y el número:
+`grep -n "DEFAULT_MAX_RETRIES =" node_modules/.pnpm/@supabase+postgrest-js@*/node_modules/@supabase/postgrest-js/dist/index.mjs`.
+
+### 🔴 Fiado en MESA: cualquier usuario de la sede puede pasar una orden a fiado (hallado 2026-10-08)
+
+El cobro de mesa a fiado no pasa por ninguna función: `setOrderFiado` (`src/lib/supabase-helpers.ts`)
+hace un UPDATE directo a `orders` (`payment_status = 'pending'`, `customer_id`, `customer_name`), y
+la política `orders: staff actualiza` solo pide `restaurant_id = get_my_restaurant_id()`. **No hay
+rol ni permiso en el servidor**: hoy lo frena solo la pantalla. Un usuario de la sede sin
+`fiado.gestionar` puede, con la API, dejar como deuda la orden de cualquier mesa.
+
+**No lo cubre A** (A cambia quién COBRA: `register_pos_sale` y `register_sale_payment`). Va en el
+paquete Mesas: `close_table_sale` con el parámetro de fiado (decidido 2026-10-07) exige
+`fiado.gestionar` en el servidor, y entonces el UPDATE directo se puede cerrar. Para
+reconfirmarlo: `select policyname, qual, with_check from pg_policies where tablename = 'orders'
+and cmd = 'UPDATE';` y `grep -rn "setOrderFiado" src/`.
 
 ### 🔴 A (permisos de cobro): `profiles.role` y `profiles.role_id` pueden divergir (anotado 2026-10-07)
 

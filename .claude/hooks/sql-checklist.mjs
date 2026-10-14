@@ -146,10 +146,10 @@ LO QUE ESTO **NO** ARREGLA, dicho explícitamente:
    falta), nunca un "set permissions = <canónica>": eso pisa los ajustes del cliente.
  · multi-tenant-rbac.sql está APLICADA ⇒ es registro histórico, no fuente. Su
    comentario-catálogo tiene 19 claves y está desactualizado a propósito. No editar.
- · 6 permisos del catálogo no gatean nada y fallan ABIERTO (pos.vender, caja.abrir,
-   mesas.cobrar, productos.ver, reportes.stock, reportes.consolidado). Ver
-   docs/DEUDAS.md → "concedible pero inerte". Que una clave esté en el catálogo NO
-   es evidencia de que algo esté protegido.`
+ · 4 permisos del catálogo no gatean nada y fallan ABIERTO (caja.abrir, productos.ver,
+   reportes.stock, reportes.consolidado; eran 6 hasta A, que hizo gatear pos.vender y
+   mesas.cobrar). Ver docs/DEUDAS.md → "concedible pero inerte". Que una clave esté en
+   el catálogo NO es evidencia de que algo esté protegido.`
 
 import fs from 'node:fs'
 
