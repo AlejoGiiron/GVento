@@ -8,7 +8,8 @@ import { colorDesdeLogo } from '@/lib/colorLogo'
 import { ubicarDireccion } from '@/lib/nominatim'
 import {
   COLOR_PORTAL_POR_DEFECTO, DIAS, DOMINIO_PORTAL, RE_COLOR, etiquetaTramo, horarioAgrupado, leerPesos,
-  mostrarPesos, normalizarSlug, problemaHorario, problemaTramos, slugValido, textoEstado, urlPortal,
+  mostrarPesos, mostrarWhatsapp, normalizarSlug, normalizarWhatsapp, problemaHorario, problemaTramos,
+  slugValido, textoEstado, urlPortal,
   type DiaIso, type EnvioTipo, type Horario, type PortalSede, type Punto, type ZonaTipo,
 } from '@/lib/portal'
 import { MapaZona, type ModoMapa } from '@/components/config/MapaZona'
@@ -144,6 +145,9 @@ function TarjetaLink({ portal }: { portal: PortalSede }) {
   const [color, setColor] = useState(portal.color ?? '')
   const [sugerido, setSugerido] = useState<string | null>(null)
   const disponible = useDisponibilidad(slug, portal.slug)
+  const whatsappInicial = portal.whatsapp ?? normalizarWhatsapp(restaurant?.phone)
+  const [whatsapp, setWhatsapp] = useState(mostrarWhatsapp(whatsappInicial))
+  useEffect(() => { setWhatsapp(mostrarWhatsapp(portal.whatsapp ?? normalizarWhatsapp(restaurant?.phone))) }, [portal.whatsapp, restaurant?.phone])
 
   useEffect(() => { setSlug(portal.slug) }, [portal.slug])
   useEffect(() => { setColor(portal.color ?? '') }, [portal.color])
@@ -169,6 +173,12 @@ function TarjetaLink({ portal }: { portal: PortalSede }) {
   const guardarSlug = () => {
     if (!slugValido(slug)) { toast.error('El link no es válido'); return }
     actualizar({ slug }).catch(() => {})
+  }
+  const whatsappNuevo = normalizarWhatsapp(whatsapp)
+  const guardarWhatsapp = () => {
+    if (whatsapp.trim() === '') { actualizar({ whatsapp: null }).catch(() => {}); return }
+    if (!whatsappNuevo) { toast.error('Escribe un número de Colombia de 10 dígitos'); return }
+    actualizar({ whatsapp: whatsappNuevo }).catch(() => {})
   }
   const guardarColor = (c: string | null) => {
     if (c !== null && !RE_COLOR.test(c)) { toast.error('El color tiene que tener la forma #rrggbb'); return }
@@ -229,6 +239,23 @@ function TarjetaLink({ portal }: { portal: PortalSede }) {
           )}
         </span>
       </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <label style={{ ...etiqueta, flex: '1 1 200px' }}>
+          WhatsApp del local
+          <input data-testid="portal-whatsapp" inputMode="tel" value={whatsapp} placeholder="300 123 4567"
+            onChange={(e) => setWhatsapp(e.target.value.replace(/[^\d +]/g, ''))} style={campo} />
+        </label>
+        {(whatsappNuevo ?? null) !== portal.whatsapp && (
+          <button type="button" style={botonOscuro} onClick={guardarWhatsapp} disabled={guardando} data-testid="portal-whatsapp-guardar">
+            {whatsapp.trim() === '' ? 'Quitar WhatsApp' : 'Guardar WhatsApp'}
+          </button>
+        )}
+      </div>
+      <p style={nota}>
+        {portal.whatsapp
+          ? 'Tus clientes lo ven en el seguimiento del pedido y si su dirección queda fuera de la zona.'
+          : 'Todavía no está guardado: arranca con el teléfono de la sede. Guárdalo para que tus clientes puedan escribirte.'}
+      </p>
     </section>
   )
 }

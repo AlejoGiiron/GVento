@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  etiquetaTramo, franjasLegibles, horaLegible, horarioAgrupado, leerPesos, mostrarPesos, normalizarSlug,
-  problemaHorario, problemaTramos, slugValido, textoEstado,
+  etiquetaTramo, franjasLegibles, horaLegible, horarioAgrupado, leerPesos, mostrarPesos, mostrarWhatsapp,
+  normalizarSlug, normalizarWhatsapp, problemaHorario, problemaTramos, RE_WHATSAPP, slugValido, textoEstado,
 } from './portal'
 import { CASOS_SLUG } from './portalCasos'
 
@@ -55,6 +55,17 @@ describe('envío por distancia', () => {
     expect(problemaTramos([{ hasta_km: 2, valor: 1 }, { hasta_km: 5, valor: 1 }])).toMatch(/último tramo/)
     expect(problemaTramos([{ hasta_km: null, valor: -1 }])).toMatch(/valor/)
     expect(problemaTramos([])).toMatch(/1 a 10/)
+  })
+})
+
+describe('WhatsApp del local', () => {
+  it('normaliza a 57 + 10 dígitos lo que se escribe o el teléfono de la sede, y lo muestra', () => {
+    expect(['300 123 4567', '+57 300 123 4567', '(601) 234-5678', '573001234567'].map(normalizarWhatsapp))
+      .toEqual(['573001234567', '573001234567', '576012345678', '573001234567'])
+    expect(['', null, '123', '1 300 123 4567', '583001234567'].map(normalizarWhatsapp)).toEqual([null, null, null, null, null])
+    expect(mostrarWhatsapp('573001234567')).toBe('300 123 4567')
+    expect(mostrarWhatsapp(null)).toBe('')
+    expect(['573001234567', '3001234567', '57300123456'].map((w) => RE_WHATSAPP.test(w))).toEqual([true, false, false])
   })
 })
 

@@ -74,6 +74,7 @@ const COLUMNAS_DEL_ESQUEMA: ColumnaEsquema[] = [
   { tabla: 'portal_sedes', columna: 'pedido_minimo', ejemplo: 15000 },
   { tabla: 'portal_sedes', columna: 'horario', ejemplo: 'miércoles 17:00 a 23:30' },
   { tabla: 'portal_sedes', columna: 'color', ejemplo: '#c2410c' },
+  { tabla: 'portal_sedes', columna: 'whatsapp', ejemplo: '573001234567' },
   { tabla: 'portal_sedes', columna: 'tiempo_min', ejemplo: 30 },
   { tabla: 'portal_sedes', columna: 'tiempo_max', ejemplo: 45 },
   { tabla: 'portal_productos', columna: 'precio_domicilio', ejemplo: 10000 },

@@ -4,8 +4,9 @@
 --
 --   1. portal_sedes: una fila por sede con el portal configurado. Link (slug, único entre
 --      TODAS las organizaciones), publicado (activo), pausa, ubicación del local, zona (radio o
---      polígono), envío (fijo o por tramos de km), pedido mínimo, tiempo que se muestra, horario
---      y color. La forma de cada valor la validan CHECK con funciones inmutables.
+--      polígono), envío (fijo o por tramos de km), pedido mínimo, tiempo que se muestra, horario,
+--      color y el WhatsApp del local (lo ve el cliente en el seguimiento y si su dirección queda
+--      fuera de la zona; P2/P3). La forma de cada valor la validan CHECK con funciones inmutables.
 --   2. portal_productos: qué productos de la sede salen en el portal y su precio a domicilio
 --      (null = el del local). ALLOWLIST: un producto sin fila aquí NO está publicado. La FK
 --      compuesta (product_id, restaurant_id) → products(id, restaurant_id) hace imposible
@@ -246,6 +247,7 @@ create table public.portal_sedes (
   tiempo_max     smallint,
   horario        jsonb not null default '{}'::jsonb,
   color          text,
+  whatsapp       text,
   created_at     timestamptz not null default now(),
   updated_at     timestamptz not null default now(),
   updated_by     uuid references public.profiles (id) on delete set null,
@@ -264,7 +266,9 @@ create table public.portal_sedes (
   constraint portal_sedes_tiempo         check (tiempo_min between 5 and 240 and tiempo_max between 5 and 240
                                                 and tiempo_min <= tiempo_max),
   constraint portal_sedes_horario        check (portal_horario_valido(horario)),
-  constraint portal_sedes_color          check (color ~ '^#[0-9a-f]{6}$')
+  constraint portal_sedes_color          check (color ~ '^#[0-9a-f]{6}$'),
+  -- Número de Colombia con el indicativo y sin signos: 57 + los 10 dígitos (celular o fijo).
+  constraint portal_sedes_whatsapp       check (whatsapp ~ '^57[0-9]{10}$')
 );
 
 comment on table public.portal_sedes is
@@ -462,6 +466,7 @@ as $$
     when 'portal_sedes_tiempo'        then 'El tiempo de entrega tiene que estar entre 5 y 240 minutos, y el mínimo no puede ser mayor que el máximo.'
     when 'portal_sedes_horario'       then 'El horario no es válido: cada franja necesita hora de abrir y de cerrar distintas, y hasta 3 franjas por día.'
     when 'portal_sedes_color'         then 'El color tiene que tener la forma #rrggbb.'
+    when 'portal_sedes_whatsapp'      then 'El WhatsApp del local tiene que ser un número de Colombia de 10 dígitos.'
     else 'Un valor de la configuración no es válido (' || coalesce(p_restriccion, 'sin nombre') || ').'
   end
 $$;
@@ -477,7 +482,7 @@ declare
   c_claves constant text[] := array[
     'slug', 'activo', 'lat', 'lng', 'zona_tipo', 'zona_radio_m', 'zona_poligono',
     'envio_tipo', 'envio_fijo', 'envio_tramos', 'pedido_minimo', 'tiempo_min', 'tiempo_max',
-    'horario', 'color'
+    'horario', 'color', 'whatsapp'
   ];
   c_obligatorias constant text[] := array['slug', 'activo', 'pedido_minimo', 'horario'];
   v_sede      uuid := get_my_restaurant_id();
@@ -544,7 +549,7 @@ begin
       zona_tipo = excluded.zona_tipo, zona_radio_m = excluded.zona_radio_m, zona_poligono = excluded.zona_poligono,
       envio_tipo = excluded.envio_tipo, envio_fijo = excluded.envio_fijo, envio_tramos = excluded.envio_tramos,
       pedido_minimo = excluded.pedido_minimo, tiempo_min = excluded.tiempo_min, tiempo_max = excluded.tiempo_max,
-      horario = excluded.horario, color = excluded.color,
+      horario = excluded.horario, color = excluded.color, whatsapp = excluded.whatsapp,
       updated_at = excluded.updated_at, updated_by = excluded.updated_by;
   exception
     when unique_violation then

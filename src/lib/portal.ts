@@ -31,6 +31,8 @@ export interface PortalSede {
   tiempo_max: number | null
   horario: Horario
   color: string | null
+  /** 57 + 10 dígitos (CHECK portal_sedes_whatsapp). */
+  whatsapp: string | null
   created_at: string
   updated_at: string
 }
@@ -69,7 +71,7 @@ export interface CambioProducto {
 export type PortalCambios = Partial<Pick<PortalSede,
   | 'slug' | 'activo' | 'lat' | 'lng' | 'zona_tipo' | 'zona_radio_m' | 'zona_poligono'
   | 'envio_tipo' | 'envio_fijo' | 'envio_tramos' | 'pedido_minimo' | 'tiempo_min' | 'tiempo_max'
-  | 'horario' | 'color'>>
+  | 'horario' | 'color' | 'whatsapp'>>
 
 /**
  * 🔴 CONTRATO DE DOS LADOS (R1): las claves que actualizar_portal acepta (c_claves en
@@ -80,7 +82,7 @@ export type PortalCambios = Partial<Pick<PortalSede,
 export const CLAVES_PORTAL = [
   'slug', 'activo', 'lat', 'lng', 'zona_tipo', 'zona_radio_m', 'zona_poligono',
   'envio_tipo', 'envio_fijo', 'envio_tramos', 'pedido_minimo', 'tiempo_min', 'tiempo_max',
-  'horario', 'color',
+  'horario', 'color', 'whatsapp',
 ] as const satisfies readonly (keyof PortalCambios)[]
 type ClavesFaltantes = Exclude<keyof PortalCambios, (typeof CLAVES_PORTAL)[number]>
 const _todasLasClaves: [ClavesFaltantes] extends [never] ? true : ClavesFaltantes = true
@@ -215,6 +217,29 @@ export function textoEstado(e: EstadoPortal): { titulo: string; detalle: string;
 /** Verde de G-Vento: el color del portal cuando la sede no elige uno. */
 export const COLOR_PORTAL_POR_DEFECTO = '#047857'
 export const RE_COLOR = /^#[0-9a-f]{6}$/
+
+// ── WhatsApp del local ──
+
+/** El mismo formato que el CHECK portal_sedes_whatsapp: 57 + 10 dígitos. */
+export const RE_WHATSAPP = /^57\d{10}$/
+
+/**
+ * Lo que se escribe (o el teléfono de la sede) → 57 + 10 dígitos, o null si no se puede.
+ * "300 123 4567" → "573001234567"; "+57 300 123 4567" → "573001234567"; "601 234 5678" → "576012345678".
+ */
+export function normalizarWhatsapp(texto: string | null | undefined): string | null {
+  const d = (texto ?? '').replace(/\D/g, '')
+  if (d.length === 10) return `57${d}`
+  if (d.length === 12 && d.startsWith('57')) return d
+  return null
+}
+
+/** "573001234567" → "300 123 4567" (para mostrar en el campo). */
+export function mostrarWhatsapp(w: string | null): string {
+  if (!w || !RE_WHATSAPP.test(w)) return ''
+  const n = w.slice(2)
+  return `${n.slice(0, 3)} ${n.slice(3, 6)} ${n.slice(6)}`
+}
 
 // ── Pesos ──
 

@@ -140,7 +140,7 @@ test.describe('Pedidos en línea · configuración (servidor)', () => {
       envio_tipo: 'distancia', envio_fijo: 4000,
       envio_tramos: [{ hasta_km: 2, valor: 3000 }, { hasta_km: 4, valor: 4000 }, { hasta_km: null, valor: 6000 }],
       pedido_minimo: 15000, tiempo_min: 30, tiempo_max: 45,
-      horario: { '3': [['17:00', '23:30']], '6': [['16:00', '00:00']] }, color: '#c2410c',
+      horario: { '3': [['17:00', '23:30']], '6': [['16:00', '00:00']] }, color: '#c2410c', whatsapp: '573001234567',
     }
     expect(Object.keys(valores).sort()).toEqual([...CLAVES_PORTAL].sort())
     // lat y lng van juntas (CHECK portal_sedes_ubicacion): cada una se escribe con su pareja.
@@ -189,6 +189,8 @@ test.describe('Pedidos en línea · configuración (servidor)', () => {
       [{ horario: { '1': [['24:00', '10:00']] } }, /horario no es válido/],
       [{ tiempo_min: 50, tiempo_max: 40 }, /tiempo de entrega/],
       [{ color: 'rojo' }, /#rrggbb/],
+      [{ whatsapp: '3001234567' }, /WhatsApp del local/],
+      [{ whatsapp: '57300123456' }, /WhatsApp del local/],
       [{ lat: 4.7 }, /ubicación del local no es válida/],
       [{ lat: 'norte' }, /tipo equivocado/],
     ]
@@ -198,7 +200,8 @@ test.describe('Pedidos en línea · configuración (servidor)', () => {
     // Nada de lo anterior quedó guardado.
     expect(fila(`select coalesce(zona_radio_m::text, '-') || coalesce(zona_poligono::text, '-') || coalesce(envio_tramos::text, '-')
         || horario::text || coalesce(tiempo_min::text, '-') || coalesce(color, '-') || coalesce(lat::text, '-')
-        from public.portal_sedes where restaurant_id = '${SEDE}';`)).toBe('---{}---')
+        || coalesce(whatsapp, '-')
+        from public.portal_sedes where restaurant_id = '${SEDE}';`)).toBe('---{}----')
   })
 
   test('productos: solo los de la sede, por id; sin precio no se publica; todo o nada', async () => {
@@ -498,5 +501,19 @@ test.describe('Pedidos en línea · la pantalla', () => {
     await expect.poll(() => fila(`select envio_tipo || ':' || (envio_tramos =
         '[{"hasta_km":2,"valor":3000},{"hasta_km":4,"valor":4000},{"hasta_km":null,"valor":6000}]'::jsonb)
         from public.portal_sedes where restaurant_id = '${SEDE}';`)).toBe('distancia:true')
+
+    // WhatsApp del local: arranca con el teléfono de la sede (sin guardar), se guarda y se quita.
+    const telefono = fila(`select coalesce(phone, '') from public.restaurants where id = '${SEDE}';`)
+    const digitos = telefono.replace(/\D/g, '')
+    if (digitos.length === 10) {
+      await expect(page.getByTestId('portal-whatsapp')).toHaveValue(`${digitos.slice(0, 3)} ${digitos.slice(3, 6)} ${digitos.slice(6)}`)
+    }
+    await page.getByTestId('portal-whatsapp').fill('+57 315 555 0101')
+    await page.getByTestId('portal-whatsapp-guardar').click()
+    await expect.poll(() => fila(`select coalesce(whatsapp, 'null') from public.portal_sedes where restaurant_id = '${SEDE}';`)).toBe('573155550101')
+    await expect(page.getByTestId('portal-whatsapp')).toHaveValue('315 555 0101')
+    await page.getByTestId('portal-whatsapp').fill('')
+    await page.getByTestId('portal-whatsapp-guardar').click()
+    await expect.poll(() => fila(`select coalesce(whatsapp, 'null') from public.portal_sedes where restaurant_id = '${SEDE}';`)).toBe('null')
   })
 })
