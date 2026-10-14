@@ -745,7 +745,17 @@ diga "N passed".
   force-killed it`). Cualquier otra cosa es rojo. Se documenta en CLAUDE.md (R9) y en
   `tests/README.md` al construirlo, no antes.
 
-### `anon` tiene privilegios de escritura en TODAS las tablas de `public` (default de Supabase) — medido, NO barrido (2026-09-30)
+### ✅ RESUELTO con `supabase/anon-sin-escritura.sql` (P0.2, rama `feat/anon-sin-escritura`, 2026-10-13): `anon` tiene privilegios de escritura en TODAS las tablas de `public` (default de Supabase) — medido, NO barrido (2026-09-30)
+
+**Cómo quedó:** la migración quita a `anon` la escritura en todo `public` (tablas, vistas y
+secuencias) y los privilegios por defecto de lo que `postgres` cree después; la política de
+`cash_movements` pasa a `TO authenticated`; `rls_auto_enable()` deja de ser ejecutable por `anon`.
+El SELECT se queda (lo decide RLS). El inventario de lo que lee y escribe la app sin sesión (R3) dio
+que nada escribe sin sesión. Tripwire: `tests/anon-sin-escritura.spec.ts`. **Lo que no cubre:** los
+privilegios por defecto de `supabase_admin` (`postgres` no puede cambiarlos); el test mira el
+catálogo entero, así que una tabla escribible por `anon` lo pone rojo igual. Lo de abajo es el
+registro del 2026-09-30.
+
 
 **No se barre ahora, a propósito:** revocar en bloque puede romper lecturas públicas (tienda,
 menú, logos por URL) que nadie inventarió. D revoca solo `UPDATE` sobre `cash_shifts`.

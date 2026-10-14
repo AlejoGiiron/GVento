@@ -1426,6 +1426,54 @@ del Paso 8 funciona con él.
 
 ---
 
+## P0.2 — `anon` (sin sesión) no escribe en ninguna tabla (`anon-sin-escritura.sql`)
+
+Rama `feat/anon-sin-escritura`, encima de `feat/mesas-servidor`. **No es el Paso 11 de abajo**
+("Mesas, fase 2", que cierra escrituras directas de usuarios CON sesión y depende de que el Paso 10
+esté en todos los equipos): P0.2 solo toca al rol `anon`.
+
+- **Por qué:** Supabase le concede por defecto a `anon` INSERT/UPDATE/DELETE/TRUNCATE (y MAINTAIN,
+  de Postgres 17: LOCK TABLE / VACUUM / REFRESH) en todo lo que `postgres` crea en `public`. Hoy lo frena RLS, y la única política de escritura que alcanzaba
+  a `anon` (`cash_movements`, `TO public`) fallaba cerrada por accidente. Medido en la base local
+  el 2026-10-13: **29 objetos** escribibles por `anon` (25 tablas y las 4 vistas de reportes).
+- **Barrido R3 (2026-10-13): nada de la app escribe sin sesión.** Fuera de `ProtectedRoute` solo
+  quedan `/login`, `/m/login` y `/cocina`. Login no escribe; Cocina avanza órdenes con la sesión de
+  la tableta (el PIN es un candado de pantalla: `orders` y `order_items` son `TO authenticated`, sin
+  sesión Cocina no ve ni escribe nada); `marcar_version` ya no es ejecutable por `anon`. No hubo que
+  pasar nada a RPC.
+- **Qué hace:** anota lo que quita en `public.anon_escritura_revocada` (para la reversa); quita a
+  `anon` la escritura en todas las tablas, vistas y secuencias de `public` (el SELECT se queda: lo
+  decide RLS); quita los privilegios **por defecto** de lo que `postgres` cree después; la política
+  de `cash_movements` pasa a `TO authenticated`; `rls_auto_enable()` (event trigger `ensure_rls`)
+  deja de ser ejecutable por `public`/`anon`. Comprueba todo en la misma transacción y, si queda
+  algo, **aborta**.
+- **Lo que NO cubre:** los privilegios por defecto de `supabase_admin` (`postgres` no puede
+  cambiarlos: no es miembro). Lo vigila `tests/anon-sin-escritura.spec.ts`, que mira el catálogo
+  entero: si algún día aparece una tabla escribible por `anon`, sea de quien sea, se pone rojo.
+- **Solo SQL, sin frontend:** la pantalla no cambia. Compatible con cualquier frontend publicado.
+
+**P0.2.1 — Pre-flight, JUSTO ANTES:** `supabase/diag/anon-sin-escritura-preflight.sql`, cada
+consulta por separado. Esperado: consulta 1 = **29 filas** (25 `r` y 4 `v`; `cash_shifts` sin
+`update`); consulta 2 = **1 fila** (`cash_movements: acceso por restaurante`, `ALL`, `public`);
+consulta 3 = **1 fila** (`rls_auto_enable()`); consulta 4 = tablas
+`delete,insert,references,select,trigger,truncate,update`, secuencias `select,update,usage`,
+funciones `execute` (tablas incluye `maintain`); consulta 5 = `aplicada = f`. Si producción da otra cosa (más filas, otra
+política), pégame la salida antes de correr la migración.
+
+**P0.2.2 — Correr `supabase/anon-sin-escritura.sql`** (trae su `begin`/`commit`; el md5 LF está
+en el reporte de publicación). Avisa `anon-sin-escritura: N objeto(s) anotados`. Si la comprobación
+final encuentra algo, **aborta sin cambiar nada**: pégame la salida.
+
+**P0.2.3 — Verificación:** el mismo pre-flight. Consultas 1, 2 y 3 = **0 filas**; consulta 4 =
+tablas `select`, secuencias `select` (funciones ya no aparece); consulta 5 = `aplicada = t`. Y la
+app sin cambios: iniciar sesión, vender en el POS, abrir Cocina en la tableta.
+
+**P0.2.4 — Reversa:** `anon-sin-escritura-revertir.sql` (fuera de git, en la raíz): devuelve a
+`anon` exactamente lo anotado (objeto por objeto, los defaults, la política y la función) y borra
+la tabla de registro. **Reabre la escritura de `anon`**: solo si la migración rompió algo.
+
+---
+
 ## Paso 11 — Mesas, fase 2 (ESQUEMA: se completa al construirlo)
 
 | paso | qué | tipo | depende de |
