@@ -23,14 +23,17 @@
 --      app no borra órdenes). Borrar una sede sigue borrando sus órdenes EN CASCADA: esa acción la
 --      ejecuta Postgres con los permisos del dueño de la tabla, no los del usuario.
 --   Las políticas no se tocan: el permiso es la barrera. Las funciones SECURITY DEFINER no cambian
---   (corren como su dueño). INSERT de órdenes e ítems sigue igual.
+--   (corren como su dueño). INSERT de órdenes e ítems sigue igual (ver lo que NO cierra).
 --
 -- 🔴 LO QUE NO CIERRA (sigue abierto por la API para un usuario con sesión; revisión del 2026-10-14):
---   orders.status acepta cualquier valor del enum (también delivered y cancelled): con
---   payment_status por defecto 'paid', pasar a delivered una mesa sin pagos la deja "pagada".
---   status sigue en el grant porque Cocina, Delivery y Mesas lo escriben directo. Se cierra con P4,
---   que rehace los cambios de estado de Domicilios y Cocina (DEUDAS → "orders.status con cualquier
---   valor").
+--   a. orders.status acepta cualquier valor del enum (también delivered y cancelled): con
+--      payment_status por defecto 'paid', pasar a delivered una mesa sin pagos la deja "pagada".
+--      status sigue en el grant porque Cocina, Delivery y Mesas lo escriben directo. Se cierra con
+--      P4 (DEUDAS → "orders.status con cualquier valor").
+--   b. INSERT directo en order_items y order_item_extras, con unit_price libre y sin descontar
+--      stock: un ítem insertado a 0 en una mesa abierta se cobra en 0 (close_table_sale suma las
+--      líneas). La app no lo usa (Mesas inserta por add_order_items_with_extras, DEFINER).
+--      Lo de 4 ("qty y unit_price ya no se cambian") vale para EDITAR ítems, no para crearlos.
 --
 -- 🔴 GUARDA: SOLO SE APLICA CON EL PASO 10 EN TODOS LOS EQUIPOS. Un equipo con el frontend viejo
 -- cobra mesas con escrituras directas: después de esta migración, cobrar le fallaría. La migración
@@ -47,7 +50,10 @@
 -- REVERSA: mesas-fase2-revertir.sql (fuera de git).
 --
 -- NO DEDUZCAS EL ESTADO DE ESTE COMENTARIO — correlo:
---   select has_table_privilege('authenticated', 'public.orders', 'UPDATE') as sin_aplicar;
+--   select has_table_privilege('authenticated', 'public.orders', 'UPDATE')      as orders_update_tabla,
+--          has_table_privilege('authenticated', 'public.order_items', 'UPDATE') as order_items_update_tabla,
+--          has_table_privilege('authenticated', 'public.orders', 'DELETE')      as orders_delete;
+--   -- t · t · t = no está · f · t · t = una versión anterior de este archivo · f · f · f = esta versión
 -- ============================================================================
 begin;
 
@@ -109,7 +115,9 @@ begin
   if has_table_privilege('anon', 'public.orders', 'INSERT,UPDATE,DELETE,TRUNCATE')
      or has_any_column_privilege('anon', 'public.orders', 'UPDATE')
      or has_table_privilege('anon', 'public.order_items', 'INSERT,UPDATE,DELETE,TRUNCATE')
-     or has_table_privilege('anon', 'public.tables', 'INSERT,UPDATE,DELETE,TRUNCATE') then
+     or has_any_column_privilege('anon', 'public.order_items', 'UPDATE')
+     or has_table_privilege('anon', 'public.tables', 'INSERT,UPDATE,DELETE,TRUNCATE')
+     or has_any_column_privilege('anon', 'public.tables', 'UPDATE') then
     raise exception 'Precondición: anon (sin sesión) todavía escribe en orders, order_items o tables: falta anon-sin-escritura.sql (P0.2). No se cambió nada.';
   end if;
 end $$;

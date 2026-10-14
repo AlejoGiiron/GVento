@@ -1546,7 +1546,7 @@ aplica hasta que el Paso 10 esté en TODOS los equipos. Sale el martes 20/10, an
 
 - **Qué cierra** (solo permisos del rol `authenticated`; las políticas no se tocan):
   - `order_items` sin DELETE directo: quitar un ítem es `quitar_item_mesa` (cierra BORRAR ítems sin
-    rastro; editarlos no, ver abajo).
+    rastro; editarlos lo cierra el punto de `order_items` de abajo; CREARLOS sigue abierto).
   - `tables` sin DELETE directo: eliminar una mesa es `eliminar_mesa` (archiva si vendió).
   - `orders` sin UPDATE de tabla: UPDATE **solo** de `status`, `courier_id` y
     `estimated_delivery_minutes`, que es lo que la app del Paso 10 escribe directo (Cocina,
@@ -1557,16 +1557,20 @@ aplica hasta que el Paso 10 esté en TODOS los equipos. Sale el martes 20/10, an
     app). `qty` y `unit_price` ya no se cambian por la API (agregado el 2026-10-14, aprobado).
   - `orders` sin DELETE (la política `orders: admin elimina` queda sin uso; la app no borra órdenes).
     Borrar una sede sigue borrando sus órdenes en cascada (la cascada corre como el dueño de la tabla).
-- 🔴 **Lo que NO cierra:** `orders.status` con cualquier valor (con `payment_status` `'paid'` por
-  defecto, pasar a `delivered` una mesa sin pagos la deja "pagada"). Se cierra con **P4**, que rehace
-  los cambios de estado de Domicilios y Cocina (DEUDAS → *"`orders.status` con cualquier valor"*).
+- 🔴 **Lo que NO cierra:**
+  - `orders.status` con cualquier valor (con `payment_status` `'paid'` por defecto, pasar a
+    `delivered` una mesa sin pagos la deja "pagada"). Se cierra con **P4** (DEUDAS →
+    *"`orders.status` con cualquier valor"*).
+  - **INSERT directo** en `order_items` y `order_item_extras`, con `unit_price` libre y sin descontar
+    stock: un ítem insertado a 0 en una mesa abierta se cobra en 0. La app no lo usa (Mesas inserta
+    por `add_order_items_with_extras`). Propuesto el 2026-10-14 para cerrar, sin aprobar todavía.
 - **Guarda 0e:** aborta si `anon` todavía escribe en `orders`, `order_items` o `tables` (P0.2 sin
   aplicar): este paso solo cierra lo de `authenticated`.
 - **Barrido R3 (2026-10-13):** con el código del Paso 10, la app no borra ítems ni mesas directo, y
   en `orders` solo escribe esas tres columnas. Los 9 escritores de esas tablas en la base son
-  `SECURITY DEFINER` (no cambian). Tres fixtures de la suite escribían directo con sesión
-  (`order_number` en `abono-efectivo-turno` y `anular-venta`, borrar una mesa en `helpers/lab.ts`):
-  pasaron a `psql`.
+  `SECURITY DEFINER` (no cambian). Cuatro fixtures de la suite escribían directo con sesión
+  (`order_number` en `abono-efectivo-turno` y `anular-venta`, borrar una mesa en `helpers/lab.ts`, y
+  el 2026-10-14 borrar órdenes en la limpieza de `anular-venta`): pasaron a `psql`.
 - **🔴 La guarda:** la migración lee `app_versiones` y **aborta** si algún equipo tiene una versión
   fuera de la lista que se pega en el archivo. La versión es el hash corto (7) del commit publicado
   (`VERCEL_GIT_COMMIT_SHA`): no se puede ordenar, por eso la lista es explícita. Lo que la guarda NO
@@ -1599,18 +1603,19 @@ vuelve a mirar. Consulta 3: los 4 md5 del Paso 9. Consulta 4: `t · (ninguna) ·
   Si el equipo vuelve a abrir la app, reaparece con su versión actual.
 
 **11.3 — Correr `supabase/mesas-fase2.sql`** con la lista llena (md5 LF del archivo SIN llenar:
-**`efc0917dade564a3b931b196f3269291`**; cambió el 2026-10-14 por la guarda 0e, el encabezado y lo que se agregó de order_items y orders). Avisa `N equipo(s) en app_versiones, todos con una versión de la
+**`2ff799812a21997054db5dfd49ecfc4b`**; cambió el 2026-10-14 por la guarda 0e, el encabezado y lo que se agregó de order_items y orders). Avisa `N equipo(s) en app_versiones, todos con una versión de la
 lista` y `orders actualizable solo en courier_id,estimated_delivery_minutes,status`. Si la lista no
 está llena, si un equipo tiene otra versión, si el Paso 9 no está, si ya se aplicó o si `anon`
 todavía escribe en esas tablas, **aborta sin cambiar nada** y lo dice.
 
 **11.4 — Verificación:** la consulta 4 del pre-flight: `f · courier_id,estimated_delivery_minutes,status
-· f · f · f · sent_to_kitchen · f`. Y en la app: cobrar una mesa, quitar un ítem, cerrar una mesa sin consumo, avanzar una
-comanda en Cocina y asignar un repartidor en Delivery.
+· f · f · f · sent_to_kitchen · f`. Y en la app: cobrar una mesa, **enviar a cocina desde Mesas** (el
+único camino del grant de `sent_to_kitchen`), quitar un ítem, cerrar una mesa sin consumo, avanzar
+una comanda en Cocina y asignar un repartidor en Delivery.
 
 **11.5 — Reversa:** `mesas-fase2-revertir.sql` (fuera de git, en la raíz), md5
 **`b7101138f82a81932fd3e985f4cb7805`**: devuelve a `authenticated` el estado de partida exacto (UPDATE
-de tabla en `orders`, DELETE en `order_items` y `tables`). **Reabre las escrituras directas**: solo si
+y DELETE de tabla en `orders` y `order_items`, DELETE en `tables`). **Reabre las escrituras directas**: solo si
 la migración rompió algo. No deshace nada de datos (no los hay) y no toca `anon`.
 
 ## Calendario de releases (actualizado el 2026-10-13)
@@ -1653,4 +1658,4 @@ Los martes G-10 y Salchimelo no abren: los pasos con SQL van ese día.
 | 9 | SQL de Mesas en el servidor | `mesas-servidor.sql` (`4adc0197…`), con pre-flight 3, 4 y 5 justo antes | — | `mesas-servidor-revertir.sql` (`2f557c6d…`), solo antes del 10 |
 | 10 | frontend de Mesas | — | `feat/mesas-servidor` | rollback (el SQL del 9 se queda) |
 | P0.2 | anon sin escritura | `anon-sin-escritura.sql` (`26bca67d…`) | — | `anon-sin-escritura-revertir.sql` (`ed8bd914…`) |
-| 11 | Mesas fase 2 (sin escrituras directas de cobro, ítems ni mesas) | `mesas-fase2.sql` (`efc0917d…`, lista sin llenar), pre-flight `3d645a66…` | — | `mesas-fase2-revertir.sql` (`b7101138…`) |
+| 11 | Mesas fase 2 (sin escrituras directas de cobro, ítems ni mesas) | `mesas-fase2.sql` (`2ff79981…`, lista sin llenar), pre-flight `3d645a66…` | — | `mesas-fase2-revertir.sql` (`b7101138…`) |

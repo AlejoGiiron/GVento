@@ -6,8 +6,9 @@ import { cliente, psql, psqlResultado } from './helpers/db-local'
 
 // ============================================================================
 // supabase/mesas-fase2.sql (Paso 11): un usuario CON sesión ya no escribe directo lo que el
-// frontend del Paso 10 hace por funciones del servidor. Sin DELETE de ítems ni de mesas; en
-// orders, UPDATE solo de status, courier_id y estimated_delivery_minutes (Cocina y Delivery).
+// frontend del Paso 10 hace por funciones del servidor. Sin DELETE de ítems, mesas ni órdenes; en
+// orders, UPDATE solo de status, courier_id y estimated_delivery_minutes (Cocina y Delivery); en
+// order_items, UPDATE solo de sent_to_kitchen (Mesas al enviar a cocina).
 // Y la GUARDA: la migración no se aplica si app_versiones muestra un equipo con una versión
 // fuera de la lista del Paso 10.
 // Que la app siga funcionando por los caminos del servidor (cobrar, quitar, cerrar, eliminar)
@@ -62,6 +63,58 @@ test.describe('Paso 11: sin escrituras directas de cobro, ítems ni mesas', () =
     const rep = await owner.from('orders').update({ courier_id: null, estimated_delivery_minutes: null }).eq('id', FALSO)
     const env = await owner.from('order_items').update({ sent_to_kitchen: true }).eq('id', FALSO)
     expect([st.error?.message, rep.error?.message, env.error?.message]).toEqual([undefined, undefined, undefined])
+  })
+})
+
+// Medido como usuario CON sesión sobre filas REALES (en una transacción que se deshace): el
+// contraste por la API usa un id que no existe y no dispara los triggers; esto sí.
+test.describe('Paso 11 medido sobre filas reales, como usuario con sesión', () => {
+  const comoDuenio = () => `set local role authenticated;
+    select set_config('request.jwt.claims', '{"sub":"${OWNER_ID}","role":"authenticated"}', true);`
+  const datos = () => {
+    const [sede, org] = psql(`select r.id || '|' || r.organization_id from public.profiles p
+      join public.restaurants r on r.id = p.restaurant_id where p.id = '${OWNER_ID}';`).split('|')
+    const prod = psql(`select id from public.products where restaurant_id = '${sede}' limit 1;`)
+    return { sede, org, prod }
+  }
+
+  test('enviar a cocina y cambiar el estado siguen andando con los triggers (updated_at, delivered_at); qty no', () => {
+    const { sede, prod } = datos()
+    const orden = crypto.randomUUID(), item = crypto.randomUUID()
+    const base = `insert into public.orders (id, restaurant_id, type, created_by) values ('${orden}', '${sede}', 'delivery', '${OWNER_ID}');
+      insert into public.order_items (id, order_id, product_id, qty, unit_price) values ('${item}', '${orden}', '${prod}', 1, 1000);`
+    const ok = psqlResultado(`begin; ${base} ${comoDuenio()}
+      update public.order_items set sent_to_kitchen = true where id = '${item}' returning 'ITEM|' || sent_to_kitchen;
+      update public.orders set status = 'delivered' where id = '${orden}' returning 'ORDEN|' || status || '|' || (delivered_at is not null);
+      rollback;`)
+    expect(ok.stderr, 'el UPDATE permitido no debería fallar').not.toMatch(/ERROR/)
+    expect(ok.stdout).toContain('ITEM|true')
+    expect(ok.stdout).toContain('ORDEN|delivered|true')
+    // Contraste sobre la MISMA fila: qty y el DELETE de la orden se rechazan.
+    const qty = psqlResultado(`begin; ${base} ${comoDuenio()}
+      update public.order_items set qty = 2 where id = '${item}'; rollback;`)
+    expect(qty.stderr).toMatch(/permission denied/)
+    const borrar = psqlResultado(`begin; ${base} ${comoDuenio()}
+      delete from public.orders where id = '${orden}'; rollback;`)
+    expect(borrar.stderr).toMatch(/permission denied/)
+  })
+
+  test('borrar una sede sigue borrando sus órdenes en cascada (la cascada corre como el dueño de la tabla)', () => {
+    const { org, prod } = datos()
+    const sedeX = crypto.randomUUID(), orden = crypto.randomUUID()
+    const r = psqlResultado(`begin;
+      insert into public.restaurants (id, name, organization_id) values ('${sedeX}', 'E2E sede a borrar', '${org}');
+      insert into public.orders (id, restaurant_id, type, created_by) values ('${orden}', '${sedeX}', 'takeaway', '${OWNER_ID}');
+      insert into public.order_items (order_id, product_id, qty, unit_price) values ('${orden}', '${prod}', 1, 1000);
+      ${comoDuenio()}
+      delete from public.restaurants where id = '${sedeX}' returning 'BORRADA|' || id;
+      reset role;
+      select 'QUEDAN|' || (select count(*) from public.orders where id = '${orden}')
+                || '|' || (select count(*) from public.order_items where order_id = '${orden}');
+      rollback;`)
+    expect(r.stderr, 'borrar la sede no debería fallar').not.toMatch(/ERROR/)
+    expect(r.stdout).toContain(`BORRADA|${sedeX}`)
+    expect(r.stdout).toContain('QUEDAN|0|0')
   })
 })
 

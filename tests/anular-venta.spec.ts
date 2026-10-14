@@ -497,7 +497,9 @@ test.describe.serial('Anulación de ventas', () => {
     // "fiado con abono"). Se borran para no contaminar el baseline de Cartera de
     // otros specs (getDebts los vería como deuda viva).
     const c = await ctx()
-    const pend = ((await c.from('orders').select('id').eq('restaurant_id', SEDE).in('payment_status', ['pending', 'partial']).is('cancelled_at', null)).data ?? []).map((o) => o.id)
+    const sel = await c.from('orders').select('id').eq('restaurant_id', SEDE).in('payment_status', ['pending', 'partial']).is('cancelled_at', null)
+    expect(sel.error, 'la limpieza no pudo leer las órdenes pendientes').toBeNull()
+    const pend = (sel.data ?? []).map((o) => o.id)
     if (pend.length) {
       // Por psql: con sesión, el DELETE de orders está cerrado desde el Paso 11 (mesas-fase2.sql), y
       // estas dos líneas no revisaban el error (habrían dejado de borrar en silencio).
