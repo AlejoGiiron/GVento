@@ -376,9 +376,10 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    cambia con un archivo NUEVO (R5). Para reconfirmar los lados:
    `grep -rn "'preparing'" src/ supabase/*.sql tests/`.
 12. **Lo que `authenticated` escribe DIRECTO en `orders`, `order_items` y `tables` — 3 lados
-   (agregado 2026-10-14, Paso 11).** El `grant update (status, courier_id,
-   estimated_delivery_minutes)` y los `revoke` de `supabase/mesas-fase2.sql` (y su reversa en la
-   raíz); las escrituras directas de `src/lib/supabase-helpers.ts` (`updateOrderStatus`,
+   (agregado 2026-10-14, Paso 11).** Los `grant update (status, courier_id,
+   estimated_delivery_minutes)` en `orders` y `grant update (sent_to_kitchen)` en `order_items`, y los
+   `revoke` (sin DELETE de `orders`, `order_items` ni `tables`) de `supabase/mesas-fase2.sql` (y su
+   reversa en la raíz); las escrituras directas de `src/lib/supabase-helpers.ts` (`updateOrderStatus`,
    `assignOrderCourier`, `markItemsSentToKitchen`, y las de `tables`); y `tests/mesas-fase2.spec.ts`.
    `tsc` no lo ve: `TablesUpdate<'orders'>` acepta cualquier columna, así que una escritura directa
    nueva a otra columna compila y falla en prod con 42501. Antes de agregar una:

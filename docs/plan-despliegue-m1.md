@@ -1553,16 +1553,13 @@ aplica hasta que el Paso 10 esté en TODOS los equipos. Sale el martes 20/10, an
     Delivery, Mesas al enviar a cocina). Todo lo de cobro (`total`, `payment_status`, `order_number`,
     descuentos, cliente, `close_id`, `cobrada_*`, anulación) solo por las funciones del servidor.
     Cierra DEUDAS → *"Fiado en MESA"*.
-- 🔴 **Lo que NO cierra** (revisión del 2026-10-14; siguen abiertos por la API para un usuario con
-  sesión, aunque la app del Paso 10 no los usa):
-  - **UPDATE de tabla en `order_items`:** bajar `qty` o poner `unit_price = 0` cambia lo que cobra
-    `close_table_sale`, sin rastro y sin devolver stock. La app solo escribe `sent_to_kitchen`.
-  - **DELETE de `orders` para admin** (política `orders: admin elimina`): borra en cascada ítems,
-    bajas, abonos de fiado y lotes (`payments` es restrict).
-  - **`orders.status` con cualquier valor:** con `payment_status` `'paid'` por defecto, pasar a
-    `delivered` una mesa sin pagos la deja "pagada" (DEUDAS → *"Mesas cerradas como pagadas SIN
-    filas en payments"*).
-  Cerrarlos es un paso aparte (propuesto el 2026-10-14, sin aprobar).
+  - `order_items` sin UPDATE de tabla: UPDATE **solo** de `sent_to_kitchen` (lo único que escribe la
+    app). `qty` y `unit_price` ya no se cambian por la API (agregado el 2026-10-14, aprobado).
+  - `orders` sin DELETE (la política `orders: admin elimina` queda sin uso; la app no borra órdenes).
+    Borrar una sede sigue borrando sus órdenes en cascada (la cascada corre como el dueño de la tabla).
+- 🔴 **Lo que NO cierra:** `orders.status` con cualquier valor (con `payment_status` `'paid'` por
+  defecto, pasar a `delivered` una mesa sin pagos la deja "pagada"). Se cierra con **P4**, que rehace
+  los cambios de estado de Domicilios y Cocina (DEUDAS → *"`orders.status` con cualquier valor"*).
 - **Guarda 0e:** aborta si `anon` todavía escribe en `orders`, `order_items` o `tables` (P0.2 sin
   aplicar): este paso solo cierra lo de `authenticated`.
 - **Barrido R3 (2026-10-13):** con el código del Paso 10, la app no borra ítems ni mesas directo, y
@@ -1586,9 +1583,9 @@ Esos hash (7 caracteres cada uno) van en la línea marcada `[VERSIONES-PASO-10]`
 `supabase/mesas-fase2.sql`, en el SQL Editor, en lugar de `'PEGA-AQUI-LOS-HASH-DEL-PASO-10'`.
 
 **11.2 — Pre-flight, JUSTO ANTES:** `supabase/diag/mesas-fase2-preflight.sql`, cada consulta por
-separado (md5 LF `e90ba7ef57d11165e23cc8c3feeacf82`). Consulta 1: **todas** las versiones tienen que
+separado (md5 LF `3d645a6642d4a312dd68e460ede30d76`). Consulta 1: **todas** las versiones tienen que
 estar en la lista de 11.1; si aparece otra, que ese equipo recargue (la consulta 2 dice cuál) y se
-vuelve a mirar. Consulta 3: los 4 md5 del Paso 9. Consulta 4: `t · (ninguna) · t · t`.
+vuelve a mirar. Consulta 3: los 4 md5 del Paso 9. Consulta 4: `t · (ninguna) · t · t · t · (ninguna) · t`.
 - **Un equipo que ya no existe** (navegador borrado, usuario inactivo, una vista previa contra prod)
   deja su fila en `app_versiones` para siempre y la guarda aborta (a propósito: no sabe distinguirlo
   de uno que sigue con la versión vieja). Solo si estás SEGURO de que ese equipo no se usa, se borra
@@ -1602,17 +1599,17 @@ vuelve a mirar. Consulta 3: los 4 md5 del Paso 9. Consulta 4: `t · (ninguna) ·
   Si el equipo vuelve a abrir la app, reaparece con su versión actual.
 
 **11.3 — Correr `supabase/mesas-fase2.sql`** con la lista llena (md5 LF del archivo SIN llenar:
-**`80b4923cf2a5d105691b752abfb36a81`**; cambió el 2026-10-14 por la guarda 0e y el encabezado). Avisa `N equipo(s) en app_versiones, todos con una versión de la
+**`efc0917dade564a3b931b196f3269291`**; cambió el 2026-10-14 por la guarda 0e, el encabezado y lo que se agregó de order_items y orders). Avisa `N equipo(s) en app_versiones, todos con una versión de la
 lista` y `orders actualizable solo en courier_id,estimated_delivery_minutes,status`. Si la lista no
 está llena, si un equipo tiene otra versión, si el Paso 9 no está, si ya se aplicó o si `anon`
 todavía escribe en esas tablas, **aborta sin cambiar nada** y lo dice.
 
 **11.4 — Verificación:** la consulta 4 del pre-flight: `f · courier_id,estimated_delivery_minutes,status
-· f · f`. Y en la app: cobrar una mesa, quitar un ítem, cerrar una mesa sin consumo, avanzar una
+· f · f · f · sent_to_kitchen · f`. Y en la app: cobrar una mesa, quitar un ítem, cerrar una mesa sin consumo, avanzar una
 comanda en Cocina y asignar un repartidor en Delivery.
 
 **11.5 — Reversa:** `mesas-fase2-revertir.sql` (fuera de git, en la raíz), md5
-**`5de6c5fed4cecbaf08e1d0122cb0fb7e`**: devuelve a `authenticated` el estado de partida exacto (UPDATE
+**`b7101138f82a81932fd3e985f4cb7805`**: devuelve a `authenticated` el estado de partida exacto (UPDATE
 de tabla en `orders`, DELETE en `order_items` y `tables`). **Reabre las escrituras directas**: solo si
 la migración rompió algo. No deshace nada de datos (no los hay) y no toca `anon`.
 
@@ -1656,4 +1653,4 @@ Los martes G-10 y Salchimelo no abren: los pasos con SQL van ese día.
 | 9 | SQL de Mesas en el servidor | `mesas-servidor.sql` (`4adc0197…`), con pre-flight 3, 4 y 5 justo antes | — | `mesas-servidor-revertir.sql` (`2f557c6d…`), solo antes del 10 |
 | 10 | frontend de Mesas | — | `feat/mesas-servidor` | rollback (el SQL del 9 se queda) |
 | P0.2 | anon sin escritura | `anon-sin-escritura.sql` (`26bca67d…`) | — | `anon-sin-escritura-revertir.sql` (`ed8bd914…`) |
-| 11 | Mesas fase 2 (sin escrituras directas de cobro, ítems ni mesas) | `mesas-fase2.sql` (`80b4923c…`, lista sin llenar), pre-flight `e90ba7ef…` | — | `mesas-fase2-revertir.sql` (`5de6c5fe…`) |
+| 11 | Mesas fase 2 (sin escrituras directas de cobro, ítems ni mesas) | `mesas-fase2.sql` (`efc0917d…`, lista sin llenar), pre-flight `3d645a66…` | — | `mesas-fase2-revertir.sql` (`b7101138…`) |

@@ -23,10 +23,16 @@ test.beforeAll(async () => {
 })
 
 test.describe('Paso 11: sin escrituras directas de cobro, ítems ni mesas', () => {
-  test('catálogo: authenticated sin DELETE en order_items y tables; orders actualizable solo en 3 columnas', () => {
+  test('catálogo: sin DELETE en order_items, tables y orders; orders en 3 columnas y order_items solo en sent_to_kitchen', () => {
     expect(psql(`select has_table_privilege('authenticated','public.order_items','DELETE') || '|'
       || has_table_privilege('authenticated','public.tables','DELETE') || '|'
-      || has_table_privilege('authenticated','public.orders','UPDATE');`)).toBe('false|false|false')
+      || has_table_privilege('authenticated','public.orders','DELETE') || '|'
+      || has_table_privilege('authenticated','public.orders','UPDATE') || '|'
+      || has_table_privilege('authenticated','public.order_items','UPDATE');`)).toBe('false|false|false|false|false')
+    expect(psql(`select string_agg(attname::text, ',' order by attname) from pg_attribute
+       where attrelid = 'public.order_items'::regclass and attnum > 0 and not attisdropped
+         and has_column_privilege('authenticated', 'public.order_items', attname, 'UPDATE');`))
+      .toBe('sent_to_kitchen')
     expect(psql(`select string_agg(attname::text, ',' order by attname) from pg_attribute
        where attrelid = 'public.orders'::regclass and attnum > 0 and not attisdropped
          and has_column_privilege('authenticated', 'public.orders', attname, 'UPDATE');`))
@@ -41,6 +47,9 @@ test.describe('Paso 11: sin escrituras directas de cobro, ítems ni mesas', () =
       'update orders.payment_status': await owner.from('orders').update({ payment_status: 'paid' }).eq('id', FALSO),
       'update orders.order_number': await owner.from('orders').update({ order_number: 1 }).eq('id', FALSO),
       'update orders.customer_id (fiado)': await owner.from('orders').update({ customer_id: FALSO }).eq('id', FALSO),
+      'update order_items.qty': await owner.from('order_items').update({ qty: 1 }).eq('id', FALSO),
+      'update order_items.unit_price': await owner.from('order_items').update({ unit_price: 0 }).eq('id', FALSO),
+      'delete orders (admin)': await owner.from('orders').delete().eq('id', FALSO),
     }
     const abiertos = Object.entries(intentos)
       .filter(([, r]) => !/permission denied/i.test(r.error?.message ?? ''))
@@ -83,7 +92,10 @@ test.describe('la guarda de mesas-fase2.sql', () => {
 
   // El estado de partida (antes del Paso 11), armado dentro de la transacción que se deshace.
   const PARTIDA = `revoke update (status, courier_id, estimated_delivery_minutes) on public.orders from authenticated;
+    revoke update (sent_to_kitchen) on public.order_items from authenticated;
     grant update on public.orders to authenticated;
+    grant delete on public.orders to authenticated;
+    grant update on public.order_items to authenticated;
     grant delete on public.order_items to authenticated;
     grant delete on public.tables to authenticated;`
 

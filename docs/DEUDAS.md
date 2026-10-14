@@ -262,11 +262,11 @@ SECURITY DEFINER. Las policies y grants salen de `pg_policies` y
 |---|---|---|---|---|
 | `payments` | `register_sale_payment` (I), `register_sale_void` (D) | **ninguna** (`createPayment` sin llamadores) | INSERT cajero/admin · DELETE admin | **quitar las 2 y revocar I/U/D.** Medido: el cajero insertó directo un pago en efectivo SIN turno (rollback). |
 | `debt_payments` | `register_debt_payment(_batch)` (I) | **ninguna** | INSERT con `fiado.gestionar` | **quitar y revocar.** Es la forma de los $48.000 de Salchimelo. Antes: pasar el fixture de `anular-venta.spec` a la RPC. |
-| `order_items` | `add_order_items_with_extras` (I, descuenta stock) | UPDATE `sent_to_kitchen` (Mesas) · DELETE de un ítem (Mesas, **sin devolver stock**: TODO conocido en `handleRemoveItem`) | INSERT · UPDATE · DELETE "staff" | **INSERT: quitar** (`addOrderItems` sin llamadores; hoy se puede dar de alta un ítem sin descontar stock). **UPDATE: solo la columna** (`grant update (sent_to_kitchen)`); hoy se puede cambiar `qty` o `unit_price` de un ítem ya descontado. **DELETE: dos fases**, primero una RPC que devuelva el stock (el TODO) y, cuando ya no haya pestañas viejas, revocar. |
+| `order_items` | `add_order_items_with_extras` (I, descuenta stock) | UPDATE `sent_to_kitchen` (Mesas) · DELETE de un ítem (Mesas, **sin devolver stock**: TODO conocido en `handleRemoveItem`) | INSERT · UPDATE · DELETE "staff" | **INSERT: quitar** (`addOrderItems` sin llamadores; hoy se puede dar de alta un ítem sin descontar stock). **UPDATE: solo la columna** (`grant update (sent_to_kitchen)`): lo hace el Paso 11 (`mesas-fase2.sql`, sale el 2026-10-20). **DELETE:** lo cierra el mismo Paso 11 (quitar un ítem = `quitar_item_mesa`, que devuelve el stock). Hasta que se aplique en prod, lo de esta fila sigue abierto. |
 | `order_item_extras` | `add_order_items_with_extras` (I) | **ninguna** | INSERT "staff" | **quitar.** |
 | `cash_movements` | abonos (I) | INSERT (movimientos manuales, legítimo) | **ALL** por sede | 🔴 Medido: el cajero borraba un egreso de 5.000 de un turno CERRADO (el trigger era `BEFORE INSERT OR UPDATE`), y un UPDATE podía mover un movimiento fuera de un turno cerrado. **✅ Cerrado en la fase 1 de D** (`3339978`): el trigger cubre DELETE y mira el turno viejo. **Queda para después de M1:** quitar UPDATE y DELETE también en turnos abiertos (la app nunca los usa). |
 | `purchase_invoices` / `_items` | `register_purchase` | **ninguna** | INSERT con permiso / ninguna | **quitar el INSERT de `purchase_invoices`** (una factura sin ítems ni stock). |
-| `orders` | abonos y anulación (U) | INSERT (POS y Mesas) y 6 UPDATE (estado, total, descuento, número, fiado, domiciliario) | INSERT · UPDATE "staff" · DELETE admin | **no se puede cerrar todavía**: es el camino vivo del POS y de Mesas. **DELETE admin: quitar** (sin uso; cascada a `debt_payments`). El resto se achica con `register_pos_sale` (ver la entrada de abajo) y después con el cobro de mesa. |
+| `orders` | abonos y anulación (U) | INSERT (POS y Mesas) y 6 UPDATE (estado, total, descuento, número, fiado, domiciliario) | INSERT · UPDATE "staff" · DELETE admin | **no se puede cerrar todavía**: es el camino vivo del POS y de Mesas. **DELETE admin: lo quita el Paso 11** (`mesas-fase2.sql`, 2026-10-20; sin uso en la app; la cascada alcanza `order_items`, `order_item_extras`, `debt_payments`, `order_item_bajas` y `order_item_lotes`; borrar una sede sigue borrando sus órdenes en cascada, porque esa acción corre con los permisos del dueño de la tabla). El resto se achica con `register_pos_sale` (ver la entrada de abajo) y después con el cobro de mesa. |
 | `products` | stock por `add_order_items_with_extras`, `adjust_stock`, `register_purchase`, anulación | `stock_qty` = 0/null al crear o al apagar el seguimiento (modal de producto) | INSERT · UPDATE · DELETE admin | dejar. `updateProductStock` no tiene llamadores, pero el modal escribe `stock_qty` y una restricción por columna lo rompería. |
 | `stock_movements`, `store_sequences`, `purchase_invoice_items` | solo RPC | — | **ninguna** ✅ | ya está bien: es el modelo a copiar. |
 | `cash_shifts` | `close_cash_shift` (U) | INSERT (abrir turno) | INSERT | UPDATE de `authenticated`: lo quita el Paso 6 (fase 2 de D, `close-cash-shift-revoke.sql`), que al 2026-10-14 **no estaba aplicado en prod** (corregido: esta celda decía "ya revocado"). `anon`: cerrado por P0.2. Estado: `supabase/diag/cash-shifts-preflight.sql`, filas 9 y 10. |
@@ -1210,6 +1210,17 @@ guarda otra vez sobre la fila bloqueada. **Hasta entonces sigue abierto en produ
 **¿Ya pasó?** `supabase/diag/mesas-preflight.sql`, consulta 5 (solo lectura): una fila = una venta
 que devolvió su stock más de una vez. Señal verificada con contraste en Docker: 2 anulaciones con
 la versión de producción, 1 con la del Paso 9.
+
+### 🔴 `orders.status` con cualquier valor por la API — se cierra con P4 (decidido 2026-10-14)
+
+Después del Paso 11, `authenticated` todavía puede escribir `orders.status` directo (lo necesitan
+Cocina, Delivery y Mesas), con cualquier valor del enum: `delivered` o `cancelled` incluidos. Como
+`payment_status` es `'paid'` por defecto, pasar a `delivered` una mesa sin pagos la deja "pagada"
+sin ningún cobro (la entrada "Mesas cerradas como pagadas SIN filas en payments").
+**Se cierra con P4 (Pedidos en línea)**, que rehace los cambios de estado de Domicilios y Cocina:
+los estados pasan a una función del servidor que valida la transición, y se revoca el UPDATE de
+`status`. Hasta entonces, el Paso 11 lo deja abierto a propósito (`mesas-fase2.sql` lo dice en su
+encabezado).
 
 ### 🔴 Fiado en MESA: cualquier usuario de la sede puede pasar una orden a fiado (hallado 2026-10-08)
 

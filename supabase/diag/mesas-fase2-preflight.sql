@@ -39,6 +39,11 @@ select has_table_privilege('authenticated', 'public.orders', 'UPDATE')      as o
           from pg_attribute where attrelid = 'public.orders'::regclass and attnum > 0 and not attisdropped
            and attacl is not null and has_column_privilege('authenticated', 'public.orders', attname, 'UPDATE')) as orders_update_por_columna,
        has_table_privilege('authenticated', 'public.order_items', 'DELETE') as order_items_delete,
-       has_table_privilege('authenticated', 'public.tables', 'DELETE')      as tables_delete;
--- ANTES: t · (ninguna) · t · t.
--- DESPUÉS: f · courier_id,estimated_delivery_minutes,status · f · f.
+       has_table_privilege('authenticated', 'public.tables', 'DELETE')      as tables_delete,
+       has_table_privilege('authenticated', 'public.order_items', 'UPDATE') as order_items_update_tabla,
+       (select coalesce(string_agg(attname::text, ',' order by attname), '(ninguna)')
+          from pg_attribute where attrelid = 'public.order_items'::regclass and attnum > 0 and not attisdropped
+           and attacl is not null and has_column_privilege('authenticated', 'public.order_items', attname, 'UPDATE')) as order_items_update_por_columna,
+       has_table_privilege('authenticated', 'public.orders', 'DELETE')      as orders_delete;
+-- ANTES:   t · (ninguna) · t · t · t · (ninguna) · t
+-- DESPUÉS: f · courier_id,estimated_delivery_minutes,status · f · f · f · sent_to_kitchen · f

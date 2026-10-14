@@ -604,8 +604,8 @@ export const registerSaleVoid = (orderId: string, reason: string) =>
 export const addOrderItems = (items: TablesInsert<'order_items'>[]) =>
   supabase.from('order_items').insert(items).select()
 
-export const updateOrderItem = (itemId: string, data: TablesUpdate<'order_items'>) =>
-  supabase.from('order_items').update(data).eq('id', itemId).select().single()
+// order_items: desde el Paso 11 (mesas-fase2.sql) la app solo puede escribir sent_to_kitchen
+// directo (markItemsSentToKitchen). Lo demás va por las funciones del servidor.
 
 // --- Payments ---
 

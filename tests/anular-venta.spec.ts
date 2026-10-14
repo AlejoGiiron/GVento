@@ -499,8 +499,10 @@ test.describe.serial('Anulación de ventas', () => {
     const c = await ctx()
     const pend = ((await c.from('orders').select('id').eq('restaurant_id', SEDE).in('payment_status', ['pending', 'partial']).is('cancelled_at', null)).data ?? []).map((o) => o.id)
     if (pend.length) {
-      await c.from('debt_payments').delete().in('order_id', pend)
-      await c.from('orders').delete().in('id', pend)
+      // Por psql: con sesión, el DELETE de orders está cerrado desde el Paso 11 (mesas-fase2.sql), y
+      // estas dos líneas no revisaban el error (habrían dejado de borrar en silencio).
+      const ids = pend.map((id) => `'${id}'`).join(',')
+      psql(`begin; delete from public.debt_payments where order_id in (${ids}); delete from public.orders where id in (${ids}); commit;`)
     }
     await loginAsOwner(page)
     await page.goto('/ventas')

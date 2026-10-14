@@ -17,20 +17,20 @@
 --      Paso 10 escribe directo: status (Cocina, Delivery, Mesas al enviar a cocina), courier_id y
 --      estimated_delivery_minutes (Delivery). Todo lo de cobro (total, payment_status, order_number,
 --      descuentos, cliente, close_id, cobrada_*, anulación) solo por las funciones del servidor.
+--   4. order_items: authenticated sin UPDATE de tabla; UPDATE solo de sent_to_kitchen (lo único que
+--      la app escribe: markItemsSentToKitchen). qty y unit_price ya no se cambian por la API.
+--   5. orders:      authenticated sin DELETE (la política "orders: admin elimina" queda sin uso: la
+--      app no borra órdenes). Borrar una sede sigue borrando sus órdenes EN CASCADA: esa acción la
+--      ejecuta Postgres con los permisos del dueño de la tabla, no los del usuario.
 --   Las políticas no se tocan: el permiso es la barrera. Las funciones SECURITY DEFINER no cambian
 --   (corren como su dueño). INSERT de órdenes e ítems sigue igual.
 --
--- 🔴 LO QUE NO CIERRA (siguen abiertos por la API para un usuario con sesión; la app del Paso 10 no
---    los usa, pero la base no los impide; revisión del 2026-10-14):
---   a. UPDATE de tabla en order_items (política "order_items: staff actualiza"): bajar qty o poner
---      unit_price = 0 cambia el total que cobra close_table_sale sin dejar rastro ni devolver stock.
---      H3 queda cerrado para BORRAR ítems, no para editarlos. La app solo escribe sent_to_kitchen.
---   b. DELETE de orders para admin (política "orders: admin elimina"): borra en cascada sus ítems,
---      sus bajas (order_item_bajas), sus abonos de fiado y sus lotes; payments es restrict.
---   c. orders.status acepta cualquier valor del enum (también delivered y cancelled): con
---      payment_status por defecto 'paid', pasar a delivered una mesa sin pagos la deja "pagada".
---      status sigue en el grant porque Cocina, Delivery y Mesas lo escriben directo.
---   Cerrarlos es otro paso (DEUDAS → "Tablas que solo deberían escribirse por RPC").
+-- 🔴 LO QUE NO CIERRA (sigue abierto por la API para un usuario con sesión; revisión del 2026-10-14):
+--   orders.status acepta cualquier valor del enum (también delivered y cancelled): con
+--   payment_status por defecto 'paid', pasar a delivered una mesa sin pagos la deja "pagada".
+--   status sigue en el grant porque Cocina, Delivery y Mesas lo escriben directo. Se cierra con P4,
+--   que rehace los cambios de estado de Domicilios y Cocina (DEUDAS → "orders.status con cualquier
+--   valor").
 --
 -- 🔴 GUARDA: SOLO SE APLICA CON EL PASO 10 EN TODOS LOS EQUIPOS. Un equipo con el frontend viejo
 -- cobra mesas con escrituras directas: después de esta migración, cobrar le fallaría. La migración
@@ -41,8 +41,8 @@
 -- no aparece en app_versiones.
 --
 -- PRECONDICIONES: la lista de versiones llena; ningún equipo fuera de ella; el Paso 9 aplicado
--- (md5 de sus funciones); authenticated con UPDATE de tabla en orders y DELETE en order_items y
--- tables, y sin permisos por columna en orders (el estado del que parte la reversa).
+-- (md5 de sus funciones); authenticated con UPDATE y DELETE de tabla en orders y order_items, DELETE
+-- en tables, y sin permisos por columna en orders ni order_items (el estado del que parte la reversa).
 -- RE-APLICAR: aborta sin cambiar nada (el estado ya no es el de partida).
 -- REVERSA: mesas-fase2-revertir.sql (fuera de git).
 --
@@ -96,10 +96,13 @@ begin
 
   -- ── 0d. El estado de partida (del que parte la reversa) ──
   if not has_table_privilege('authenticated', 'public.orders', 'UPDATE')
+     or not has_table_privilege('authenticated', 'public.orders', 'DELETE')
+     or not has_table_privilege('authenticated', 'public.order_items', 'UPDATE')
      or not has_table_privilege('authenticated', 'public.order_items', 'DELETE')
      or not has_table_privilege('authenticated', 'public.tables', 'DELETE')
-     or exists (select 1 from pg_attribute where attrelid = 'public.orders'::regclass and attacl is not null) then
-    raise exception 'Precondición: authenticated no está en el estado de partida (UPDATE en orders, DELETE en order_items y tables, sin permisos por columna). ¿Ya se aplicó? No se cambió nada.';
+     or exists (select 1 from pg_attribute where attrelid in ('public.orders'::regclass, 'public.order_items'::regclass)
+                and attacl is not null) then
+    raise exception 'Precondición: authenticated no está en el estado de partida (UPDATE y DELETE en orders y order_items, DELETE en tables, sin permisos por columna). ¿Ya se aplicó? No se cambió nada.';
   end if;
 
   -- ── 0e. P0.2 aplicado: anon no escribe en estas tablas (este paso solo cierra lo de authenticated) ──
@@ -119,15 +122,31 @@ revoke delete on public.tables from authenticated;
 revoke update on public.orders from authenticated;
 grant  update (status, courier_id, estimated_delivery_minutes) on public.orders to authenticated;
 
--- ── 4. Comprobación, en esta misma transacción (fail-closed) ──
+-- ── 4. order_items: UPDATE solo de sent_to_kitchen ──
+revoke update on public.order_items from authenticated;
+grant  update (sent_to_kitchen) on public.order_items to authenticated;
+
+-- ── 5. orders: sin DELETE directo ──
+revoke delete on public.orders from authenticated;
+
+-- ── 6. Comprobación, en esta misma transacción (fail-closed) ──
 do $$
 declare
   v_cols text;
 begin
   if has_table_privilege('authenticated', 'public.order_items', 'DELETE')
      or has_table_privilege('authenticated', 'public.tables', 'DELETE')
-     or has_table_privilege('authenticated', 'public.orders', 'UPDATE') then
-    raise exception 'authenticated todavía tiene DELETE en order_items/tables o UPDATE de tabla en orders. No se cambió nada.';
+     or has_table_privilege('authenticated', 'public.orders', 'DELETE')
+     or has_table_privilege('authenticated', 'public.orders', 'UPDATE')
+     or has_table_privilege('authenticated', 'public.order_items', 'UPDATE') then
+    raise exception 'authenticated todavía tiene DELETE en order_items/tables/orders o UPDATE de tabla en orders/order_items. No se cambió nada.';
+  end if;
+  select string_agg(attname::text, ',' order by attname) into v_cols
+    from pg_attribute
+   where attrelid = 'public.order_items'::regclass and attnum > 0 and not attisdropped
+     and has_column_privilege('authenticated', 'public.order_items', attname, 'UPDATE');
+  if v_cols is distinct from 'sent_to_kitchen' then
+    raise exception 'authenticated puede actualizar en order_items: % (se esperaba solo sent_to_kitchen). No se cambió nada.', v_cols;
   end if;
   select string_agg(attname::text, ',' order by attname) into v_cols
     from pg_attribute
@@ -136,7 +155,7 @@ begin
   if v_cols is distinct from 'courier_id,estimated_delivery_minutes,status' then
     raise exception 'authenticated puede actualizar en orders: % (se esperaba courier_id,estimated_delivery_minutes,status). No se cambió nada.', v_cols;
   end if;
-  raise notice 'mesas-fase2: listo — orders actualizable solo en %', v_cols;
+  raise notice 'mesas-fase2: listo — orders actualizable solo en %; order_items solo en sent_to_kitchen; sin DELETE de orders, order_items ni tables', v_cols;
 end $$;
 
 commit;
