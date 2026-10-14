@@ -14,6 +14,8 @@ import {
   getShiftPayments,
   getShiftVouchersTotal,
   getCashMovements,
+  getAbonoMovementIds,
+  getShiftMovementTotals,
   createCashMovement,
   type ClosedShiftRow,
 } from '@/lib/supabase-helpers'
@@ -29,6 +31,8 @@ export interface ShiftSalesSummary {
 }
 
 export type CashMovement = Tables<'cash_movements'>
+
+const SIN_ABONOS: ReadonlySet<string> = new Set()
 
 export function useCashShift() {
   const { profile } = useAuth()
@@ -75,6 +79,17 @@ export function useCashShift() {
       return data ?? []
     },
     enabled: !!currentShift?.id,
+  })
+
+  // Cuáles ingresos del turno son abonos de fiado en efectivo (por el vínculo
+  // debt_payments.cash_movement_id). Solo para MOSTRARLOS aparte de los ingresos
+  // manuales: el esperado usa el total de ingresos y no cambia. Si la lectura falla,
+  // el conjunto queda vacío y se ven como manuales, que es lo de antes.
+  const idsIngresos = movements.filter((m) => m.type === 'in').map((m) => m.id)
+  const { data: abonoMovementIds = SIN_ABONOS } = useQuery({
+    queryKey: ['shift_abono_movs', currentShift?.id, idsIngresos.join(',')],
+    queryFn: () => getAbonoMovementIds(idsIngresos),
+    enabled: !!currentShift?.id && idsIngresos.length > 0,
   })
 
   // Vales (ruletazo) del turno — INFORMATIVO (no entra al cuadre). Para mostrar
@@ -145,7 +160,15 @@ export function useCashShift() {
       // comprobante, idéntico a la reimpresión del historial.
       const { data: fila, error: e2 } = await getClosedShiftRow(resumen.id)
       if (e2) throw e2
-      return { fila: fila as unknown as ClosedShiftRow, movementsIn: resumen.movements_in, movementsOut: resumen.movements_out }
+      // Qué parte de los ingresos son abonos en efectivo, para el comprobante. Mismo helper
+      // que la reimpresión del historial. Si falla, 0: el turno YA está cerrado y el
+      // comprobante solo los muestra como ingresos manuales (como antes); no es un error.
+      const abonosEfectivo = await getShiftMovementTotals(resumen.id)
+        .then((t) => t.abonosEfectivo, () => 0)
+      return {
+        fila: fila as unknown as ClosedShiftRow,
+        movementsIn: resumen.movements_in, movementsOut: resumen.movements_out, abonosEfectivo,
+      }
     },
     onSuccess: () => { invalidateShift(); toast.success('Turno cerrado correctamente') },
     onError: () => toast.error('Error al cerrar el turno'),
@@ -211,6 +234,8 @@ export function useCashShift() {
     salesSummary,
     abonosSummary,
     movements,
+    /** Ids de los ingresos de `movements` que son abonos de fiado en efectivo. */
+    abonoMovementIds,
     vouchersTotal,
     refetchSales,
     openShift: openShiftMutation.mutateAsync,

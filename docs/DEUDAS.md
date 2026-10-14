@@ -436,27 +436,30 @@ sin mirar el estado ni los pagos. Una venta anulada con vale, o una huérfana co
 sumando. El vale del cierre (`close_cash_shift`) sí exige pago. No se arregló: se anota porque
 las limpiezas de huérfanas no la sacan de ese número.
 
-### UX del cierre: un abono de fiado en efectivo aparece como "Ingresos manuales" (anotado 2026-10-01)
+### ✅ RESUELTO (2026-10-13): los abonos de fiado ya no se muestran como ventas ni como "Ingresos manuales"
 
-La cuenta está bien: el abono en efectivo crea un `cash_movement` de tipo `in` ("Abono de
-<cliente>"), y el arqueo lo suma como cualquier ingreso. Pero el modal de cierre lo rotula
-**"Ingresos manuales"**, y el dueño va a preguntar qué ingreso manual hizo. Visto en Café Aroma
-en la prueba del 2026-10-01.
+Anotado el 2026-10-01: el abono en efectivo salía como **"Ingresos manuales"** en el cierre. Desde
+`arqueo-abonos.sql` (2026-10-13) apareció la otra mitad: el detalle del turno, la reimpresión y el
+comprobante del cierre derivaban las "ventas" del esperado, que ahora incluye los abonos de
+tarjeta, transferencia y Nequi ("Nequi $5.000 · 0 vta(s)" en Café Aroma).
 
-**Propuesta, sin construir:** una línea aparte, **"Abonos de fiado"**, separada de "Ingresos
-manuales".
-- **Cómo distinguirlos:** por el vínculo `debt_payments.cash_movement_id`, que es la definición
-  de "este ingreso es un abono". **NO por el texto** "Abono de…" del `reason` (R2: el texto es
-  una descripción, no una identidad).
-- **Lados a tocar en la misma pasada (R1):**
-  - `close_cash_shift`, que hoy devuelve un solo `movements_in`: sumar `abonos_fiado`;
-  - `CloseShiftModal` (vista previa);
-  - `ShiftDetailModal` (historial);
-  - `printer.ts`, que en el ticket imprime "Ingresos";
-  - `MovementsModal`.
-- **La fórmula del arqueo NO cambia** (contrato R1 #6): ingresos totales = manuales + abonos. Es
-  solo presentación, así que el invariante de `cierre-turno-servidor.spec.ts` no se toca. Sí
-  hay que agregar un test que separe las dos líneas.
+**Cómo quedó (`fix/abonos-fuera-de-ventas`, solo pantalla, sin SQL):**
+- Un ingreso de caja es un abono si `debt_payments.cash_movement_id` lo apunta (el vínculo, **no**
+  el texto "Abono de…"): `getAbonoMovementIds` + `separarMovimientos` en `src/lib/shiftCalc.ts`.
+- Las ventas por método del snapshot ya no incluyen los abonos (`deriveCashReportSales`), y los
+  abonos van en su sección, por método (`deriveCashReportAbonos`). Las dos viven en `printer.ts`,
+  que comparten el detalle y el papel.
+- Cierre en vivo: "Ingresos manuales" y "Abonos en efectivo" por separado. Detalle y comprobante:
+  sección "Abonos de fiado" y los movimientos separados. Ventana de movimientos: la fila de un
+  abono dice "Abono de fiado".
+- **El esperado NO cambia** (R1 #6): sigue usando los ingresos totales. `close_cash_shift` no se
+  tocó; el comprobante del cierre lee la separación después de cerrar, con el mismo helper que la
+  reimpresión.
+- Barrido R3 (2026-10-13): las vistas de reportes (`daily_sales_summary`, `hourly_sales`,
+  `waiter_performance`, `product_performance`), Historial de ventas y Mis ventas de `/m` leen
+  `payments`, no `debt_payments` ni `cash_movements`: **no** cuentan abonos como ventas.
+- Pruebas: `tests/arqueo-abonos.spec.ts` ("Abonos fuera de las ventas") y
+  `src/lib/abonosTurno.test.ts`.
 
 ### Precio del POS: ¿se valida `unit_price` contra `products.price`? — NO por ahora (B2, 2026-10-01)
 

@@ -17,8 +17,8 @@ const signed = (n: number) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${formatCOP(Ma
 
 interface ShiftDetailModalProps {
   row: ClosedShiftRow
-  /** Totales de movimientos del turno, ya leídos por shift_id. */
-  movements: { in: number; out: number }
+  /** Totales de movimientos del turno, ya leídos por shift_id (`in` incluye los abonos en efectivo). */
+  movements: { in: number; out: number; abonosEfectivo?: number }
   restaurantName?: string | null
   restaurantAddress?: string | null
   /** false = sin permiso de caja.cerrar → no se ofrece reimprimir. */
@@ -50,7 +50,8 @@ export function ShiftDetailModal({
   // Lo importante que resuelve esa función: NO llama a buildCashReportData
   // cuando close_reconciliation es null (el builder castea sin chequear).
   const v = buildShiftDetail(row, movements, { restaurantName, restaurantAddress })
-  const { tieneArqueo, data, ventas } = v
+  const { tieneArqueo, data, ventas, abonos } = v
+  const { ingresosManuales, abonosEfectivo, egresos } = v.movimientos
   const rec = data?.reconciliation
   const { esperado, declarado, diferencia } = v.efectivo
 
@@ -150,7 +151,7 @@ export function ShiftDetailModal({
                 ))}
                 <div style={totalRowStyle}>
                   <span>Total ventas</span>
-                  <span style={{ fontFamily: 'monospace', color: '#10b981' }}>
+                  <span data-testid="detail-sales-total" style={{ fontFamily: 'monospace', color: '#10b981' }}>
                     {formatCOP(ventas.total)}
                     <span style={{ color: '#94a3b8', fontWeight: 500 }}> · {v.salesCount} vta(s)</span>
                   </span>
@@ -159,21 +160,48 @@ export function ShiftDetailModal({
             </div>
           )}
 
-          {/* ── Movimientos, si los hubo ── */}
-          {(movements.in > 0 || movements.out > 0) && (
+          {/* ── Abonos de fiado — plata de ventas a fiado de otros días: NO son ventas ── */}
+          {abonos && abonos.total > 0 && (
+            <div data-testid="detail-abonos" style={{ marginBottom: 20 }}>
+              <div style={seccion}>Abonos de fiado</div>
+              <div style={caja}>
+                {ARQUEO_ORDER.filter((m) => abonos.byMethod[m] !== 0).map((m) => (
+                  <div key={m} style={{ ...rowStyle, borderBottom: '1px solid #f1f5f9' }}>
+                    <span style={{ color: '#64748b' }}>{ARQUEO_METHOD_LABEL[m]}</span>
+                    <span data-testid={`detail-abonos-${m}`} style={{ fontFamily: 'monospace', fontWeight: 600, color: '#0f172a' }}>
+                      {formatCOP(abonos.byMethod[m])}
+                    </span>
+                  </div>
+                ))}
+                <div style={totalRowStyle}>
+                  <span>Total abonos</span>
+                  <span data-testid="detail-abonos-total" style={{ fontFamily: 'monospace' }}>{formatCOP(abonos.total)}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Movimientos, si los hubo: los abonos en efectivo aparte de los ingresos manuales ── */}
+          {(ingresosManuales > 0 || abonosEfectivo > 0 || egresos > 0) && (
             <div style={{ marginBottom: 20 }}>
               <div style={seccion}>Movimientos de caja</div>
               <div style={caja}>
-                {movements.in > 0 && (
-                  <div style={{ ...rowStyle, borderBottom: movements.out > 0 ? '1px solid #f1f5f9' : undefined }}>
-                    <span style={{ color: '#64748b' }}>Ingresos</span>
-                    <span data-testid="detail-mov-in" style={{ fontFamily: 'monospace', color: '#059669' }}>+ {formatCOP(movements.in)}</span>
+                {ingresosManuales > 0 && (
+                  <div style={{ ...rowStyle, borderBottom: '1px solid #f1f5f9' }}>
+                    <span style={{ color: '#64748b' }}>Ingresos manuales</span>
+                    <span data-testid="detail-mov-in" style={{ fontFamily: 'monospace', color: '#059669' }}>+ {formatCOP(ingresosManuales)}</span>
                   </div>
                 )}
-                {movements.out > 0 && (
+                {abonosEfectivo > 0 && (
+                  <div style={{ ...rowStyle, borderBottom: '1px solid #f1f5f9' }}>
+                    <span style={{ color: '#64748b' }}>Abonos en efectivo</span>
+                    <span data-testid="detail-mov-abonos" style={{ fontFamily: 'monospace', color: '#059669' }}>+ {formatCOP(abonosEfectivo)}</span>
+                  </div>
+                )}
+                {egresos > 0 && (
                   <div style={rowStyle}>
                     <span style={{ color: '#64748b' }}>Egresos</span>
-                    <span data-testid="detail-mov-out" style={{ fontFamily: 'monospace', color: '#dc2626' }}>− {formatCOP(movements.out)}</span>
+                    <span data-testid="detail-mov-out" style={{ fontFamily: 'monospace', color: '#dc2626' }}>− {formatCOP(egresos)}</span>
                   </div>
                 )}
               </div>

@@ -225,8 +225,11 @@ export interface CashReportData {
   openedByName?: string | null
   closedByName?: string | null
   openingAmount: number
+  /** TODOS los ingresos de caja del turno (manuales + abonos de fiado en efectivo). */
   movementsIn: number
   movementsOut: number
+  /** La parte de movementsIn que son abonos de fiado en efectivo. Sin el dato, 0. */
+  abonosEfectivo?: number
   reconciliation: ShiftReconciliation
   comment?: string | null
 }
@@ -235,8 +238,11 @@ export interface CashReportData {
  * Ventas por método derivadas del SNAPSHOT del arqueo.
  *
  * Efectivo = esperado_cash − apertura − ingresos + egresos (el inverso de la
- * fórmula con la que se calculó el esperado). Para los demás, ventas = esperado
- * del método, porque su esperado NO lleva apertura ni movimientos.
+ * fórmula con la que se calculó el esperado; los abonos en efectivo son ingresos de
+ * caja, así que ya quedan fuera). Para los demás, ventas = esperado del método −
+ * sus abonos de fiado (desde arqueo-abonos.sql el esperado los incluye y el snapshot
+ * los trae en `abonos`; un snapshot anterior no trae la clave y vale 0). Un abono NO
+ * es una venta: es plata de una venta a fiado de otro día.
  *
  * 🔴 VIVE ACÁ, EXPORTADA, A PROPÓSITO (R1): la usan el COMPROBANTE impreso y la
  * modal de detalle del historial. Si cada uno hiciera su propia cuenta serían
@@ -254,14 +260,34 @@ export function deriveCashReportSales(
   const esperado = (m: ArqueoMethod) => rec.methods?.[m]?.expected ?? 0
   const byMethod: Record<ArqueoMethod, number> = {
     cash: esperado('cash') - data.openingAmount - data.movementsIn + data.movementsOut,
-    card: esperado('card'),
-    transfer: esperado('transfer'),
-    nequi: esperado('nequi'),
+    card: esperado('card') - abonosDe(rec, 'card'),
+    transfer: esperado('transfer') - abonosDe(rec, 'transfer'),
+    nequi: esperado('nequi') - abonosDe(rec, 'nequi'),
   }
   return { byMethod, total: ARQUEO_ORDER.reduce((s, m) => s + byMethod[m], 0) }
 }
 
-function buildCashReportHtml(data: CashReportData): string {
+const abonosDe = (rec: ShiftReconciliation, m: ArqueoMethod) => rec.methods?.[m]?.abonos ?? 0
+
+/**
+ * Abonos de fiado del turno por método, FUERA de las ventas. Efectivo = los ingresos de
+ * caja ligados a un abono (CashReportData.abonosEfectivo); los demás, del snapshot.
+ * Misma razón que deriveCashReportSales para vivir acá: pantalla y papel iguales (R1).
+ */
+export function deriveCashReportAbonos(
+  data: CashReportData,
+): { byMethod: Record<ArqueoMethod, number>; total: number } {
+  const rec = data.reconciliation
+  const byMethod: Record<ArqueoMethod, number> = {
+    cash: data.abonosEfectivo ?? 0,
+    card: abonosDe(rec, 'card'),
+    transfer: abonosDe(rec, 'transfer'),
+    nequi: abonosDe(rec, 'nequi'),
+  }
+  return { byMethod, total: ARQUEO_ORDER.reduce((s, m) => s + byMethod[m], 0) }
+}
+
+export function buildCashReportHtml(data: CashReportData): string {
   const rec = data.reconciliation
   const fmtDT = (iso: string) =>
     new Date(iso).toLocaleString('es-CO', {
@@ -270,6 +296,9 @@ function buildCashReportHtml(data: CashReportData): string {
     })
 
   const { byMethod: salesByMethod, total: salesTotal } = deriveCashReportSales(data)
+  const { byMethod: abonosByMethod, total: abonosTotal } = deriveCashReportAbonos(data)
+  const abonosEfectivo = data.abonosEfectivo ?? 0
+  const ingresosManuales = data.movementsIn - abonosEfectivo
 
   const money = (n: number) => formatCOP(n)
   const signed = (n: number) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${formatCOP(Math.abs(n))}`
@@ -319,9 +348,17 @@ function buildCashReportHtml(data: CashReportData): string {
     <div style="font-size:10px;font-weight:700;letter-spacing:1px;margin-bottom:2px">VENTAS POR MÉTODO</div>
     ${salesRows || `<div style="font-size:11px;color:#000">Sin ventas</div>`}
     ${line('Total ventas', `${money(salesTotal)}  ·  ${rec.sales_count} vta(s)`, { bold: true })}
+    ${abonosTotal > 0 ? `
+      ${dash}
+      <div style="font-size:10px;font-weight:700;letter-spacing:1px;margin-bottom:2px">ABONOS DE FIADO</div>
+      ${ARQUEO_ORDER.filter((m) => abonosByMethod[m] !== 0)
+        .map((m) => line(ARQUEO_METHOD_LABEL[m], money(abonosByMethod[m]))).join('')}
+      ${line('Total abonos', money(abonosTotal), { bold: true })}
+    ` : ''}
     ${(data.movementsIn > 0 || data.movementsOut > 0) ? `
       ${dash}
-      ${data.movementsIn > 0 ? line('Ingresos', signed(data.movementsIn)) : ''}
+      ${ingresosManuales > 0 ? line('Ingresos manuales', signed(ingresosManuales)) : ''}
+      ${abonosEfectivo > 0 ? line('Abonos en efectivo', signed(abonosEfectivo)) : ''}
       ${data.movementsOut > 0 ? line('Egresos', signed(-data.movementsOut)) : ''}
     ` : ''}
     ${dash}
@@ -356,7 +393,10 @@ export interface CashReportShiftRow {
 // (row.close_reconciliation), NUNCA recomputa el esperado (bug de ventana).
 export function buildCashReportData(
   row: CashReportShiftRow,
-  ctx: { restaurantName?: string | null; restaurantAddress?: string | null; movementsIn: number; movementsOut: number },
+  ctx: {
+    restaurantName?: string | null; restaurantAddress?: string | null
+    movementsIn: number; movementsOut: number; abonosEfectivo?: number
+  },
 ): CashReportData {
   return {
     restaurantName: ctx.restaurantName,
@@ -369,6 +409,7 @@ export function buildCashReportData(
     openingAmount: row.opening_amount,
     movementsIn: ctx.movementsIn,
     movementsOut: ctx.movementsOut,
+    abonosEfectivo: ctx.abonosEfectivo ?? 0,
     reconciliation: row.close_reconciliation as ShiftReconciliation,
     comment: row.close_comment,
   }

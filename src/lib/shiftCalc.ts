@@ -81,6 +81,29 @@ export function esperadoMetodo(ventas: number, abonos: number): number {
   return ventas + abonos
 }
 
+/**
+ * Los movimientos de caja de un turno, separados para MOSTRARLOS: un abono de fiado en
+ * efectivo es un ingreso de caja (su movimiento queda en debt_payments.cash_movement_id),
+ * pero no es un "ingreso manual". `ingresos` es el total de siempre: el esperado lo sigue
+ * usando entero (no cambia). Una sola regla para el cierre en vivo, el detalle del
+ * historial y el comprobante (R1).
+ */
+export function separarMovimientos(
+  movs: ReadonlyArray<{ id: string; type: string; amount: number }>,
+  idsDeAbono: ReadonlySet<string>,
+): { ingresos: number; ingresosManuales: number; abonosEfectivo: number; egresos: number } {
+  let ingresos = 0, abonosEfectivo = 0, egresos = 0
+  for (const m of movs) {
+    if (m.type === 'in') {
+      ingresos += m.amount
+      if (idsDeAbono.has(m.id)) abonosEfectivo += m.amount
+    } else if (m.type === 'out') {
+      egresos += m.amount
+    }
+  }
+  return { ingresos, ingresosManuales: ingresos - abonosEfectivo, abonosEfectivo, egresos }
+}
+
 export function calcShiftBalance(input: ShiftBalanceInput): ShiftBalance {
   const expectedCash = availableCash(input)
   const difference = input.declared - expectedCash

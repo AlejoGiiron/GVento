@@ -1,5 +1,5 @@
 import {
-  buildCashReportData, deriveCashReportSales,
+  buildCashReportData, deriveCashReportSales, deriveCashReportAbonos,
   type CashReportData, type CashReportShiftRow,
 } from '@/lib/printer'
 import type { ArqueoMethod, MethodReconciliation, ShiftReconciliation } from '@/lib/shiftCalc'
@@ -32,8 +32,12 @@ export interface ShiftDetailView {
   tieneArqueo: boolean
   /** null cuando no hay snapshot. Nunca se construye con `reconciliation` null. */
   data: CashReportData | null
-  /** Ventas por método derivadas del snapshot. null sin snapshot. */
+  /** Ventas por método derivadas del snapshot, SIN abonos de fiado. null sin snapshot. */
   ventas: { byMethod: Record<ArqueoMethod, number>; total: number } | null
+  /** Abonos de fiado del turno por método (fuera de las ventas). null sin snapshot. */
+  abonos: { byMethod: Record<ArqueoMethod, number>; total: number } | null
+  /** Movimientos de caja: los ingresos manuales separados de los abonos en efectivo. */
+  movimientos: { ingresosManuales: number; abonosEfectivo: number; egresos: number }
   /** Cuadre de efectivo (F1): existe en TODA fila cerrada, con o sin snapshot. */
   efectivo: { esperado: number; declarado: number; diferencia: number }
   /** Total de vales. 0 en snapshots anteriores al vale (la clave puede faltar). */
@@ -54,7 +58,7 @@ export function metodoDelArqueo(
 
 export function buildShiftDetail(
   row: ShiftDetailRow,
-  movements: { in: number; out: number },
+  movements: { in: number; out: number; abonosEfectivo?: number },
   ctx: { restaurantName?: string | null; restaurantAddress?: string | null } = {},
 ): ShiftDetailView {
   const tieneArqueo = row.close_reconciliation != null
@@ -65,8 +69,10 @@ export function buildShiftDetail(
         restaurantAddress: ctx.restaurantAddress,
         movementsIn: movements.in,
         movementsOut: movements.out,
+        abonosEfectivo: movements.abonosEfectivo ?? 0,
       })
     : null
+  const abonosEfectivo = movements.abonosEfectivo ?? 0
 
   const rec = (data?.reconciliation ?? null) as ShiftReconciliation | null
 
@@ -74,6 +80,12 @@ export function buildShiftDetail(
     tieneArqueo,
     data,
     ventas: data ? deriveCashReportSales(data) : null,
+    abonos: data ? deriveCashReportAbonos(data) : null,
+    movimientos: {
+      ingresosManuales: movements.in - abonosEfectivo,
+      abonosEfectivo,
+      egresos: movements.out,
+    },
     efectivo: {
       esperado: row.expected_amount ?? 0,
       declarado: row.closing_amount ?? 0,
