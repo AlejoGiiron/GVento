@@ -8,9 +8,13 @@ select to_regclass('public.portal_sedes')                         as portal_sede
        to_regclass('public.products_id_restaurant_uniq')          as indice_products,
        to_regprocedure('public.actualizar_portal(jsonb)')         as actualizar_portal,
        position('pedidos_online.gestionar' in pg_get_functiondef('public.seed_system_roles(uuid)'::regprocedure)) > 0
-                                                                   as seed_con_permiso_nuevo;
--- ANTES:   null · null · null · null · f
--- DESPUÉS: portal_sedes · portal_productos · products_id_restaurant_uniq · actualizar_portal(jsonb) · t
+                                                                   as seed_con_permiso_nuevo,
+       exists (select 1 from information_schema.columns where table_schema = 'public'
+                and table_name = 'portal_sedes' and column_name = 'whatsapp')
+                                                                   as con_whatsapp;
+-- ANTES:   null · null · null · null · f · f
+-- DESPUÉS: portal_sedes · portal_productos · products_id_restaurant_uniq · actualizar_portal(jsonb) · t · t
+-- (portal_sedes con valor pero con_whatsapp = f: corrió una versión anterior de este archivo; avísame)
 
 -- ── Consulta 2: quién podrá configurar el portal en cada organización ──
 -- Arranca de organizations (caso #12): una organización sin roles sale igual.

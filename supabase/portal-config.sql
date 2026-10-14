@@ -43,8 +43,10 @@
 -- RE-APLICAR: falla y hace rollback (la guarda del paso 0 aborta si portal_sedes ya existe).
 --
 -- NO DEDUZCAS EL ESTADO DE ESTE COMENTARIO — correlo:
---   select to_regclass('public.portal_sedes'), to_regprocedure('public.actualizar_portal(jsonb)');
---   -- null, null = no está
+--   select to_regclass('public.portal_sedes'), to_regprocedure('public.actualizar_portal(jsonb)'),
+--          exists (select 1 from information_schema.columns where table_schema = 'public'
+--                   and table_name = 'portal_sedes' and column_name = 'whatsapp');
+--   -- null, null, f = no está · con valor, con valor, t = está (esta versión, con WhatsApp)
 -- ============================================================================
 
 begin;
@@ -267,8 +269,9 @@ create table public.portal_sedes (
                                                 and tiempo_min <= tiempo_max),
   constraint portal_sedes_horario        check (portal_horario_valido(horario)),
   constraint portal_sedes_color          check (color ~ '^#[0-9a-f]{6}$'),
-  -- Número de Colombia con el indicativo y sin signos: 57 + los 10 dígitos (celular o fijo).
-  constraint portal_sedes_whatsapp       check (whatsapp ~ '^57[0-9]{10}$')
+  -- Número de Colombia con el indicativo y sin signos: 57 + celular (3 + 9 dígitos) o fijo
+  -- (60 + indicativo de 1 a 8 + 7 dígitos). El mismo formato que RE_WHATSAPP (src/lib/portal.ts).
+  constraint portal_sedes_whatsapp       check (whatsapp ~ '^57(3[0-9]{9}|60[1-8][0-9]{7})$')
 );
 
 comment on table public.portal_sedes is
@@ -466,7 +469,7 @@ as $$
     when 'portal_sedes_tiempo'        then 'El tiempo de entrega tiene que estar entre 5 y 240 minutos, y el mínimo no puede ser mayor que el máximo.'
     when 'portal_sedes_horario'       then 'El horario no es válido: cada franja necesita hora de abrir y de cerrar distintas, y hasta 3 franjas por día.'
     when 'portal_sedes_color'         then 'El color tiene que tener la forma #rrggbb.'
-    when 'portal_sedes_whatsapp'      then 'El WhatsApp del local tiene que ser un número de Colombia de 10 dígitos.'
+    when 'portal_sedes_whatsapp'      then 'El WhatsApp del local tiene que ser un celular (3xx) o un fijo (60x) de Colombia, de 10 dígitos.'
     else 'Un valor de la configuración no es válido (' || coalesce(p_restriccion, 'sin nombre') || ').'
   end
 $$;
@@ -762,6 +765,12 @@ begin
      or not (select relrowsecurity from pg_class where oid = 'public.portal_productos'::regclass) then
     raise exception 'RLS apagada en portal_sedes o portal_productos. No se cambió nada.';
   end if;
+  -- Cada CHECK de portal_sedes tiene su mensaje propio (si no, el usuario vería el genérico).
+  select string_agg(conname::text, ', ' order by conname) into v_mal
+    from pg_constraint
+   where conrelid = 'public.portal_sedes'::regclass and contype = 'c'
+     and portal_mensaje_restriccion(conname::text) like 'Un valor de la configuración no es válido%';
+  if v_mal is not null then raise exception 'CHECK sin mensaje propio en portal_mensaje_restriccion: %. No se cambió nada.', v_mal; end if;
   raise notice 'portal-config: listo — 2 tablas sin acceso directo, 7 funciones para la app';
 end $$;
 

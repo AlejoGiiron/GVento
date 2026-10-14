@@ -20,3 +20,19 @@ export const CASOS_SLUG: readonly { slug: string; valido: boolean }[] = [
   { slug: 'a_b', valido: false },
   { slug: 'a.b', valido: false },
 ]
+
+// Casos del formato del WhatsApp del local (R1 #12 c), ya normalizados (57 + 10 dígitos o algo que
+// no lo es): src/lib/portal.test.ts los pasa por RE_WHATSAPP y tests/portal-config.spec.ts por
+// actualizar_portal (el CHECK portal_sedes_whatsapp). Los dos tienen que dar `valido`.
+export const CASOS_WHATSAPP: readonly { numero: string; valido: boolean }[] = [
+  { numero: '573001234567', valido: true },
+  { numero: '573155550101', valido: true },
+  { numero: '576012345678', valido: true },
+  { numero: '576082345678', valido: true },
+  { numero: '570000000001', valido: false },
+  { numero: '576092345678', valido: false },
+  { numero: '575012345678', valido: false },
+  { numero: '57300123456', valido: false },
+  { numero: '3001234567', valido: false },
+  { numero: '5730012345678', valido: false },
+]

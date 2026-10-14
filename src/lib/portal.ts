@@ -220,8 +220,11 @@ export const RE_COLOR = /^#[0-9a-f]{6}$/
 
 // ── WhatsApp del local ──
 
-/** El mismo formato que el CHECK portal_sedes_whatsapp: 57 + 10 dígitos. */
-export const RE_WHATSAPP = /^57\d{10}$/
+/**
+ * El mismo formato que el CHECK portal_sedes_whatsapp (R1 #12 c, casos en CASOS_WHATSAPP):
+ * 57 + celular (3 + 9 dígitos) o fijo (60 + indicativo de 1 a 8 + 7 dígitos).
+ */
+export const RE_WHATSAPP = /^57(3\d{9}|60[1-8]\d{7})$/
 
 /**
  * Lo que se escribe (o el teléfono de la sede) → 57 + 10 dígitos, o null si no se puede.
@@ -229,9 +232,8 @@ export const RE_WHATSAPP = /^57\d{10}$/
  */
 export function normalizarWhatsapp(texto: string | null | undefined): string | null {
   const d = (texto ?? '').replace(/\D/g, '')
-  if (d.length === 10) return `57${d}`
-  if (d.length === 12 && d.startsWith('57')) return d
-  return null
+  const candidato = d.length === 10 ? `57${d}` : d.length === 12 && d.startsWith('57') ? d : null
+  return candidato && RE_WHATSAPP.test(candidato) ? candidato : null
 }
 
 /** "573001234567" → "300 123 4567" (para mostrar en el campo). */

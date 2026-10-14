@@ -3,7 +3,7 @@ import {
   etiquetaTramo, franjasLegibles, horaLegible, horarioAgrupado, leerPesos, mostrarPesos, mostrarWhatsapp,
   normalizarSlug, normalizarWhatsapp, problemaHorario, problemaTramos, RE_WHATSAPP, slugValido, textoEstado,
 } from './portal'
-import { CASOS_SLUG } from './portalCasos'
+import { CASOS_SLUG, CASOS_WHATSAPP } from './portalCasos'
 
 describe('link del portal', () => {
   it('normaliza lo que se escribe: minúsculas, sin tildes ni eñes, espacios a guiones', () => {
@@ -62,10 +62,15 @@ describe('WhatsApp del local', () => {
   it('normaliza a 57 + 10 dígitos lo que se escribe o el teléfono de la sede, y lo muestra', () => {
     expect(['300 123 4567', '+57 300 123 4567', '(601) 234-5678', '573001234567'].map(normalizarWhatsapp))
       .toEqual(['573001234567', '573001234567', '576012345678', '573001234567'])
-    expect(['', null, '123', '1 300 123 4567', '583001234567'].map(normalizarWhatsapp)).toEqual([null, null, null, null, null])
+    // El teléfono de prueba de LAB (0000000001) no es un número de Colombia: no se sugiere.
+    expect(['', null, '123', '1 300 123 4567', '583001234567', '0000000001'].map(normalizarWhatsapp))
+      .toEqual([null, null, null, null, null, null])
     expect(mostrarWhatsapp('573001234567')).toBe('300 123 4567')
     expect(mostrarWhatsapp(null)).toBe('')
-    expect(['573001234567', '3001234567', '57300123456'].map((w) => RE_WHATSAPP.test(w))).toEqual([true, false, false])
+  })
+  it('el formato es el mismo del CHECK: los casos compartidos con el servidor (CASOS_WHATSAPP)', () => {
+    expect(CASOS_WHATSAPP.map((c) => `${c.numero}: ${RE_WHATSAPP.test(c.numero)}`))
+      .toEqual(CASOS_WHATSAPP.map((c) => `${c.numero}: ${c.valido}`))
   })
 })
 

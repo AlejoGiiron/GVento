@@ -245,7 +245,9 @@ function TarjetaLink({ portal }: { portal: PortalSede }) {
           <input data-testid="portal-whatsapp" inputMode="tel" value={whatsapp} placeholder="300 123 4567"
             onChange={(e) => setWhatsapp(e.target.value.replace(/[^\d +]/g, ''))} style={campo} />
         </label>
-        {(whatsappNuevo ?? null) !== portal.whatsapp && (
+        {/* Aparece apenas el texto cambia: así un número inválido avisa al guardar (antes, si no había
+            nada guardado y el número no servía, el botón no salía y nadie decía por qué). */}
+        {whatsapp.trim() !== mostrarWhatsapp(portal.whatsapp) && (
           <button type="button" style={botonOscuro} onClick={guardarWhatsapp} disabled={guardando} data-testid="portal-whatsapp-guardar">
             {whatsapp.trim() === '' ? 'Quitar WhatsApp' : 'Guardar WhatsApp'}
           </button>
@@ -253,8 +255,8 @@ function TarjetaLink({ portal }: { portal: PortalSede }) {
       </div>
       <p style={nota}>
         {portal.whatsapp
-          ? 'Tus clientes lo ven en el seguimiento del pedido y si su dirección queda fuera de la zona.'
-          : 'Todavía no está guardado: arranca con el teléfono de la sede. Guárdalo para que tus clientes puedan escribirte.'}
+          ? 'Tus clientes lo van a ver en el seguimiento del pedido y si su dirección queda fuera de la zona.'
+          : 'Todavía no está guardado: arranca con el teléfono de la sede si es un celular o un fijo de Colombia. Guárdalo para que tus clientes puedan escribirte.'}
       </p>
     </section>
   )

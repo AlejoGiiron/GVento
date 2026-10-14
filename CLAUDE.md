@@ -397,6 +397,9 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    de `tests/portal-config.spec.ts` por `portal_slug_disponible`, y los dos tienen que dar lo mismo.
    La allowlist de (a) se vigila en una sola dirección: una clave que esté en `c_claves` y no en
    `CLAVES_PORTAL` no la detecta nada (la misma forma que el #7).
+   (c) El formato del WhatsApp del local: el CHECK `portal_sedes_whatsapp` contra `RE_WHATSAPP` y
+   `normalizarWhatsapp` (`src/lib/portal.ts`). Los ata `CASOS_WHATSAPP` (`src/lib/portalCasos.ts`):
+   `portal.test.ts` por `RE_WHATSAPP` y el spec por `actualizar_portal`.
    🔴 **"¿Recibe pedidos ahora?" NO es un contrato de dos lados, a propósito:** lo decide SOLO
    `portal_estado` en el servidor (horario en Bogotá, turno, pausa, faltantes). La pantalla muestra
    el motivo que devuelve; nadie lo recalcula en el navegador. El portal de P2 tiene que leer la

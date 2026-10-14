@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs'
 import { cliente, psql, psqlResultado } from './helpers/db-local'
 import { otraCreds } from './helpers/storage'
 import { CLAVES_PORTAL, type PortalCambios } from '../src/lib/portal'
-import { CASOS_SLUG } from '../src/lib/portalCasos'
+import { CASOS_SLUG, CASOS_WHATSAPP } from '../src/lib/portalCasos'
 
 // ============================================================================
 // Pedidos en línea, P1 (supabase/portal-config.sql): la configuración del portal de cada sede.
@@ -191,6 +191,7 @@ test.describe('Pedidos en línea · configuración (servidor)', () => {
       [{ color: 'rojo' }, /#rrggbb/],
       [{ whatsapp: '3001234567' }, /WhatsApp del local/],
       [{ whatsapp: '57300123456' }, /WhatsApp del local/],
+      [{ whatsapp: '570000000001' }, /WhatsApp del local/],
       [{ lat: 4.7 }, /ubicación del local no es válida/],
       [{ lat: 'norte' }, /tipo equivocado/],
     ]
@@ -202,6 +203,16 @@ test.describe('Pedidos en línea · configuración (servidor)', () => {
         || horario::text || coalesce(tiempo_min::text, '-') || coalesce(color, '-') || coalesce(lat::text, '-')
         || coalesce(whatsapp, '-')
         from public.portal_sedes where restaurant_id = '${SEDE}';`)).toBe('---{}----')
+  })
+
+  test('WhatsApp: el servidor acepta exactamente lo mismo que la pantalla (CASOS_WHATSAPP, R1 #12 c)', async () => {
+    expect((await owner.rpc('actualizar_portal', { p_cambios: { slug: LAB_SLUG } })).error).toBeNull()
+    const servidor: string[] = []
+    for (const c of CASOS_WHATSAPP) {
+      const r = await owner.rpc('actualizar_portal', { p_cambios: { whatsapp: c.numero } })
+      servidor.push(`${c.numero}: ${r.error === null}`)
+    }
+    expect(servidor).toEqual(CASOS_WHATSAPP.map((c) => `${c.numero}: ${c.valido}`))
   })
 
   test('productos: solo los de la sede, por id; sin precio no se publica; todo o nada', async () => {
@@ -502,12 +513,24 @@ test.describe('Pedidos en línea · la pantalla', () => {
         '[{"hasta_km":2,"valor":3000},{"hasta_km":4,"valor":4000},{"hasta_km":null,"valor":6000}]'::jsonb)
         from public.portal_sedes where restaurant_id = '${SEDE}';`)).toBe('distancia:true')
 
-    // WhatsApp del local: arranca con el teléfono de la sede (sin guardar), se guarda y se quita.
-    const telefono = fila(`select coalesce(phone, '') from public.restaurants where id = '${SEDE}';`)
-    const digitos = telefono.replace(/\D/g, '')
-    if (digitos.length === 10) {
-      await expect(page.getByTestId('portal-whatsapp')).toHaveValue(`${digitos.slice(0, 3)} ${digitos.slice(3, 6)} ${digitos.slice(6)}`)
+    // WhatsApp del local: arranca con el teléfono de la sede SIN guardarlo, se guarda y se quita.
+    // El teléfono de prueba de LAB no es de Colombia: durante la prueba la sede tiene un celular
+    // conocido, y se restaura al final.
+    const telefonoOriginal = fila(`select coalesce(phone, '') from public.restaurants where id = '${SEDE}';`)
+    psql(`update public.restaurants set phone = '300 555 0000' where id = '${SEDE}';`)
+    try {
+      await page.reload()
+      await page.getByTestId('config-nav-pedidos_online').click()
+      await expect(page.getByTestId('portal-whatsapp')).toHaveValue('300 555 0000')
+      await expect(page.getByText('Todavía no está guardado')).toBeVisible()
+      expect(fila(`select coalesce(whatsapp, 'null') from public.portal_sedes where restaurant_id = '${SEDE}';`), 'no se guarda solo').toBe('null')
+    } finally {
+      psql(`update public.restaurants set phone = '${telefonoOriginal.replace(/'/g, "''")}' where id = '${SEDE}';`)
     }
+    // Un número que no sirve avisa al guardar (aunque no haya nada guardado).
+    await page.getByTestId('portal-whatsapp').fill('123')
+    await page.getByTestId('portal-whatsapp-guardar').click()
+    await expect(page.getByText('Escribe un número de Colombia de 10 dígitos')).toBeVisible()
     await page.getByTestId('portal-whatsapp').fill('+57 315 555 0101')
     await page.getByTestId('portal-whatsapp-guardar').click()
     await expect.poll(() => fila(`select coalesce(whatsapp, 'null') from public.portal_sedes where restaurant_id = '${SEDE}';`)).toBe('573155550101')
