@@ -146,8 +146,13 @@ con origen externo. No construir — solo no bloquear.
 - **Mapa y geocodificación solo al configurar:** Leaflet con mapas de OpenStreetMap y Nominatim (un
   botón, una consulta). Su política de uso no aguanta el tráfico de clientes: el mapa del portal
   (P2) se decide aparte.
-- **El horario guarda varias franjas por día, el editor sí las maneja (hasta 3); el portal (P2)
-  tiene que leerlas de `portal_estado`, no recalcularlas** (R1 #12).
+- **El horario:** la base acepta hasta 3 franjas por día; el editor de P1 maneja UNA (lo aprobado).
+  Si una sede trae más (por SQL), el editor las muestra y deja quitarlas, pero no agrega. **El portal
+  (P2) tiene que leerlas de `portal_estado`, no recalcularlas** (R1 #12).
+- **Pausar sin `pedidos_online.gestionar`:** el servidor ya deja pausar con `delivery.gestionar`
+  (decisión 2 de P1), pero en P1 el único botón está en Configuración › Pedidos en línea, que pide
+  `pedidos_online.gestionar`. El cajero no lo ve hasta P4, cuando el botón pasa a Domicilios
+  (pantalla 6). Hasta entonces, pantalla y servidor dicen cosas distintas a propósito.
 
 ### 🔴 Una mesa que tuvo ventas NO se puede borrar — y TablesPage deja intentarlo (confirmado 2026-09-30)
 
@@ -1034,7 +1039,7 @@ actual**. Son ~40 archivos. Los tres tipos de afirmación, en orden de riesgo:
    shift_open"*) — las más caras de verificar y las que más dirigen a quien lee.
 
 **Ya hay un caso confirmado de tipo 3 en el repo:** el comentario-catálogo de
-`multi-tenant-rbac.sql` lista **19 permisos** cuando el catálogo vivo tiene 23. No se corrige
+`multi-tenant-rbac.sql` lista **19 permisos** cuando el catálogo vivo tiene 24 (2026-10-14; `grep -c "key: '" src/lib/permissions.ts`). No se corrige
 porque la migración está aplicada y es inmutable (R5) — es registro histórico. Pero alguien
 que la lea buscando "el catálogo" se lleva una lista incompleta, y ese es precisamente el
 modo de fallo de *"una nota que dirige mal cuesta más que una ausente"*.

@@ -106,7 +106,7 @@ function TarjetaEstado({ portal, estado }: { portal: PortalSede; estado: { recib
 // ─── Link, QR y color ───────────────────────────────────────────────
 
 function useDisponibilidad(slug: string, propio: string | null) {
-  const [estado, setEstado] = useState<'libre' | 'tomado' | 'invalido' | 'consultando' | null>(null)
+  const [estado, setEstado] = useState<'libre' | 'tomado' | 'invalido' | 'consultando' | 'error' | null>(null)
   useEffect(() => {
     if (!slug || slug === propio) { setEstado(null); return }
     if (!slugValido(slug)) { setEstado('invalido'); return }
@@ -115,7 +115,8 @@ function useDisponibilidad(slug: string, propio: string | null) {
     const t = setTimeout(() => {
       consultarSlugDisponible(slug)
         .then((libre) => { if (vigente) setEstado(libre ? 'libre' : 'tomado') })
-        .catch(() => { if (vigente) setEstado(null) })
+        // Si la consulta falla, se dice: con null el botón quedaba deshabilitado sin ningún aviso.
+        .catch(() => { if (vigente) setEstado('error') })
     }, 400)
     return () => { vigente = false; clearTimeout(t) }
   }, [slug, propio])
@@ -129,6 +130,7 @@ function AvisoSlug({ estado }: { estado: ReturnType<typeof useDisponibilidad> })
     tomado: ['Ese link ya lo usa otro negocio', '#b91c1c'],
     invalido: ['De 3 a 40 letras minúsculas, números o guiones (sin guion al principio ni al final)', '#b91c1c'],
     consultando: ['Revisando…', '#64748b'],
+    error: ['No se pudo revisar si el link está libre. Recarga la página e inténtalo de nuevo.', '#b91c1c'],
   } as const
   const [texto, color] = textos[estado]
   return <span data-testid="portal-slug-aviso" style={{ fontSize: 12, fontWeight: 600, color }}>{texto}</span>
@@ -149,7 +151,7 @@ function TarjetaLink({ portal }: { portal: PortalSede }) {
     let vigente = true
     QRCode.toDataURL(urlPortal(portal.slug), { width: 512, margin: 2, color: { dark: '#0f172a', light: '#ffffff' } })
       .then((d) => { if (vigente) setQr(d) })
-      .catch(() => { if (vigente) setQr(null) })
+      .catch(() => { if (vigente) { setQr(null); toast.error('No se pudo generar el código QR') } })
     return () => { vigente = false }
   }, [portal.slug])
   // Sugerencia desde el logo, solo si la sede todavía no eligió color.
@@ -291,11 +293,6 @@ function TarjetaHorario({ portal }: { portal: PortalSede }) {
                         style={{ background: 'none', border: 0, color: '#94a3b8', cursor: 'pointer', minWidth: 32, minHeight: 32 }}><X size={16} /></button>
                     </div>
                   ))}
-                  {f.length > 0 && f.length < 3 && (
-                    <button type="button" style={{ ...enlace, fontSize: 12 }} onClick={() => cambiar(iso, [...f, ['12:00', '15:00']])}>
-                      <Plus size={12} style={{ verticalAlign: -2 }} /> Otra franja
-                    </button>
-                  )}
                 </div>
               </div>
             )

@@ -137,7 +137,7 @@ Los seeds (lab-seed, onboard-org, onboard-org-paso1) ya NO llevan listas: llaman
 seed_system_roles(v_org). Si estás por escribir un array de permisos dentro de un
 .sql, casi seguro estás en el archivo equivocado — editá permissions.ts y regenerá.
 
-TRIPWIRE: tests/roles.spec.ts clava el tamaño del catálogo con toBe(23). Si se pone
+TRIPWIRE: tests/roles.spec.ts clava el tamaño del catálogo con toBe(N) (24 desde P1). Si se pone
 rojo, mirá QUÉ permiso cambió ANTES de tocar el número.
 
 LO QUE ESTO **NO** ARREGLA, dicho explícitamente:

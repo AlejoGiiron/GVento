@@ -1,9 +1,11 @@
 import { test, expect, type Page } from '@playwright/test'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { cashierCreds, hasWaiterCreds, loginAsOwner, ownerCreds, waiterCreds } from './helpers/auth'
-import { cliente, psql } from './helpers/db-local'
+import { readFileSync } from 'node:fs'
+import { cliente, psql, psqlResultado } from './helpers/db-local'
 import { otraCreds } from './helpers/storage'
 import { CLAVES_PORTAL, type PortalCambios } from '../src/lib/portal'
+import { CASOS_SLUG } from '../src/lib/portalCasos'
 
 // ============================================================================
 // Pedidos en línea, P1 (supabase/portal-config.sql): la configuración del portal de cada sede.
@@ -28,7 +30,8 @@ let CAT_AJENA = ''
 
 const LAB_SLUG = 'e2e-portal-lab'
 const OTRA_SLUG = 'e2e-portal-otra'
-const HORARIO_TODO_EL_DIA = Object.fromEntries(['1', '2', '3', '4', '5', '6', '7'].map((d) => [d, [['00:00', '23:59']]]))
+// Dos franjas que cubren el día entero (con una sola, 00:00–23:59, el minuto 23:59 quedaba cerrado).
+const HORARIO_TODO_EL_DIA = Object.fromEntries(['1', '2', '3', '4', '5', '6', '7'].map((d) => [d, [['00:00', '12:00'], ['12:00', '00:00']]]))
 
 const limpiar = () => psql(`
   delete from public.portal_productos where restaurant_id in ('${SEDE}', '${SEDE_OTRA}');
@@ -165,6 +168,11 @@ test.describe('Pedidos en línea · configuración (servidor)', () => {
     expect((await owner.rpc('portal_slug_disponible', { p_slug: LAB_SLUG })).data, 'el propio cuenta como disponible').toBe(true)
     expect((await owner.rpc('portal_slug_disponible', { p_slug: 'e2e-libre-123' })).data).toBe(true)
     expect((await owner.rpc('portal_slug_disponible', { p_slug: 'X' })).data).toBe(false)
+    // R1 #12 (b): el servidor contesta lo mismo que slugValido en los casos compartidos
+    // (src/lib/portal.test.ts corre el lado del navegador con la misma lista).
+    const servidor: string[] = []
+    for (const c of CASOS_SLUG) servidor.push(`${c.slug}: ${(await owner.rpc('portal_slug_disponible', { p_slug: c.slug })).data}`)
+    expect(servidor).toEqual(CASOS_SLUG.map((c) => `${c.slug}: ${c.valido}`))
   })
 
   test('forma de los valores: el servidor rechaza zona, tramos, horario, tiempo y color mal formados', async () => {
@@ -316,6 +324,33 @@ test.describe('Pedidos en línea · configuración (servidor)', () => {
   })
 })
 
+// ─── Las guardas de supabase/portal-config.sql (corren el archivo en una transacción que se deshace) ──
+
+test.describe('la guarda de portal-config.sql', () => {
+  const cuerpo = () => readFileSync('supabase/portal-config.sql', 'utf-8').replace(/\r\n/g, '\n').split('\n')
+    .filter((l) => l !== 'begin;' && l !== 'commit;').join('\n')
+  const SIN_TABLAS = 'drop table public.portal_productos; drop table public.portal_sedes;'
+
+  test('ya aplicada: re-aplicar aborta sin cambiar nada', () => {
+    const r = psqlResultado(`begin;\n${cuerpo()}\nrollback;`)
+    expect(r.status).not.toBe(0)
+    expect(r.stderr).toContain('ya está aplicada')
+  })
+
+  test('precondición por md5: con otra has_permission aborta; con la vigente pasa la guarda (contraste)', () => {
+    const otra = `create or replace function public.has_permission(perm text) returns boolean
+      language sql stable security definer set search_path = public as $$ select true $$;`
+    const conOtra = psqlResultado(`begin;\n${SIN_TABLAS}\n${otra}\n${cuerpo()}\nrollback;`)
+    expect(conOtra.status).not.toBe(0)
+    expect(conOtra.stderr).toContain('no son las de profiles-is-active-enforced.sql')
+    // Contraste: con las funciones vigentes la guarda pasa (después choca con las funciones que ya
+    // existen, porque aquí solo se borraron las tablas; ese error no es el de la precondición).
+    const vigente = psqlResultado(`begin;\n${SIN_TABLAS}\n${cuerpo()}\nrollback;`)
+    expect(vigente.stderr).not.toContain('no son las de profiles-is-active-enforced.sql')
+    expect(vigente.stderr).toMatch(/already exists|ya existe/)
+  })
+})
+
 // ─── La pantalla ────────────────────────────────────────────────────
 
 async function abrirSeccion(page: Page, id: 'pedidos_online' | 'portal_productos') {
@@ -428,5 +463,40 @@ test.describe('Pedidos en línea · la pantalla', () => {
     await page.getByTestId('portal-pausar').click()
     await expect(page.getByTestId('portal-estado')).toHaveText('Pedidos pausados')
     expect(fila(`select activo || ':' || pausado from public.portal_sedes where restaurant_id = '${SEDE}';`)).toBe('true:true')
+  })
+
+  test('cambiar el link, elegir y quitar el color, y el envío por distancia con un tramo agregado', async ({ page }) => {
+    expect((await owner.rpc('actualizar_portal', { p_cambios: { slug: LAB_SLUG } })).error).toBeNull()
+    await loginAsOwner(page)
+    await abrirSeccion(page, 'pedidos_online')
+
+    // Link nuevo: avisa que está libre y lo guarda.
+    await page.getByTestId('portal-slug').fill('e2e-portal-lab-dos')
+    await expect(page.getByTestId('portal-slug-aviso')).toHaveText('Disponible')
+    await page.getByTestId('portal-slug-guardar').click()
+    await expect.poll(() => fila(`select slug from public.portal_sedes where restaurant_id = '${SEDE}';`)).toBe('e2e-portal-lab-dos')
+    await expect(page.getByTestId('portal-copiar')).toBeVisible()
+
+    // Color: se elige, se guarda y se quita (vuelve al verde de G-Vento = null).
+    await page.getByTestId('portal-color').fill('#c2410c')
+    await page.getByTestId('portal-color-guardar').click()
+    await expect.poll(() => fila(`select coalesce(color, 'null') from public.portal_sedes where restaurant_id = '${SEDE}';`)).toBe('#c2410c')
+    await page.getByTestId('portal-color-quitar').click()
+    await expect.poll(() => fila(`select coalesce(color, 'null') from public.portal_sedes where restaurant_id = '${SEDE}';`)).toBe('null')
+
+    // Envío por distancia: hasta 2 km $3.000, se agrega 2 a 4 km $4.000, más de 4 km $6.000.
+    await page.getByTestId('envio-tipo-distancia').check()
+    await page.getByTestId('envio-tramo-0-valor').fill('3000')
+    await page.getByTestId('envio-tramo-1-valor').fill('6000')
+    await page.getByTestId('envio-tramo-agregar').click()
+    await page.getByTestId('envio-tramo-1-km').fill('4')
+    await page.getByTestId('envio-tramo-1-valor').fill('4000')
+    await expect(page.getByTestId('envio-tramo-2-etiqueta')).toHaveText('Más de 4 km, dentro de la zona')
+    await page.getByTestId('tiempo-min').fill('30')
+    await page.getByTestId('tiempo-max').fill('45')
+    await page.getByTestId('envio-guardar').click()
+    await expect.poll(() => fila(`select envio_tipo || ':' || (envio_tramos =
+        '[{"hasta_km":2,"valor":3000},{"hasta_km":4,"valor":4000},{"hasta_km":null,"valor":6000}]'::jsonb)
+        from public.portal_sedes where restaurant_id = '${SEDE}';`)).toBe('distancia:true')
   })
 })

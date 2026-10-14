@@ -38,7 +38,7 @@
 --
 -- PRECONDICIONES: has_permission y get_my_restaurant_id (profiles-is-active-enforced.sql);
 -- PostgreSQL con jsonb_populate_record (cualquiera soportado).
--- FRONTEND: todo es nuevo → este SQL va ANTES del frontend de P1. El frontend actual no lo usa.
+-- FRONTEND: todo es nuevo → este SQL va ANTES del frontend de P1 (el frontend anterior a P1 no lo usa).
 -- RE-APLICAR: falla y hace rollback (la guarda del paso 0 aborta si portal_sedes ya existe).
 --
 -- NO DEDUZCAS EL ESTADO DE ESTE COMENTARIO — correlo:
@@ -48,14 +48,25 @@
 
 begin;
 
+-- Crear el índice de products toma un lock SHARE que frena las ventas (que actualizan el stock)
+-- mientras dura. Si hay una transacción larga delante, mejor fallar a los 3 s que colgar el POS
+-- (la misma clase que order-number-unique.sql).
+set local lock_timeout = '3s';
+set local statement_timeout = '60s';
+
 -- ── 0. Guarda ──
 do $$
 begin
   if to_regclass('public.portal_sedes') is not null or to_regclass('public.portal_productos') is not null then
     raise exception 'portal-config.sql ya está aplicada (existe portal_sedes o portal_productos). No se cambió nada.';
   end if;
-  if to_regprocedure('public.has_permission(text)') is null or to_regprocedure('public.get_my_restaurant_id()') is null then
-    raise exception 'Precondición: faltan has_permission(text) o get_my_restaurant_id(). No se cambió nada.';
+  -- Las versiones vigentes (profiles-is-active-enforced.sql, ver GANA en preparar-local.mjs):
+  -- con unas viejas, un usuario desactivado podría configurar el portal.
+  if (select count(*) from pg_proc p
+       where (p.oid::regprocedure::text, md5(regexp_replace(regexp_replace(pg_get_functiondef(p.oid), E'\r','','g'), E'[ \t]+\n', E'\n','g'))) in (
+               ('has_permission(text)',   '1a79ece7f371a2afd3a8e195d27ddb87'),
+               ('get_my_restaurant_id()', '7ed39b96b4fa8da1101030aba03ee557'))) <> 2 then
+    raise exception 'Precondición: has_permission(text) o get_my_restaurant_id() no son las de profiles-is-active-enforced.sql (md5). No se cambió nada.';
   end if;
 end $$;
 
@@ -537,7 +548,11 @@ begin
       updated_at = excluded.updated_at, updated_by = excluded.updated_by;
   exception
     when unique_violation then
-      raise exception 'Ese link ya lo usa otro negocio. Elige otro. No se guardó nada.';
+      get stacked diagnostics v_restr = constraint_name;
+      if v_restr = 'portal_sedes_slug_unico' then
+        raise exception 'Ese link ya lo usa otro negocio. Elige otro. No se guardó nada.';
+      end if;
+      raise exception 'Alguien más está guardando la configuración de esta sede en este momento. Vuelve a intentarlo. No se guardó nada.';
     when check_violation then
       get stacked diagnostics v_restr = constraint_name;
       raise exception '% No se guardó nada.', portal_mensaje_restriccion(v_restr);
@@ -628,6 +643,9 @@ begin
     raise exception 'No hay cambios para guardar';
   end if;
   if jsonb_array_length(p_cambios) > 1000 then raise exception 'Demasiados productos en un solo guardado'; end if;
+  -- Se bloquea el portal de la sede antes de tocar los productos: así nadie lo publica mientras
+  -- se despublican (actualizar_portal toma la misma fila con for update).
+  perform 1 from public.portal_sedes where restaurant_id = v_sede for update;
 
   for v_item in select value from jsonb_array_elements(p_cambios) loop
     if jsonb_typeof(v_item) <> 'object'
@@ -680,7 +698,9 @@ begin
 end $$;
 
 -- ── 5. Permisos de ejecución ──
--- Internas: solo las usan las funciones de arriba (y los CHECK, que corren como su dueño).
+-- Internas: solo las usan las funciones de arriba y los CHECK. Ojo: un CHECK revisa el EXECUTE con
+-- el USUARIO ACTUAL, no con el dueño de la tabla; aquí siempre es el dueño porque solo escriben
+-- las funciones SECURITY DEFINER. Un escritor nuevo que no lo sea necesitaría EXECUTE.
 revoke execute on function public.geo_distancia_m(numeric, numeric, numeric, numeric) from public, anon, authenticated;
 revoke execute on function public.geo_en_poligono(numeric, numeric, jsonb)            from public, anon, authenticated;
 revoke execute on function public.portal_poligono_valido(jsonb)                       from public, anon, authenticated;

@@ -64,8 +64,8 @@ Una página por módulo en `src/pages/`, hooks de datos en `src/hooks/`, spec E2
 | **Configuración** | datos de la sede, usuarios (crear vía Edge Function, activar/desactivar), sedes, roles con matriz de permisos | `config`, `create-user`, `roles`, `rbac`, `rbac-escalada` |
 | **Banner de suscripción** | aviso descartable en `expiring`, banner persistente en `grace`. **No bloquea nada** | `suscripcion-banner`, `suscripcion-estado` |
 
-**RBAC:** 23 permisos en `src/lib/permissions.ts` (`PERMISSION_GROUPS`) agrupados en POS,
-Caja, Mesas, Cocina, Delivery, Productos, Compras, Fiado, Ventas, Reportes y Configuración.
+**RBAC:** 24 permisos (2026-10-14) en `src/lib/permissions.ts` (`PERMISSION_GROUPS`) agrupados en POS,
+Caja, Mesas, Cocina, Delivery, Pedidos en línea, Productos, Compras, Fiado, Ventas, Reportes y Configuración.
 Roles del sistema por organización: `owner` (comodín `*`), `admin`, `cajero`, `mozo`. El
 seed de roles se **genera** desde el catálogo con `pnpm gen:rbac` y se vigila con
 `pnpm gen:rbac:check`. `tests/roles.spec.ts` clava el tamaño del catálogo a propósito.

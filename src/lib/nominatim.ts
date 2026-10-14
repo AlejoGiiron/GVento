@@ -2,7 +2,9 @@
 // dirección de la sede"), nunca desde el portal del cliente: el mapa del portal se decide en P2.
 //
 // Política de uso (https://operations.osmfoundation.org/policies/nominatim/, leída el 2026-10-14):
-//   · máximo 1 consulta por segundo en TOTAL → `esperarTurno` separa las consultas ≥ 1,1 s;
+//   · máximo 1 consulta por segundo → `esperarTurno` separa las consultas ≥ 1,1 s POR PESTAÑA (el
+//     estado es del módulo: dos pestañas no se coordinan). En la práctica alcanza: es una consulta
+//     por clic y solo al configurar el portal;
 //   · identificarse con un Referer o User-Agent válido → el navegador manda el Referer (el origen de
 //     la app) con la política explícita de abajo; no hay ningún Referrer-Policy que lo quite;
 //   · guardar los resultados → la ubicación queda en portal_sedes al guardar la zona, y en esta

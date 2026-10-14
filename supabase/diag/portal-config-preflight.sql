@@ -55,3 +55,13 @@ select (select count(*) from information_schema.role_table_grants
            and not has_function_privilege('anon', oid, 'EXECUTE'))                   as funciones_internas_ok,
        (select count(*) from public.portal_sedes)                                     as portales;
 -- DESPUÉS: 0 · 7 · 8 · 0 (portales = 0 hasta que alguien cree el suyo en la pantalla).
+
+-- ── Consulta 5 (ANTES): la precondición de la guarda — las funciones de permisos vigentes ──
+select p.oid::regprocedure as funcion,
+       md5(regexp_replace(regexp_replace(pg_get_functiondef(p.oid), E'\r','','g'), E'[ \t]+\n', E'\n','g')) as md5
+  from pg_proc p
+ where p.oid in ('public.has_permission(text)'::regprocedure, 'public.get_my_restaurant_id()'::regprocedure)
+ order by 1;
+-- Esperado: get_my_restaurant_id() 7ed39b96b4fa8da1101030aba03ee557 · has_permission(text)
+-- 1a79ece7f371a2afd3a8e195d27ddb87 (las de profiles-is-active-enforced.sql). Si no, portal-config.sql
+-- aborta en su guarda: no la corras y avísame.

@@ -392,8 +392,11 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    el tipo, la lista y el SQL (archivo NUEVO, R5) en la misma pasada.
    (b) El formato del link: el CHECK `portal_sedes_slug_formato` (y el regex de
    `portal_slug_disponible`) contra `RE_SLUG` en `src/lib/portal.ts`. Si divergen, la pantalla dice
-   "Disponible" a un link que el servidor rechaza, o al revés. Lo prueban los dos lados por separado
-   (`src/lib/portal.test.ts` y el test "link" del spec) con los mismos casos; nada los ata.
+   "Disponible" a un link que el servidor rechaza, o al revés. Los ata `CASOS_SLUG`
+   (`src/lib/portalCasos.ts`): `src/lib/portal.test.ts` los pasa por `slugValido` y el test "link"
+   de `tests/portal-config.spec.ts` por `portal_slug_disponible`, y los dos tienen que dar lo mismo.
+   La allowlist de (a) se vigila en una sola dirección: una clave que esté en `c_claves` y no en
+   `CLAVES_PORTAL` no la detecta nada (la misma forma que el #7).
    🔴 **"¿Recibe pedidos ahora?" NO es un contrato de dos lados, a propósito:** lo decide SOLO
    `portal_estado` en el servidor (horario en Bogotá, turno, pausa, faltantes). La pantalla muestra
    el motivo que devuelve; nadie lo recalcula en el navegador. El portal de P2 tiene que leer la

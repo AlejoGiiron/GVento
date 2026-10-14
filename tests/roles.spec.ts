@@ -36,7 +36,7 @@ test.describe('Roles y permisos — editables (menos owner)', () => {
     }
   })
 
-  test('el catálogo muestra los 23 permisos (incl. compras/fiado/historial/anular)', async ({ page }) => {
+  test('el catálogo muestra todos los permisos (incl. compras/fiado/historial/anular y pedidos en línea)', async ({ page }) => {
     await openRoles(page)
     await page.getByRole('button', { name: 'Crear rol' }).click()
     await expect(page.getByTestId('role-modal')).toBeVisible()

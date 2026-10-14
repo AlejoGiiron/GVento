@@ -3,6 +3,7 @@ import {
   etiquetaTramo, franjasLegibles, horaLegible, horarioAgrupado, leerPesos, mostrarPesos, normalizarSlug,
   problemaHorario, problemaTramos, slugValido, textoEstado,
 } from './portal'
+import { CASOS_SLUG } from './portalCasos'
 
 describe('link del portal', () => {
   it('normaliza lo que se escribe: minúsculas, sin tildes ni eñes, espacios a guiones', () => {
@@ -11,10 +12,11 @@ describe('link del portal', () => {
     expect(normalizarSlug('Piñata & Co.')).toBe('pinata-co-')
     expect(normalizarSlug('--G10--')).toBe('g10-')
   })
-  it('el formato es el mismo del CHECK: 3 a 40, sin guion al principio ni al final', () => {
-    expect(['abc', 'salchimelo', 'g-10', 'a'.repeat(40)].map(slugValido)).toEqual([true, true, true, true])
-    expect(['ab', 'a'.repeat(41), '-abc', 'abc-', 'Abc', 'ab c', 'ñam'].map(slugValido))
-      .toEqual([false, false, false, false, false, false, false])
+  it('el formato es el mismo del CHECK: los casos compartidos con el servidor (CASOS_SLUG)', () => {
+    // El otro lado (portal_slug_disponible) los corre tests/portal-config.spec.ts, test "link".
+    expect(CASOS_SLUG.map((c) => `${c.slug}: ${slugValido(c.slug)}`)).toEqual(CASOS_SLUG.map((c) => `${c.slug}: ${c.valido}`))
+    // Solo del navegador: sin normalizar, una mayúscula no pasa (la pantalla normaliza antes).
+    expect(slugValido('Abc')).toBe(false)
   })
 })
 

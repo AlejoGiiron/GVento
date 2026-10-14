@@ -64,6 +64,7 @@ const COLUMNAS_DEL_ESQUEMA: ColumnaEsquema[] = [
   { tabla: 'restaurants', columna: 'nequi_qr_url', ejemplo: 'https://x.co/qr.png' },
   // ── portal_sedes / portal_productos (portal-config.sql, Pedidos en línea P1). La ubicación del
   // local y la zona describen dónde está y hasta dónde llega un negocio: no salen.
+  { tabla: 'portal_sedes', columna: 'slug', ejemplo: 'salchimelo-norte' },
   { tabla: 'portal_sedes', columna: 'lat', ejemplo: 4.711234 },
   { tabla: 'portal_sedes', columna: 'lng', ejemplo: -74.072092 },
   { tabla: 'portal_sedes', columna: 'zona_poligono', ejemplo: [[4.7101, -74.0711], [4.7202, -74.0612], [4.7003, -74.0513]] },
