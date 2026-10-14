@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { psql } from './helpers/db-local'
 
 // ============================================================================
-// supabase/anon-sin-escritura.sql (Paso 11 / P0.2): el rol `anon` —cualquiera SIN sesión, con
+// supabase/anon-sin-escritura.sql (P0.2): el rol `anon` —cualquiera SIN sesión, con
 // la anon key que viaja en el bundle— no escribe en NINGUNA tabla ni vista de `public`.
 //
 // Este spec es el TRIPWIRE: se pone rojo si anon vuelve a poder escribir por cualquier camino.

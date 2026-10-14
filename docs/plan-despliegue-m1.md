@@ -1111,7 +1111,9 @@ Esperado: **cada** usuario que cierra turno (en particular **valeria sanchez**) 
 equipo con versión del Paso 1 o posterior, visto después de ese release. Un usuario con
 `version` vacía no cargó ninguna versión con aviso: su equipo puede seguir con el JS viejo.
 
-**6.3 — ANTES:** `supabase/diag/cash-shifts-preflight.sql`. Esperado: `como_antes = t` en las
+**6.3 — ANTES:** `supabase/diag/cash-shifts-preflight.sql` (md5 LF
+**`ecbc2b9abe215d610c5e9d9b3e3e82dd`**; la fila 1 mira también la definición del trigger y las filas
+9 y 10 ven el UPDATE por columna). Esperado: `como_antes = t` en las
 11 filas (fase 1 y lo que la redefinió, con sus md5; `anon` sin UPDATE; `authenticated` con UPDATE;
 las 3 políticas). Si las filas 10 y 11 dan `como_despues = t`, ya está aplicada: no la apliques.
 Una fila de 1 a 9 en `f` es una diferencia con el repo que este paso no arregla: parar.
@@ -1130,9 +1132,14 @@ cerrar. Si sigue, reversa.
 viejo): es para una emergencia con un equipo que no puede recargar, no para un "Error al cerrar",
 que se arregla recargando. Aborta si el paso no está aplicado; verifica la policy contra el hash de
 prod y que `anon` siga sin UPDATE, y hace rollback si no da. Después, 6.3 da `como_antes = t`.
-Probado en Docker el 2026-10-13: después → reversa → antes → reversa otra vez (aborta) → aplicar →
-re-aplicar (idempotente) → después; con la reversa puesta, `cierre-turno-servidor.spec.ts` ("el
-camino viejo está cerrado") se pone rojo.
+Probado en Docker el 2026-10-13 (y otra vez el 2026-10-14 con el pre-flight nuevo; ver el reporte de
+la rama, con el exit code de cada paso): después → reversa → antes → reversa otra vez (aborta) →
+aplicar → re-aplicar (idempotente) → después; con la reversa puesta, `cierre-turno-servidor.spec.ts`
+("el camino viejo está cerrado") se pone rojo.
+**Orden de las reversas:** si después del Paso 6 se revirtiera P0.2 (`anon-sin-escritura-revertir.sql`),
+`anon` recuperaría el UPDATE de `cash_shifts` que tenía antes de P0.2; desde ahí esta reversa aborta
+(lo comprueba). **`fase2-revertir.sql` quedó inutilizable a propósito:** su primera instrucción aborta
+con el aviso de obsoleto (md5 nuevo `df8ca264081ea5e8329e77c85c41fb88`).
 
 ---
 
@@ -1534,17 +1541,30 @@ mesas) y después `mesas-una-cuenta-revertir.sql` (fuera de git, en la raíz), m
 
 ## Paso 11 — Mesas, fase 2: sin escrituras directas de cobro, ítems ni mesas (`mesas-fase2.sql`)
 
-Rama `feat/mesas-fase2`, encima de `feat/anon-sin-escritura`. **Solo SQL, sin frontend. No se
-aplica hasta que el Paso 10 esté en TODOS los equipos.**
+Rama `feat/mesas-fase2` (rebasada sobre `develop` el 2026-10-14). **Solo SQL, sin frontend. No se
+aplica hasta que el Paso 10 esté en TODOS los equipos. Sale el martes 20/10, antes del Paso 6.**
 
 - **Qué cierra** (solo permisos del rol `authenticated`; las políticas no se tocan):
-  - `order_items` sin DELETE directo: quitar un ítem es `quitar_item_mesa` (cierra H3 en la base).
+  - `order_items` sin DELETE directo: quitar un ítem es `quitar_item_mesa` (cierra BORRAR ítems sin
+    rastro; editarlos no, ver abajo).
   - `tables` sin DELETE directo: eliminar una mesa es `eliminar_mesa` (archiva si vendió).
   - `orders` sin UPDATE de tabla: UPDATE **solo** de `status`, `courier_id` y
     `estimated_delivery_minutes`, que es lo que la app del Paso 10 escribe directo (Cocina,
     Delivery, Mesas al enviar a cocina). Todo lo de cobro (`total`, `payment_status`, `order_number`,
     descuentos, cliente, `close_id`, `cobrada_*`, anulación) solo por las funciones del servidor.
     Cierra DEUDAS → *"Fiado en MESA"*.
+- 🔴 **Lo que NO cierra** (revisión del 2026-10-14; siguen abiertos por la API para un usuario con
+  sesión, aunque la app del Paso 10 no los usa):
+  - **UPDATE de tabla en `order_items`:** bajar `qty` o poner `unit_price = 0` cambia lo que cobra
+    `close_table_sale`, sin rastro y sin devolver stock. La app solo escribe `sent_to_kitchen`.
+  - **DELETE de `orders` para admin** (política `orders: admin elimina`): borra en cascada ítems,
+    bajas, abonos de fiado y lotes (`payments` es restrict).
+  - **`orders.status` con cualquier valor:** con `payment_status` `'paid'` por defecto, pasar a
+    `delivered` una mesa sin pagos la deja "pagada" (DEUDAS → *"Mesas cerradas como pagadas SIN
+    filas en payments"*).
+  Cerrarlos es un paso aparte (propuesto el 2026-10-14, sin aprobar).
+- **Guarda 0e:** aborta si `anon` todavía escribe en `orders`, `order_items` o `tables` (P0.2 sin
+  aplicar): este paso solo cierra lo de `authenticated`.
 - **Barrido R3 (2026-10-13):** con el código del Paso 10, la app no borra ítems ni mesas directo, y
   en `orders` solo escribe esas tres columnas. Los 9 escritores de esas tablas en la base son
   `SECURITY DEFINER` (no cambian). Tres fixtures de la suite escribían directo con sesión
@@ -1559,29 +1579,42 @@ aplica hasta que el Paso 10 esté en TODOS los equipos.**
 commits de `main` que Vercel desplegó):
 ```bash
 git fetch origin
-git log --first-parent --format=%h <hash-del-release-del-Paso-10>^..origin/main
+git log --first-parent --format=%H <hash-del-release-del-Paso-10>^..origin/main | cut -c1-7
 ```
+(`%h` puede dar más de 7 caracteres si hay ambigüedad; la guarda exige exactamente 7.)
 Esos hash (7 caracteres cada uno) van en la línea marcada `[VERSIONES-PASO-10]` de
 `supabase/mesas-fase2.sql`, en el SQL Editor, en lugar de `'PEGA-AQUI-LOS-HASH-DEL-PASO-10'`.
 
 **11.2 — Pre-flight, JUSTO ANTES:** `supabase/diag/mesas-fase2-preflight.sql`, cada consulta por
-separado. Consulta 1: **todas** las versiones tienen que estar en la lista de 11.1; si aparece otra,
-que ese equipo recargue (la consulta 2 dice cuál) y se vuelve a mirar. Consulta 3: los 4 md5 del
-Paso 9. Consulta 4: `t · (ninguna) · t · t`.
+separado (md5 LF `e90ba7ef57d11165e23cc8c3feeacf82`). Consulta 1: **todas** las versiones tienen que
+estar en la lista de 11.1; si aparece otra, que ese equipo recargue (la consulta 2 dice cuál) y se
+vuelve a mirar. Consulta 3: los 4 md5 del Paso 9. Consulta 4: `t · (ninguna) · t · t`.
+- **Un equipo que ya no existe** (navegador borrado, usuario inactivo, una vista previa contra prod)
+  deja su fila en `app_versiones` para siempre y la guarda aborta (a propósito: no sabe distinguirlo
+  de uno que sigue con la versión vieja). Solo si estás SEGURO de que ese equipo no se usa, se borra
+  su fila por `(user_id, equipo)` (los dos valores de la consulta 2), contando antes:
+  ```sql
+  begin;
+  select count(*) from public.app_versiones where user_id = '<uuid>' and equipo = '<equipo completo>';  -- 1
+  delete from public.app_versiones where user_id = '<uuid>' and equipo = '<equipo completo>';            -- DELETE 1
+  commit;
+  ```
+  Si el equipo vuelve a abrir la app, reaparece con su versión actual.
 
-**11.3 — Correr `supabase/mesas-fase2.sql`** con la lista llena (el md5 LF del archivo SIN llenar
-está en el reporte de publicación). Avisa `N equipo(s) en app_versiones, todos con una versión de la
+**11.3 — Correr `supabase/mesas-fase2.sql`** con la lista llena (md5 LF del archivo SIN llenar:
+**`80b4923cf2a5d105691b752abfb36a81`**; cambió el 2026-10-14 por la guarda 0e y el encabezado). Avisa `N equipo(s) en app_versiones, todos con una versión de la
 lista` y `orders actualizable solo en courier_id,estimated_delivery_minutes,status`. Si la lista no
-está llena, si un equipo tiene otra versión, si el Paso 9 no está o si ya se aplicó, **aborta sin
-cambiar nada** y lo dice.
+está llena, si un equipo tiene otra versión, si el Paso 9 no está, si ya se aplicó o si `anon`
+todavía escribe en esas tablas, **aborta sin cambiar nada** y lo dice.
 
 **11.4 — Verificación:** la consulta 4 del pre-flight: `f · courier_id,estimated_delivery_minutes,status
 · f · f`. Y en la app: cobrar una mesa, quitar un ítem, cerrar una mesa sin consumo, avanzar una
 comanda en Cocina y asignar un repartidor en Delivery.
 
-**11.5 — Reversa:** `mesas-fase2-revertir.sql` (fuera de git, en la raíz): devuelve a
-`authenticated` el estado de partida exacto (UPDATE de tabla en `orders`, DELETE en `order_items` y
-`tables`). **Reabre las escrituras directas**: solo si la migración rompió algo.
+**11.5 — Reversa:** `mesas-fase2-revertir.sql` (fuera de git, en la raíz), md5
+**`5de6c5fed4cecbaf08e1d0122cb0fb7e`**: devuelve a `authenticated` el estado de partida exacto (UPDATE
+de tabla en `orders`, DELETE en `order_items` y `tables`). **Reabre las escrituras directas**: solo si
+la migración rompió algo. No deshace nada de datos (no los hay) y no toca `anon`.
 
 ## Calendario de releases (actualizado el 2026-10-13)
 
@@ -1592,8 +1625,10 @@ Los martes G-10 y Salchimelo no abren: los pasos con SQL van ese día.
 | mar 13/10 | hotfix combinado de Mesas (HC) | `hotfix/mesas-13-10` | fast-forward desde `fab23b0` (si la suite no está verde a las 12:30: mié 14/10, 7:00) |
 | mar 13/10 (adelantado; HC ya salió: `main` = `976c2ec`) | Cocina, Mesas y Delivery se recargan solas | `feat/cocina-refresco` | rebasada sobre el hotfix combinado (`09945b2`), suite completa y fast-forward (si la suite no está verde a las 18:00: mié 14/10, 7:00) |
 | mar 13/10 (adelantado; R y `fix/cocina-avisos` ya salieron: `develop` = `c3a00c5`) | el arqueo cuenta los abonos de fiado (AA) | `feat/arqueo-abonos` | rebasada sobre `develop` (`c3a00c5`), suite completa y fast-forward; SQL antes del frontend (AA.1–AA.4) |
-| mar 20/10, justo después del Paso 11 | Paso 6, fase 2 de D | — | parte de la versión de `close_cash_shift` que deja el arqueo (`a395c0a1…`); pre-flight `supabase/diag/cash-shifts-preflight.sql` |
-| mar 13/10 (adelantado, en cadena) | Pasos 7-8 (permisos de cobro, A), después 9-10 (Mesas en el servidor) y después el 11 (anon sin escritura) | `feat/a-permisos`, `feat/mesas-servidor` y la del 11, cada una encima de la anterior | fast-forward en cadena: cada rama entra cuando la anterior ya está en `develop` |
+| mar 20/10 | Paso 11, Mesas fase 2 (si la guarda aborta, no sale y el Paso 6 sale igual) | `feat/mesas-fase2` | fast-forward sobre `develop`; solo SQL |
+| mar 20/10, justo después del Paso 11 | Paso 6, fase 2 de D | `feat/mesas-fase2` (solo el pre-flight) | parte de la versión de `close_cash_shift` que deja el arqueo (`a395c0a1…`); pre-flight `supabase/diag/cash-shifts-preflight.sql` |
+| mar 20/10, después del 6 | Pedidos en línea P1 (SQL + frontend) | `feat/pedidos-p1`, encima de la rama 4 | SQL antes del frontend |
+| mar 13/10 (adelantado, en cadena) | Pasos 7-8 (permisos de cobro, A), después 9-10 (Mesas en el servidor) y después P0.2 (anon sin escritura) | `feat/a-permisos`, `feat/mesas-servidor` y `feat/anon-sin-escritura`, cada una encima de la anterior | fast-forward en cadena: cada rama entra cuando la anterior ya está en `develop` |
 | vie 16/10, con los locales abiertos | una sola cuenta viva por mesa (UC) | `fix/mesas-una-cuenta` | ya en `develop` por fast-forward; SQL antes del frontend (UC.1–UC.4) |
 | al final | Realtime | `feat/realtime` | después del paquete de Mesas |
 
@@ -1620,3 +1655,5 @@ Los martes G-10 y Salchimelo no abren: los pasos con SQL van ese día.
 | 8 | frontend de A | — | `feat/a-permisos` | rollback (el SQL del 7 se queda) |
 | 9 | SQL de Mesas en el servidor | `mesas-servidor.sql` (`4adc0197…`), con pre-flight 3, 4 y 5 justo antes | — | `mesas-servidor-revertir.sql` (`2f557c6d…`), solo antes del 10 |
 | 10 | frontend de Mesas | — | `feat/mesas-servidor` | rollback (el SQL del 9 se queda) |
+| P0.2 | anon sin escritura | `anon-sin-escritura.sql` (`26bca67d…`) | — | `anon-sin-escritura-revertir.sql` (`ed8bd914…`) |
+| 11 | Mesas fase 2 (sin escrituras directas de cobro, ítems ni mesas) | `mesas-fase2.sql` (`80b4923c…`, lista sin llenar), pre-flight `e90ba7ef…` | — | `mesas-fase2-revertir.sql` (`5de6c5fe…`) |

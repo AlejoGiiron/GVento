@@ -81,6 +81,21 @@ test.describe('la guarda de mesas-fase2.sql', () => {
     expect(r.stderr).toMatch(/equipo\(s\) con una versión anterior al Paso 10.*0123abc/)
   })
 
+  // El estado de partida (antes del Paso 11), armado dentro de la transacción que se deshace.
+  const PARTIDA = `revoke update (status, courier_id, estimated_delivery_minutes) on public.orders from authenticated;
+    grant update on public.orders to authenticated;
+    grant delete on public.order_items to authenticated;
+    grant delete on public.tables to authenticated;`
+
+  test('guarda 0e: si anon todavía escribe (P0.2 sin aplicar), aborta; sin eso, se aplica entera (contraste)', () => {
+    const conAnon = correr(`${PARTIDA}\n grant update on public.orders to anon;`, "array['dev']")
+    expect(conAnon.status).not.toBe(0)
+    expect(conAnon.stderr).toContain('falta anon-sin-escritura.sql (P0.2)')
+    const sinAnon = correr(PARTIDA, "array['dev']")
+    expect(sinAnon.stderr, 'desde el estado de partida, con P0.2, la migración no debería abortar').not.toMatch(/ERROR/)
+    expect(sinAnon.status).toBe(0)
+  })
+
   test('con todos los equipos en la lista pasa la guarda; ya aplicada, aborta en el estado de partida (re-aplicar no cambia nada)', () => {
     const r = correr(`insert into public.app_versiones (user_id, equipo, version) values ('${OWNER_ID}', 'equipo-viejo-e2e', '0123abc');`,
       "array['dev','0123abc']")

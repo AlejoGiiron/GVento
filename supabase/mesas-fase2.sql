@@ -1,7 +1,8 @@
 -- ============================================================================
 -- supabase/mesas-fase2.sql — Paso 11, "Mesas, fase 2": cerrar las escrituras DIRECTAS que el
 -- frontend del Paso 10 ya no usa (la fase 2 de D, ahora para Mesas). Solo toca permisos del rol
--- `authenticated` (usuarios CON sesión); `anon` ya no escribe nada desde anon-sin-escritura.sql.
+-- `authenticated` (usuarios CON sesión). `anon` no debe escribir nada (anon-sin-escritura.sql, P0.2):
+-- la guarda 0e lo COMPRUEBA y aborta si no, porque este paso no cierra nada para anon.
 --
 -- POR QUÉ: desde el Paso 10, cobrar, quitar ítems, cerrar sin consumo y eliminar mesas van por
 -- funciones del servidor (close_table_sale, quitar_item_mesa, cerrar_mesa_sin_consumo,
@@ -18,6 +19,18 @@
 --      descuentos, cliente, close_id, cobrada_*, anulación) solo por las funciones del servidor.
 --   Las políticas no se tocan: el permiso es la barrera. Las funciones SECURITY DEFINER no cambian
 --   (corren como su dueño). INSERT de órdenes e ítems sigue igual.
+--
+-- 🔴 LO QUE NO CIERRA (siguen abiertos por la API para un usuario con sesión; la app del Paso 10 no
+--    los usa, pero la base no los impide; revisión del 2026-10-14):
+--   a. UPDATE de tabla en order_items (política "order_items: staff actualiza"): bajar qty o poner
+--      unit_price = 0 cambia el total que cobra close_table_sale sin dejar rastro ni devolver stock.
+--      H3 queda cerrado para BORRAR ítems, no para editarlos. La app solo escribe sent_to_kitchen.
+--   b. DELETE de orders para admin (política "orders: admin elimina"): borra en cascada sus ítems,
+--      sus bajas (order_item_bajas), sus abonos de fiado y sus lotes; payments es restrict.
+--   c. orders.status acepta cualquier valor del enum (también delivered y cancelled): con
+--      payment_status por defecto 'paid', pasar a delivered una mesa sin pagos la deja "pagada".
+--      status sigue en el grant porque Cocina, Delivery y Mesas lo escriben directo.
+--   Cerrarlos es otro paso (DEUDAS → "Tablas que solo deberían escribirse por RPC").
 --
 -- 🔴 GUARDA: SOLO SE APLICA CON EL PASO 10 EN TODOS LOS EQUIPOS. Un equipo con el frontend viejo
 -- cobra mesas con escrituras directas: después de esta migración, cobrar le fallaría. La migración
@@ -87,6 +100,14 @@ begin
      or not has_table_privilege('authenticated', 'public.tables', 'DELETE')
      or exists (select 1 from pg_attribute where attrelid = 'public.orders'::regclass and attacl is not null) then
     raise exception 'Precondición: authenticated no está en el estado de partida (UPDATE en orders, DELETE en order_items y tables, sin permisos por columna). ¿Ya se aplicó? No se cambió nada.';
+  end if;
+
+  -- ── 0e. P0.2 aplicado: anon no escribe en estas tablas (este paso solo cierra lo de authenticated) ──
+  if has_table_privilege('anon', 'public.orders', 'INSERT,UPDATE,DELETE,TRUNCATE')
+     or has_any_column_privilege('anon', 'public.orders', 'UPDATE')
+     or has_table_privilege('anon', 'public.order_items', 'INSERT,UPDATE,DELETE,TRUNCATE')
+     or has_table_privilege('anon', 'public.tables', 'INSERT,UPDATE,DELETE,TRUNCATE') then
+    raise exception 'Precondición: anon (sin sesión) todavía escribe en orders, order_items o tables: falta anon-sin-escritura.sql (P0.2). No se cambió nada.';
   end if;
 end $$;
 

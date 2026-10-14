@@ -269,7 +269,7 @@ SECURITY DEFINER. Las policies y grants salen de `pg_policies` y
 | `orders` | abonos y anulación (U) | INSERT (POS y Mesas) y 6 UPDATE (estado, total, descuento, número, fiado, domiciliario) | INSERT · UPDATE "staff" · DELETE admin | **no se puede cerrar todavía**: es el camino vivo del POS y de Mesas. **DELETE admin: quitar** (sin uso; cascada a `debt_payments`). El resto se achica con `register_pos_sale` (ver la entrada de abajo) y después con el cobro de mesa. |
 | `products` | stock por `add_order_items_with_extras`, `adjust_stock`, `register_purchase`, anulación | `stock_qty` = 0/null al crear o al apagar el seguimiento (modal de producto) | INSERT · UPDATE · DELETE admin | dejar. `updateProductStock` no tiene llamadores, pero el modal escribe `stock_qty` y una restricción por columna lo rompería. |
 | `stock_movements`, `store_sequences`, `purchase_invoice_items` | solo RPC | — | **ninguna** ✅ | ya está bien: es el modelo a copiar. |
-| `cash_shifts` | `close_cash_shift` (U) | INSERT (abrir turno) | INSERT | UPDATE ya revocado en la fase 2 de D. |
+| `cash_shifts` | `close_cash_shift` (U) | INSERT (abrir turno) | INSERT | UPDATE de `authenticated`: lo quita el Paso 6 (fase 2 de D, `close-cash-shift-revoke.sql`), que al 2026-10-14 **no estaba aplicado en prod** (corregido: esta celda decía "ya revocado"). `anon`: cerrado por P0.2. Estado: `supabase/diag/cash-shifts-preflight.sql`, filas 9 y 10. |
 | `restaurants.config` | `update_restaurant_config` (fusiona clave por clave; `restaurant-config-rpc.sql`, rama `feat/m1-pos-movil`, 2026-10-04) | **ninguna** desde ese frontend (`updateRestaurant` ya no acepta `config` por tipo). El frontend anterior escribe el objeto ENTERO y puede pisar claves | UPDATE "admin actualiza" (rol viejo `admin`) y "editar sede con permiso" (`sedes.gestionar`), sobre toda la fila | **después de M1:** restringir el UPDATE directo a las columnas que la app escribe (nombre, dirección, teléfono, logo, `uses_kitchen`) y dejar `config` solo por la RPC. **¿Ya se pisó algo en prod? CERRADO, 2026-10-04: sin señales.** `config-pisado-senales.sql` (raíz) en prod: el único QR de Nequi configurado (G-10) sale "ok" (el archivo y la config coinciden). Resultado reportado: "sin señales". Las claves que no dejan rastro (PIN, estaciones, motivos, métodos) no se pueden medir con esa consulta. Queda abierto solo el endurecimiento (restringir el UPDATE directo), no un daño a reparar. |
 
 `anon` tiene grants I/U/D en todas (deuda aparte, más abajo); lo frena la RLS, no el grant.
@@ -809,13 +809,16 @@ select tablename, policyname, cmd, roles from pg_policies
 **✅ FASE 1 DESPLEGADA EL 2026-10-01** (lo reportó el usuario): `close-cash-shift.sql` de `3339978`
 a las 10:40, con las 4 verificaciones OK; frontend que cierra por `close_cash_shift` a las ~11:45.
 Cierre de prueba en Café Aroma con el frontend nuevo: congelado = recalculado (63.500).
-**FASE 2 (`close-cash-shift-revoke.sql`): queda para el 2026-10-02**, después de correr
+**FASE 2 (`close-cash-shift-revoke.sql`): no se aplicó el 2026-10-02; pasó a ser el Paso 6, que sale el 2026-10-20 después del Paso 11**, después de correr
 `fase2-precheck.sql` (fuera de git), que distingue por qué camino cerró cada turno.
 *(Historia del arreglo, abajo.)*
-`supabase/close-cash-shift.sql`: cierre en el servidor (`close_cash_shift`), UPDATE revocado a
-authenticated y anon sobre `cash_shifts` (una pestaña vieja recibe 42501: toast "Error al cerrar
-el turno", el turno sigue abierto — medido), trigger que rechaza movimientos en turnos cerrados, y
-el PROTOCOLO DE LOCKS en los dos abonos y la anulación. `tests/cierre-turno-servidor.spec.ts`:
+`supabase/close-cash-shift.sql` (fase 1): cierre en el servidor (`close_cash_shift`), trigger que
+rechaza movimientos en turnos cerrados, y el PROTOCOLO DE LOCKS en los dos abonos y la anulación.
+🔴 **La fase 1 NO quita el UPDATE directo de `cash_shifts`** (corregido el 2026-10-14: esta nota
+decía que sí, y de ahí salió la idea de que "la fase 1 lo quitaba"). Lo quita la fase 2,
+`close-cash-shift-revoke.sql` = Paso 6. Con la fase 2, una pestaña vieja recibe 42501 (toast "Error
+al cerrar el turno", el turno sigue abierto — medido en Docker). Estado:
+`supabase/diag/cash-shifts-preflight.sql`. `tests/cierre-turno-servidor.spec.ts`:
 el escenario medido + una carrera forzada por escritor + todos a la vez ×10 sin 40P01; mutantes
 verificados (escritores sin FOR SHARE → rojo; cliente viejo → congela 100.000 en vez de 89.423).
 **Falta:** el cobro (`register_sale_payment`) todavía no toma el turno → cambio (1).
@@ -1125,8 +1128,11 @@ caso NO está probado: es el único camino del código que da esa forma.
 **Hoy sigue pudiendo pasar** (ni `cobro-turno.sql` ni el Paso 3 tocan ese camino: saltarse el pago
 no llama a `register_sale_payment`). **`close_table_sale` (Paso 9) lo hace imposible:** el total sale
 de las líneas y tiene que ser el que vio la pantalla (B1), y con total > 0 no hay `delivered` sin
-que `register_sale_payment` cobre la suma exacta. Queda abierto hasta que el Paso 10 esté en todos
-los equipos y el Paso 11 cierre el UPDATE directo de `orders.status`.
+que `register_sale_payment` cobre la suma exacta. **Sigue abierto por la API** (corregido el
+2026-10-14: esta nota decía que lo cerraba el Paso 11): `mesas-fase2.sql` deja `status` en el UPDATE
+por columna porque Cocina, Delivery y Mesas lo escriben directo, y `payment_status` es `'paid'` por
+defecto. Un usuario con sesión todavía puede pasar a `delivered` una mesa sin pagos. Cerrarlo pide
+llevar los cambios de estado a una función del servidor.
 **Para medirlo:** `supabase/diag/mesas-sin-pagos.sql` (solo lectura): la consulta 1 da la clase de
 cada orden y el turno en que cayó; la 2, cada turno con su sobrante y lo que esas ventas explicarían
 (una mesa cobrada en efectivo sin `payments` deja la plata en el cajón sin que el sistema la

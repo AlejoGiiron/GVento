@@ -375,6 +375,14 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    (una cerrada libera la mesa con la otra escondida: mesa 10 de Salchimelo, 2026-10-14). El índice
    cambia con un archivo NUEVO (R5). Para reconfirmar los lados:
    `grep -rn "'preparing'" src/ supabase/*.sql tests/`.
+12. **Lo que `authenticated` escribe DIRECTO en `orders`, `order_items` y `tables` — 3 lados
+   (agregado 2026-10-14, Paso 11).** El `grant update (status, courier_id,
+   estimated_delivery_minutes)` y los `revoke` de `supabase/mesas-fase2.sql` (y su reversa en la
+   raíz); las escrituras directas de `src/lib/supabase-helpers.ts` (`updateOrderStatus`,
+   `assignOrderCourier`, `markItemsSentToKitchen`, y las de `tables`); y `tests/mesas-fase2.spec.ts`.
+   `tsc` no lo ve: `TablesUpdate<'orders'>` acepta cualquier columna, así que una escritura directa
+   nueva a otra columna compila y falla en prod con 42501. Antes de agregar una:
+   `node scripts/escrituras-directas.mjs`, y si de verdad hace falta, un SQL NUEVO con el grant.
 
 → **Evidencia:** [`docs/BITACORA.md`](docs/BITACORA.md) → *"FASE 1 — estado de suscripción"*
 (el aviso a G-Centro) · el hallazgo del onboarding está en el inventario de arriba · el caso de
