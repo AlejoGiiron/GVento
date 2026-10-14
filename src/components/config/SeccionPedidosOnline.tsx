@@ -406,7 +406,11 @@ function TarjetaZona({ portal }: { portal: PortalSede }) {
             {ubicando ? 'Buscando…' : 'Ubicar con la dirección de la sede'}
           </button>
         </div>
-        <span style={nota}>El punto del local sale de la dirección de la sede; se puede corregir arrastrándolo.</span>
+        <span style={nota}>
+          El punto del local sale de la dirección de la sede; se puede corregir arrastrándolo. La búsqueda de la
+          dirección usa <a href="https://nominatim.openstreetmap.org/" target="_blank" rel="noreferrer" style={{ color: '#64748b' }}>Nominatim</a> ©
+          colaboradores de <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" style={{ color: '#64748b' }}>OpenStreetMap</a>.
+        </span>
         <Guardar onClick={guardar} ocupado={guardando} testId="zona-guardar">Guardar zona</Guardar>
       </div>
     </section>
