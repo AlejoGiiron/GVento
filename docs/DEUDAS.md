@@ -1207,6 +1207,11 @@ la versión de producción, 1 con la del Paso 9.
 
 ### 🔴 Fiado en MESA: cualquier usuario de la sede puede pasar una orden a fiado (hallado 2026-10-08)
 
+**Se cierra con el Paso 11** (`supabase/mesas-fase2.sql`, rama `feat/mesas-fase2`, armado el
+2026-10-13; se aplica con el Paso 10 en todos los equipos): `authenticated` pierde el UPDATE de tabla
+en `orders` y queda solo con `status`, `courier_id` y `estimated_delivery_minutes`. Lo vigila
+`tests/mesas-fase2.spec.ts`. Hasta que se aplique en producción, lo de abajo sigue siendo cierto.
+
 El cobro de mesa a fiado no pasa por ninguna función: `setOrderFiado` (`src/lib/supabase-helpers.ts`)
 hace un UPDATE directo a `orders` (`payment_status = 'pending'`, `customer_id`, `customer_name`), y
 la política `orders: staff actualiza` solo pide `restaurant_id = get_my_restaurant_id()`. **No hay

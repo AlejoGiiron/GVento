@@ -1522,11 +1522,56 @@ mesas) y después `mesas-una-cuenta-revertir.sql` (fuera de git, en la raíz), m
 
 ---
 
-## Paso 11 — Mesas, fase 2 (ESQUEMA: se completa al construirlo)
+## Paso 11 — Mesas, fase 2: sin escrituras directas de cobro, ítems ni mesas (`mesas-fase2.sql`)
 
-| paso | qué | tipo | depende de |
-|---|---|---|---|
-| 11 | **Fase 2:** sin DELETE directo en `order_items`; las columnas de cobro de `orders` fuera del UPDATE directo (allowlist de columnas); borrado de mesas solo por la función; DEUDAS → *"Fiado en MESA"*. | SQL | 10 en todos los equipos (`app_versiones`) |
+Rama `feat/mesas-fase2`, encima de `feat/anon-sin-escritura`. **Solo SQL, sin frontend. No se
+aplica hasta que el Paso 10 esté en TODOS los equipos.**
+
+- **Qué cierra** (solo permisos del rol `authenticated`; las políticas no se tocan):
+  - `order_items` sin DELETE directo: quitar un ítem es `quitar_item_mesa` (cierra H3 en la base).
+  - `tables` sin DELETE directo: eliminar una mesa es `eliminar_mesa` (archiva si vendió).
+  - `orders` sin UPDATE de tabla: UPDATE **solo** de `status`, `courier_id` y
+    `estimated_delivery_minutes`, que es lo que la app del Paso 10 escribe directo (Cocina,
+    Delivery, Mesas al enviar a cocina). Todo lo de cobro (`total`, `payment_status`, `order_number`,
+    descuentos, cliente, `close_id`, `cobrada_*`, anulación) solo por las funciones del servidor.
+    Cierra DEUDAS → *"Fiado en MESA"*.
+- **Barrido R3 (2026-10-13):** con el código del Paso 10, la app no borra ítems ni mesas directo, y
+  en `orders` solo escribe esas tres columnas. Los 9 escritores de esas tablas en la base son
+  `SECURITY DEFINER` (no cambian). Tres fixtures de la suite escribían directo con sesión
+  (`order_number` en `abono-efectivo-turno` y `anular-venta`, borrar una mesa en `helpers/lab.ts`):
+  pasaron a `psql`.
+- **🔴 La guarda:** la migración lee `app_versiones` y **aborta** si algún equipo tiene una versión
+  fuera de la lista que se pega en el archivo. La versión es el hash corto (7) del commit publicado
+  (`VERCEL_GIT_COMMIT_SHA`): no se puede ordenar, por eso la lista es explícita. Lo que la guarda NO
+  ve: un equipo que nunca cargó una versión con el aviso (anterior al 1/10).
+
+**11.1 — Los hash del Paso 10 en adelante.** Cada release publicado desde el del Paso 10 (los
+commits de `main` que Vercel desplegó):
+```bash
+git fetch origin
+git log --first-parent --format=%h <hash-del-release-del-Paso-10>^..origin/main
+```
+Esos hash (7 caracteres cada uno) van en la línea marcada `[VERSIONES-PASO-10]` de
+`supabase/mesas-fase2.sql`, en el SQL Editor, en lugar de `'PEGA-AQUI-LOS-HASH-DEL-PASO-10'`.
+
+**11.2 — Pre-flight, JUSTO ANTES:** `supabase/diag/mesas-fase2-preflight.sql`, cada consulta por
+separado. Consulta 1: **todas** las versiones tienen que estar en la lista de 11.1; si aparece otra,
+que ese equipo recargue (la consulta 2 dice cuál) y se vuelve a mirar. Consulta 3: los 4 md5 del
+Paso 9. Consulta 4: `t · (ninguna) · t · t`.
+
+**11.3 — Correr `supabase/mesas-fase2.sql`** con la lista llena (el md5 LF del archivo SIN llenar
+está en el reporte de publicación). Avisa `N equipo(s) en app_versiones, todos con una versión de la
+lista` y `orders actualizable solo en courier_id,estimated_delivery_minutes,status`. Si la lista no
+está llena, si un equipo tiene otra versión, si el Paso 9 no está o si ya se aplicó, **aborta sin
+cambiar nada** y lo dice.
+
+**11.4 — Verificación:** la consulta 4 del pre-flight: `f · courier_id,estimated_delivery_minutes,status
+· f · f`. Y en la app: cobrar una mesa, quitar un ítem, cerrar una mesa sin consumo, avanzar una
+comanda en Cocina y asignar un repartidor en Delivery.
+
+**11.5 — Reversa:** `mesas-fase2-revertir.sql` (fuera de git, en la raíz): devuelve a
+`authenticated` el estado de partida exacto (UPDATE de tabla en `orders`, DELETE en `order_items` y
+`tables`). **Reabre las escrituras directas**: solo si la migración rompió algo.
 
 ## Calendario de releases (actualizado el 2026-10-13)
 

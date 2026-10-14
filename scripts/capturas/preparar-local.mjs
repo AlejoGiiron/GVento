@@ -104,6 +104,7 @@ const ORDEN = [
   'mesas-servidor.sql',                 // Paso 9: cobro de mesa, quitar ítem, cerrar sin consumo y eliminar mesa en el servidor
   'anon-sin-escritura.sql',             // Paso 11 / P0.2: anon (sin sesión) no escribe en ninguna tabla de public
   'mesas-una-cuenta.sql',               // una sola cuenta viva por mesa (índice) + abrir_mesa en una transacción
+  'mesas-fase2.sql',                    // Paso 11: sin escrituras directas de cobro, ítems ni mesas (authenticated)
 ]
 
 // ── QUIÉN GANA cuando una función está definida en más de un .sql ─────────────
@@ -325,7 +326,7 @@ function psql(sql, { user = 'postgres' } = {}) {
   return salida
 }
 
-/** Aplica un .sql del repo, con los dos parches de aplicación. */
+/** Aplica un .sql del repo, con los parches de aplicación (cada uno falla ruidoso si su marca cambió). */
 function aplicar(nombre) {
   let sql = readFileSync(join(SUPA, nombre), 'utf-8')
 
@@ -343,6 +344,16 @@ function aplicar(nombre) {
       )
     }
     sql = sql.slice(0, sql.lastIndexOf('\n', corte))
+  }
+
+  // mesas-fase2.sql (Paso 11) trae una lista de versiones que se llena al aplicarlo en producción
+  // (el hash de cada release con el Paso 10). En local la app se compila como 'dev'.
+  if (nombre === 'mesas-fase2.sql') {
+    const MARCA = "array['PEGA-AQUI-LOS-HASH-DEL-PASO-10']"
+    if (!sql.includes(MARCA)) {
+      throw new Error('mesas-fase2.sql cambió: ya no está la marca de la lista de versiones del Paso 10.')
+    }
+    sql = sql.replace(MARCA, "array['dev']")
   }
 
   psql(sql)

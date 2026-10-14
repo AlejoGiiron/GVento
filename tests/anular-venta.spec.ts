@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { loginAsOwner, loginAsCashier, ownerCreds, cashierCreds } from './helpers/auth'
 import { closeShiftIfOpen, openShiftIfClosed } from './helpers/shift'
+import { psql } from './helpers/db-local'
 
 // ============================================================================
 // Anulación de ventas (register_sale_void) — cubre F2 (RPC + 6 guardas), F3
@@ -136,7 +137,9 @@ async function createSale(opts: {
   }
   const n = await c.rpc('next_order_number', { p_restaurant_id: SEDE })
   if (n.error) throw n.error
-  await c.from('orders').update({ order_number: n.data }).eq('id', order!.id)
+  // Por psql: desde el Paso 11 (mesas-fase2.sql) la app no puede escribir order_number directo
+  // (y este update no revisaba el error: habría fallado en silencio).
+  psql(`update public.orders set order_number = ${Number(n.data)} where id = '${order!.id}';`)
   return { id: order!.id, number: n.data as number }
 }
 async function voidRpc(client: SupabaseClient, orderId: string, reason = 'error del cajero') {

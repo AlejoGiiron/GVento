@@ -1,6 +1,7 @@
 import { expect } from '@playwright/test'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { ownerCreds } from './auth'
+import { psql } from './db-local'
 
 // ============================================================================
 // Higiene del laboratorio: mesas FIJAS por spec, liberadas en un afterAll.
@@ -115,11 +116,11 @@ export async function liberarMesa(nombre: string): Promise<void> {
  * `liberarMesa`: el borrado puede ser imposible (ver el encabezado).
  */
 export async function borrarMesaTransitoria(nombre: string): Promise<void> {
-  const c = await db()
   const mesa = await filaMesa(nombre)
   if (!mesa) return
-  const { error } = await c.from('tables').delete().eq('id', mesa.id)
-  if (error) throw new Error(`lab: borrar mesa transitoria "${nombre}": ${error.message}`)
+  // Por psql: desde el Paso 11 (mesas-fase2.sql) la app solo borra mesas con eliminar_mesa,
+  // que ARCHIVA si la mesa vendió. Esto es limpieza del test, no el camino del producto.
+  psql(`delete from public.tables where id = '${mesa.id}';`)
   expect(await filaMesa(nombre), `la mesa transitoria "${nombre}" sigue existiendo`).toBeNull()
 }
 

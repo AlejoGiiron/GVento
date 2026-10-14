@@ -49,8 +49,8 @@ async function fiadoNumerado(total: number): Promise<number> {
   ordenes.push(data.id as string)
   const n = await owner.rpc('next_order_number', { p_restaurant_id: SEDE })
   if (n.error) throw n.error
-  const up = await owner.from('orders').update({ order_number: n.data }).eq('id', data.id)
-  if (up.error) throw up.error
+  // Por psql: desde el Paso 11 (mesas-fase2.sql) la app no puede escribir order_number directo.
+  psql(`update public.orders set order_number = ${Number(n.data)} where id = '${data.id}';`)
   return n.data as number
 }
 
