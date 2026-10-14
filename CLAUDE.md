@@ -599,6 +599,22 @@ Reglas duras traídas de G-Quota — aplican a todo el trabajo en este repo:
   hay que revocar ese permiso explícitamente y concederlo solo a los roles que lo
   necesiten (`authenticated`, `service_role`, etc.).
 
+## Agentes del proyecto (`.claude/agents/`, 2026-10-14)
+
+Tres agentes de SOLO LECTURA. Devuelven hallazgos o listas; no arreglan nada.
+
+| agente | para qué |
+|---|---|
+| `revisor-sql` | cada migración de la rama: precondición por md5, reversa y su md5, R5, grants y RLS, `SECURITY DEFINER` con `search_path`, nada reabierto para `anon`, tripwires |
+| `revisor-cambios` | el diff de la rama contra `origin/develop` frente al pedido que la originó: qué falta, qué sobra, qué rompe R0–R10 |
+| `barrido-r3` | todos los usos de una tabla, función, columna, testid o patrón, con archivo y línea |
+
+- **Antes de cada reporte de rama:** `revisor-cambios` siempre y, si la rama trae SQL, `revisor-sql`.
+  El reporte dice qué encontraron y cómo se resolvió cada hallazgo (o por qué no).
+- 🔴 **Ningún agente corre Playwright, ni `pnpm e2e:preparar`, ni aplica SQL:** la base local es UNA
+  sola. Las pruebas las corre la sesión principal, de a una. `revisor-sql` puede leer la base solo
+  con `PGOPTIONS='-c default_transaction_read_only=on'` (el servidor rechaza cualquier escritura).
+
 ## Variables de entorno requeridas
 VITE_GVENTO_SUPABASE_URL=
 VITE_GVENTO_SUPABASE_ANON_KEY=
