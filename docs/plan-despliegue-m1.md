@@ -1373,12 +1373,15 @@ devolverían `register_sale_void` a la versión sin el camino compartido, en sil
 - **Depende de:** Paso 9 aplicado y verificado. **El orden importa:** este frontend llama a
   `close_table_sale`, `quitar_item_mesa`, `cerrar_mesa_sin_consumo` y `eliminar_mesa`; sin el
   Paso 9, cobrar una mesa falla ("function does not exist") y la mesa queda abierta.
-- **Qué lleva:** `feat/mesas-servidor` → `develop`, por **fast-forward** (la rama ya contiene A):
+- **Qué lleva:** `feat/mesas-servidor` → `develop`, por **fast-forward**. Rebasada el 2026-10-13
+  encima de `feat/a-permisos` (`d0a57ce`); conserva los arreglos del hotfix combinado (la relectura
+  antes de cobrar, cerrar o agregar; mesas pegadas; varias cuentas vivas) y sus tests:
   ```bash
   git fetch origin
   git checkout develop
-  git merge-base --is-ancestor develop feat/mesas-servidor && echo FF   # tiene que decir FF; si no, avísame
-  git merge --ff-only feat/mesas-servidor
+  git log -1 --format='%h' develop                                        # d0a57ce (A ya publicado)
+  git merge-base --is-ancestor develop origin/feat/mesas-servidor && echo FF   # tiene que decir FF; si no, avísame
+  git merge --ff-only origin/feat/mesas-servidor
   ```
 - **Lo que cambia en pantalla:**
   - **Cobrar una mesa:** el mismo modal, pero todo va en una sola llamada al servidor. Si la mesa
