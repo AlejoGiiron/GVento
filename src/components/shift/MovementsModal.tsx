@@ -23,7 +23,9 @@ interface MovementsModalProps {
 }
 
 export function MovementsModal({ onClose }: MovementsModalProps) {
-  const { currentShift, salesSummary, movements, isLoadingMovements, addMovement, isAddingMovement } = useCashShift()
+  const {
+    currentShift, salesSummary, movements, abonoMovementIds, isLoadingMovements, addMovement, isAddingMovement,
+  } = useCashShift()
   const { config } = useRestaurantConfig()
 
   const [type, setType] = useState<'in' | 'out'>('in')
@@ -338,7 +340,16 @@ export function MovementsModal({ onClose }: MovementsModalProps) {
                         : <ArrowUpRight size={14} color="#dc2626" />
                       }
                       <div>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: '#0f172a' }}>{m.reason}</div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: '#0f172a' }}>
+                          {m.reason}
+                          {/* Un abono de fiado en efectivo entra a la caja, pero no es un ingreso manual
+                              (vínculo debt_payments.cash_movement_id, no el texto del motivo). */}
+                          {abonoMovementIds.has(m.id) && (
+                            <span data-testid="movement-abono" style={{ marginLeft: 6, padding: '1px 6px', borderRadius: 5, background: '#ede9fe', color: '#5b21b6', fontSize: 10.5, fontWeight: 600 }}>
+                              Abono de fiado
+                            </span>
+                          )}
+                        </div>
                         <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 1 }}>
                           {formatTime(m.created_at)}
                         </div>

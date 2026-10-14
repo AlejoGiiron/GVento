@@ -172,3 +172,91 @@ test.describe('Arqueo con abonos de fiado', () => {
     expect(metodos(turno).methods.nequi).toMatchObject({ expected: 11000, difference: 0 })
   })
 })
+
+// ── Abonos FUERA de las ventas (fix/abonos-fuera-de-ventas, 2026-10-13) ──────────────────
+// Antes: el detalle y el comprobante derivaban las "ventas" del esperado, que desde
+// arqueo-abonos.sql incluye los abonos ("Nequi $5.000 · 0 vta(s)"), y el abono en efectivo
+// salía como "Ingresos" / "Ingresos manuales". El esperado del arqueo NO cambia.
+test.describe('Abonos fuera de las ventas: cierre, comprobante y detalle del turno', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      ;(window as unknown as { __arqueoPrinted: string | null }).__arqueoPrinted = null
+      window.print = () => {
+        ;(window as unknown as { __arqueoPrinted: string | null }).__arqueoPrinted =
+          document.getElementById('gvento-cash-report-content')?.innerHTML ?? null
+      }
+    })
+  })
+
+  test('venta Nequi 8.000 + abono Nequi 5.000 + abono efectivo 3.000 + ingreso manual 2.000', async ({ page }) => {
+    test.setTimeout(90_000)
+    await sinTurno()
+    const APERTURA = 60_000 + Math.floor(Math.random() * 9_000)    // única: localiza la fila del historial
+    const { data: t, error } = await owner.from('cash_shifts')
+      .insert({ restaurant_id: SEDE, opened_by: OWNER_ID, opening_amount: APERTURA }).select('id').single()
+    if (error) throw error
+    const turno = t!.id as string
+    await ventaNequi()
+    const orden = await fiado(20_000)
+    expect((await abonar(orden, 5_000, 'nequi')).error).toBeNull()
+    expect((await abonar(orden, 3_000, 'cash')).error).toBeNull()
+    const manual = await owner.from('cash_movements')
+      .insert({ shift_id: turno, restaurant_id: SEDE, type: 'in', amount: 2_000, reason: 'E2E ingreso manual', created_by: OWNER_ID })
+    expect(manual.error).toBeNull()
+
+    await login(page, ownerCreds())
+
+    // ── Movimientos del turno abierto: la fila del abono dice que es un abono; la manual, no.
+    await page.getByRole('button', { name: 'Movimientos' }).click()
+    await expect(page.getByText('Movimientos manuales', { exact: true })).toBeVisible()
+    const items = page.getByTestId('movement-item')
+    await expect(items.filter({ hasText: 'Abono de' }).getByTestId('movement-abono')).toHaveText('Abono de fiado')
+    await expect(items.filter({ hasText: 'E2E ingreso manual' }).getByTestId('movement-abono')).toHaveCount(0)
+    await page.getByTestId('movements-close').click()
+
+    // ── Cierre en vivo: los ingresos manuales sin el abono; el esperado de efectivo, con todo.
+    await page.getByRole('button', { name: 'Cerrar turno', exact: true }).first().click()
+    await expect(page.getByText('Cerrar turno de caja')).toBeVisible()
+    await expect(page.getByTestId('shift-ingresos-manuales')).toHaveText(/\$\s?2\.000/)
+    await expect(page.getByTestId('shift-abonos-efectivo')).toHaveText(/\$\s?3\.000/)
+    await expect(page.getByTestId('shift-sales-nequi')).toHaveText(/\$\s?8\.000/)
+    const esperadoEfectivo = APERTURA + 5_000
+    await page.getByTestId('close-shift-declared').fill(String(esperadoEfectivo))
+    await page.getByTestId('pay-declared-nequi').fill('13000')
+    await page.getByRole('button', { name: 'Confirmar cierre' }).click()
+    await expect(page.getByText('Sin turno')).toBeVisible({ timeout: 15_000 })
+    expect(metodos(turno).methods.nequi).toMatchObject({ expected: 13_000, difference: 0 })   // el arqueo no cambia
+
+    // ── Comprobante del cierre: ventas sin abonos, abonos aparte, ingresos separados.
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __arqueoPrinted: string | null }).__arqueoPrinted),
+      { timeout: 10_000 }).not.toBeNull()
+    const html = (await page.evaluate(() => (window as unknown as { __arqueoPrinted: string | null }).__arqueoPrinted))!
+    const linea = (etiqueta: string) =>
+      // innerHTML serializa el espacio duro de Intl.NumberFormat como &nbsp;
+      html.match(new RegExp(`<span>${etiqueta}</span><span[^>]*>([^<]*)</span>`))?.[1].replace(/&nbsp;|\s+/g, ' ').replace(/ +/g, ' ').trim()
+    expect(linea('Total ventas')).toMatch(/^\$ 8\.000 · 1 vta\(s\)$/)
+    expect(html).toContain('ABONOS DE FIADO')
+    expect(linea('Total abonos')).toMatch(/^\$ 8\.000$/)
+    expect(linea('Ingresos manuales')).toMatch(/^\+\$ 2\.000$/)
+    expect(linea('Abonos en efectivo')).toMatch(/^\+\$ 3\.000$/)
+
+    // ── Detalle del turno en el historial: lo mismo que el papel.
+    await page.goto('/historial-turnos')
+    const row = page.getByTestId('shift-history-row')
+      .filter({ has: page.getByTestId('shift-opening').filter({ hasText: APERTURA.toLocaleString('es-CO') }) })
+    await expect(row).toBeVisible({ timeout: 15_000 })
+    await row.getByTestId('shift-detail-btn').click()
+    const modal = page.getByTestId('shift-detail-modal')
+    await expect(modal.getByTestId('detail-sales-nequi')).toHaveText(/\$\s?8\.000/)
+    await expect(modal.getByTestId('detail-sales-total')).toContainText(/\$\s?8\.000/)
+    await expect(modal.getByTestId('detail-abonos-nequi')).toHaveText(/\$\s?5\.000/)
+    await expect(modal.getByTestId('detail-abonos-cash')).toHaveText(/\$\s?3\.000/)
+    await expect(modal.getByTestId('detail-abonos-total')).toHaveText(/\$\s?8\.000/)
+    await expect(modal.getByTestId('detail-mov-in')).toHaveText(/\$\s?2\.000/)
+    await expect(modal.getByTestId('detail-mov-abonos')).toHaveText(/\$\s?3\.000/)
+    await expect(modal.getByTestId('detail-arqueo-nequi')).toContainText(/\$\s?13\.000/)    // esperado congelado
+
+    // Contraste en el mismo detalle: un método sin abonos no aparece en la sección.
+    await expect(modal.getByTestId('detail-abonos-card')).toHaveCount(0)
+  })
+})

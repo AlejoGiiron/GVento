@@ -72,7 +72,7 @@ export function ShiftHistoryPage() {
   // consultar sin reimprimir. El que se deshabilita sin snapshot es el botón de
   // reimprimir, adentro.
   const [detalle, setDetalle] = useState<
-    { row: ClosedShiftRow; movements: { in: number; out: number } } | null
+    { row: ClosedShiftRow; movements: { in: number; out: number; abonosEfectivo: number } } | null
   >(null)
 
   const handleVerDetalle = async (row: ClosedShiftRow) => {

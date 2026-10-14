@@ -3,7 +3,7 @@ import { X, DollarSign, TrendingUp, TrendingDown, Minus, AlertTriangle, Bike } f
 import { useCashShift } from '@/hooks/useCashShift'
 import { useDeliveryCount } from '@/hooks/useDeliveryCount'
 import { useRestaurantConfig } from '@/hooks/useRestaurantConfig'
-import { calcShiftBalance, esperadoMetodo } from '@/lib/shiftCalc'
+import { calcShiftBalance, esperadoMetodo, separarMovimientos } from '@/lib/shiftCalc'
 import { printCashReport, buildCashReportData } from '@/lib/printer'
 
 const formatCOP = (n: number) =>
@@ -29,7 +29,9 @@ interface CloseShiftModalProps {
 }
 
 export function CloseShiftModal({ onClose }: CloseShiftModalProps) {
-  const { currentShift, salesSummary, abonosSummary, movements, vouchersTotal, closeShift, isClosingShift } = useCashShift()
+  const {
+    currentShift, salesSummary, abonosSummary, movements, abonoMovementIds, vouchersTotal, closeShift, isClosingShift,
+  } = useCashShift()
   const { restaurant } = useRestaurantConfig()
   // Deliveries sin entregar (pending/preparing/ready) de la sede. MISMO hook que
   // el badge del sidebar: un segundo conteo escrito acá sería una copia que se
@@ -45,8 +47,11 @@ export function CloseShiftModal({ onClose }: CloseShiftModalProps) {
   const declared = parseInt(rawAmount.replace(/\D/g, ''), 10) || 0
 
   const cashSales = salesSummary?.cash ?? 0
-  const movementsIn = movements.filter(m => m.type === 'in').reduce((s, m) => s + m.amount, 0)
-  const movementsOut = movements.filter(m => m.type === 'out').reduce((s, m) => s + m.amount, 0)
+  // El esperado usa TODOS los ingresos (los abonos en efectivo son plata en la caja); para
+  // mostrarlos, los abonos van aparte de los ingresos manuales.
+  const {
+    ingresos: movementsIn, ingresosManuales, abonosEfectivo, egresos: movementsOut,
+  } = separarMovimientos(movements, abonoMovementIds)
 
   const { expectedCash, difference, isOverdraft } = calcShiftBalance({
     openingAmount: currentShift?.opening_amount ?? 0,
@@ -81,7 +86,9 @@ export function CloseShiftModal({ onClose }: CloseShiftModalProps) {
     // estar vieja (otro dispositivo, red lenta — medido 2026-09-21).
     const declaredBy = Object.fromEntries(otherRows.map((r) => [r.method, r.declared])) as Record<OtherMethod, number>
     try {
-      const { fila: closedRow, movementsIn: inServidor, movementsOut: outServidor } = await closeShift({
+      const {
+        fila: closedRow, movementsIn: inServidor, movementsOut: outServidor, abonosEfectivo: abonosServidor,
+      } = await closeShift({
         declarado: { cash: declared, ...declaredBy },
         comment,
       })
@@ -96,6 +103,7 @@ export function CloseShiftModal({ onClose }: CloseShiftModalProps) {
           // decir lo mismo que el arqueo congelado.
           movementsIn: inServidor,
           movementsOut: outServidor,
+          abonosEfectivo: abonosServidor,
         }))
       }
       onClose()
@@ -214,10 +222,16 @@ export function CloseShiftModal({ onClose }: CloseShiftModalProps) {
                 <span style={{ color: '#64748b' }}>Ventas en efectivo</span>
                 <span style={{ fontFamily: 'monospace' }}>+ {formatCOP(cashSales)}</span>
               </div>
-              {movementsIn > 0 && (
+              {ingresosManuales > 0 && (
                 <div style={{ ...rowStyle, borderBottom: '1px solid #f1f5f9' }}>
                   <span style={{ color: '#64748b' }}>Ingresos manuales</span>
-                  <span style={{ fontFamily: 'monospace', color: '#059669' }}>+ {formatCOP(movementsIn)}</span>
+                  <span data-testid="shift-ingresos-manuales" style={{ fontFamily: 'monospace', color: '#059669' }}>+ {formatCOP(ingresosManuales)}</span>
+                </div>
+              )}
+              {abonosEfectivo > 0 && (
+                <div style={{ ...rowStyle, borderBottom: '1px solid #f1f5f9' }}>
+                  <span style={{ color: '#64748b' }}>Abonos en efectivo</span>
+                  <span data-testid="shift-abonos-efectivo" style={{ fontFamily: 'monospace', color: '#059669' }}>+ {formatCOP(abonosEfectivo)}</span>
                 </div>
               )}
               {movementsOut > 0 && (

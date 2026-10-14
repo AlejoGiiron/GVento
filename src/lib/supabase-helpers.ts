@@ -2,6 +2,7 @@ import { supabase } from './supabase'
 import { captureIssue } from './sentry'
 import type { OrdenFresca } from './mesaFresca'
 import type { Enums, Json, Tables, TablesInsert, TablesUpdate } from '@/types/database.types'
+import { separarMovimientos } from '@/lib/shiftCalc'
 
 // --- Profiles ---
 
@@ -846,16 +847,34 @@ export const getCashMovements = (shiftId: string) =>
     .eq('shift_id', shiftId)
     .order('created_at', { ascending: false })
 
-// Totales de ingresos/egresos de un turno (para reimprimir su arqueo). Los
-// cash_movements persisten por shift_id → re-leíbles tras el cierre sin snapshot.
-export const getShiftMovementTotals = async (shiftId: string): Promise<{ in: number; out: number }> => {
+/**
+ * Cuáles de estos movimientos de caja son el ingreso de un abono de fiado en efectivo:
+ * los que tienen un debt_payments.cash_movement_id apuntándoles (lo ponen las funciones
+ * del abono). Se identifica por el VÍNCULO, no por el texto del motivo ("Abono de…").
+ */
+export async function getAbonoMovementIds(movementIds: string[]): Promise<Set<string>> {
+  if (movementIds.length === 0) return new Set()
+  const { data, error } = await supabase
+    .from('debt_payments')
+    .select('cash_movement_id')
+    .in('cash_movement_id', movementIds)
+  if (error) throw error
+  return new Set((data ?? []).map((d) => d.cash_movement_id).filter((x): x is string => !!x))
+}
+
+// Totales de ingresos/egresos de un turno (para el detalle y para reimprimir su arqueo).
+// Los cash_movements persisten por shift_id → re-leíbles tras el cierre sin snapshot.
+// `in` es el total (el que usa el esperado); `abonosEfectivo` es la parte de `in` que son
+// abonos de fiado en efectivo, para mostrarlos aparte de los ingresos manuales.
+export const getShiftMovementTotals = async (
+  shiftId: string,
+): Promise<{ in: number; out: number; abonosEfectivo: number }> => {
   const { data, error } = await getCashMovements(shiftId)
   if (error) throw error
   const rows = data ?? []
-  return {
-    in: rows.filter((m) => m.type === 'in').reduce((s, m) => s + m.amount, 0),
-    out: rows.filter((m) => m.type === 'out').reduce((s, m) => s + m.amount, 0),
-  }
+  const ids = await getAbonoMovementIds(rows.filter((m) => m.type === 'in').map((m) => m.id))
+  const t = separarMovimientos(rows, ids)
+  return { in: t.ingresos, out: t.egresos, abonosEfectivo: t.abonosEfectivo }
 }
 
 export const createCashMovement = (movement: TablesInsert<'cash_movements'>) =>
