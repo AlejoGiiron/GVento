@@ -385,6 +385,20 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    nueva a otra columna compila y falla en prod con 42501. Antes de agregar una:
    `node scripts/escrituras-directas.mjs`, y si de verdad hace falta, un SQL NUEVO con el grant.
 
+12. **Configuración del portal de Pedidos en línea — 2 contratos (agregado 2026-10-13, P1).**
+   (a) Las claves de `actualizar_portal` (`c_claves` en `supabase/portal-config.sql`) y
+   `CLAVES_PORTAL` en `src/lib/portal.ts`, atada por el compilador al tipo `PortalCambios`; lo vigila
+   `tests/portal-config.spec.ts` ("contrato R1"), que escribe cada clave por la RPC. Una clave nueva =
+   el tipo, la lista y el SQL (archivo NUEVO, R5) en la misma pasada.
+   (b) El formato del link: el CHECK `portal_sedes_slug_formato` (y el regex de
+   `portal_slug_disponible`) contra `RE_SLUG` en `src/lib/portal.ts`. Si divergen, la pantalla dice
+   "Disponible" a un link que el servidor rechaza, o al revés. Lo prueban los dos lados por separado
+   (`src/lib/portal.test.ts` y el test "link" del spec) con los mismos casos; nada los ata.
+   🔴 **"¿Recibe pedidos ahora?" NO es un contrato de dos lados, a propósito:** lo decide SOLO
+   `portal_estado` en el servidor (horario en Bogotá, turno, pausa, faltantes). La pantalla muestra
+   el motivo que devuelve; nadie lo recalcula en el navegador. El portal de P2 tiene que leer la
+   misma función, no copiarla.
+
 → **Evidencia:** [`docs/BITACORA.md`](docs/BITACORA.md) → *"FASE 1 — estado de suscripción"*
 (el aviso a G-Centro) · el hallazgo del onboarding está en el inventario de arriba · el caso de
 `shift-reprint` está en el commit `fix(test): arqueo.spec buscaba shift-reprint en la fila`.

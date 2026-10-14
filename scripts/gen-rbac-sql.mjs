@@ -73,7 +73,9 @@ if (!ALL_PERMISSION_KEYS.length) errores.push('El catálogo quedó vacío.')
 const dup = ALL_PERMISSION_KEYS.filter((k, i) => ALL_PERMISSION_KEYS.indexOf(k) !== i)
 if (dup.length) errores.push('Claves duplicadas en el catálogo: ' + dup.join(', '))
 
-const malFormadas = ALL_PERMISSION_KEYS.filter((k) => !/^[a-z]+\.[a-z]+$/.test(k))
+// `_` solo entre letras (pedidos_online.gestionar, 2026-10-13): sigue siendo seguro como literal
+// SQL, clave jsonb y data-testid; lo que se prohíbe es todo lo demás.
+const malFormadas = ALL_PERMISSION_KEYS.filter((k) => !/^[a-z]+(_[a-z]+)*\.[a-z]+$/.test(k))
 if (malFormadas.length) errores.push('Claves con formato inválido: ' + malFormadas.join(', '))
 
 // Un rol no puede pedir un permiso que no existe: sería un permiso muerto sembrado

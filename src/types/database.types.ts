@@ -1556,6 +1556,43 @@ export type Database = {
         Args: { p_cambios: Json }
         Returns: Json
       }
+      // Pedidos en línea P1 (supabase/portal-config.sql), escritas a mano (R1 #3).
+      portal_config: {
+        Args: Record<PropertyKey, never>
+        Returns: Json
+      }
+      portal_estado: {
+        Args: { p_ahora?: string }
+        Returns: Json
+      }
+      portal_slug_disponible: {
+        Args: { p_slug: string }
+        Returns: boolean
+      }
+      actualizar_portal: {
+        Args: { p_cambios: Json }
+        Returns: Json
+      }
+      pausar_pedidos_online: {
+        Args: { p_pausar: boolean }
+        Returns: Json
+      }
+      portal_productos_lista: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          product_id: string
+          nombre: string
+          categoria: string | null
+          precio_local: number
+          precio_domicilio: number | null
+          publicado: boolean
+          agotado: boolean
+        }[]
+      }
+      guardar_portal_productos: {
+        Args: { p_cambios: Json }
+        Returns: number
+      }
       register_pos_sale: {
         Args: { p_items: Json; p_order: Json; p_payments?: Json; p_sale_id: string }
         Returns: Json

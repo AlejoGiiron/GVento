@@ -18,12 +18,13 @@
 -- generada se edita a mano igual de fácil que una escrita a mano. Los seeds
 -- (lab-seed, onboard-org, onboard-org-paso1) LLAMAN a esta función. Ver R1.
 --
--- CATÁLOGO VIVO (23 permisos):
+-- CATÁLOGO VIVO (24 permisos):
 --   POS             pos.vender, pos.descuento, pos.anular
 --   Caja            caja.abrir, caja.cerrar, caja.movimientos
 --   Mesas           mesas.gestionar, mesas.cobrar
 --   Cocina          cocina.acceder
 --   Delivery        delivery.gestionar
+--   Pedidos en línea pedidos_online.gestionar
 --   Productos       productos.ver, productos.editar
 --   Compras         compras.gestionar
 --   Fiado           fiado.gestionar
@@ -33,7 +34,7 @@
 --
 -- POLÍTICA DE ROLES:
 --   owner    1 comodín "*" — hereda todo, presente y futuro
---   admin   23 permisos
+--   admin   24 permisos
 --   cajero  10 permisos
 --   mozo     4 permisos
 --
@@ -73,10 +74,11 @@ begin
     (p_org, 'admin', true, '[
       "pos.vender","pos.descuento","pos.anular","caja.abrir","caja.cerrar",
       "caja.movimientos","mesas.gestionar","mesas.cobrar","cocina.acceder",
-      "delivery.gestionar","productos.ver","productos.editar",
-      "compras.gestionar","fiado.gestionar","ventas.historial","ventas.anular",
-      "reportes.financiero","reportes.stock","reportes.consolidado",
-      "config.acceder","usuarios.gestionar","sedes.gestionar","roles.gestionar"
+      "delivery.gestionar","pedidos_online.gestionar","productos.ver",
+      "productos.editar","compras.gestionar","fiado.gestionar",
+      "ventas.historial","ventas.anular","reportes.financiero","reportes.stock",
+      "reportes.consolidado","config.acceder","usuarios.gestionar",
+      "sedes.gestionar","roles.gestionar"
     ]'::jsonb),
     (p_org, 'cajero', true, '[
       "pos.vender","pos.descuento","pos.anular","caja.abrir","caja.cerrar",
@@ -102,7 +104,7 @@ commit;
 -- ============================================================
 -- Esperado: 4 filas por organización, con estos tamaños:
 --   owner   → 1
---   admin   → 23
+--   admin   → 24
 --   cajero  → 10
 --   mozo    → 4
 --

@@ -62,6 +62,20 @@ const COLUMNAS_DEL_ESQUEMA: ColumnaEsquema[] = [
   { tabla: 'restaurants', columna: 'slug', ejemplo: 'salchimelo-norte' },
   { tabla: 'restaurants', columna: 'kitchen_pin', ejemplo: 1234 },
   { tabla: 'restaurants', columna: 'nequi_qr_url', ejemplo: 'https://x.co/qr.png' },
+  // ── portal_sedes / portal_productos (portal-config.sql, Pedidos en línea P1). La ubicación del
+  // local y la zona describen dónde está y hasta dónde llega un negocio: no salen.
+  { tabla: 'portal_sedes', columna: 'lat', ejemplo: 4.711234 },
+  { tabla: 'portal_sedes', columna: 'lng', ejemplo: -74.072092 },
+  { tabla: 'portal_sedes', columna: 'zona_poligono', ejemplo: [[4.7101, -74.0711], [4.7202, -74.0612], [4.7003, -74.0513]] },
+  { tabla: 'portal_sedes', columna: 'zona_radio_m', ejemplo: 3500 },
+  { tabla: 'portal_sedes', columna: 'envio_fijo', ejemplo: 4000 },
+  { tabla: 'portal_sedes', columna: 'envio_tramos', ejemplo: 'hasta 2 km 3000, más de 2 km 6000' },
+  { tabla: 'portal_sedes', columna: 'pedido_minimo', ejemplo: 15000 },
+  { tabla: 'portal_sedes', columna: 'horario', ejemplo: 'miércoles 17:00 a 23:30' },
+  { tabla: 'portal_sedes', columna: 'color', ejemplo: '#c2410c' },
+  { tabla: 'portal_sedes', columna: 'tiempo_min', ejemplo: 30 },
+  { tabla: 'portal_sedes', columna: 'tiempo_max', ejemplo: 45 },
+  { tabla: 'portal_productos', columna: 'precio_domicilio', ejemplo: 10000 },
 
   // ── profiles / roles (schema.sql, config-profile-active.sql)
   { tabla: 'profiles', columna: 'email', ejemplo: 'cajero@salchimelo.co' },

@@ -47,7 +47,9 @@ test.describe('Roles y permisos — editables (menos owner)', () => {
     // que no se podía conceder desde esta misma pantalla. Este número clavado es el
     // único tripwire del repo sobre el tamaño del catálogo: si se pone rojo, mirá QUÉ
     // permiso cambió antes de tocar el número.
-    expect(ALL_PERMISSION_KEYS.length).toBe(23)
+    // 23 → 24 el 2026-10-13: entró `pedidos_online.gestionar` (Pedidos en línea, P1;
+    // supabase/portal-config.sql lo exige en sus funciones).
+    expect(ALL_PERMISSION_KEYS.length).toBe(24)
 
     // Los 3 que faltaban en el catálogo viejo ahora están.
     await expect(page.getByTestId('perm-compras.gestionar')).toBeVisible()

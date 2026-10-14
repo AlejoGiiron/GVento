@@ -105,6 +105,7 @@ const ORDEN = [
   'anon-sin-escritura.sql',             // P0.2: anon (sin sesión) no escribe en ninguna tabla de public
   'mesas-una-cuenta.sql',               // una sola cuenta viva por mesa (índice) + abrir_mesa en una transacción
   'mesas-fase2.sql',                    // Paso 11: sin escrituras directas de cobro, ítems ni mesas (authenticated)
+  'portal-config.sql',                  // Pedidos en línea P1: configuración del portal y productos publicados
 ]
 
 // ── QUIÉN GANA cuando una función está definida en más de un .sql ─────────────

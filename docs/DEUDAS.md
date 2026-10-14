@@ -132,6 +132,23 @@ con origen externo. No construir — solo no bloquear.
 
 ## Pendientes de verificar / deuda conocida
 
+### Pedidos en línea P1: lo que quedó para después (anotado 2026-10-13)
+
+- **`slug` sigue en la allowlist de `update_restaurant_config`** (`restaurant-config-rpc.sql` y
+  `CLAVES_CONFIG`, R1 #7). Desde P1 la pantalla ya no lo escribe: el "Slug público" de Restaurante
+  se quitó y su valor (`config.slug`) solo se usa como sugerencia al crear el portal. Sacarlo de los
+  dos lados va en un SQL posterior (archivo nuevo, R5), con `tests/config-merge.spec.ts`.
+  Para ver qué sedes lo tienen: consulta 3 de `supabase/diag/portal-config-preflight.sql`.
+- **Los admin de las organizaciones ya creadas NO tienen `pedidos_online.gestionar`.** P1 no
+  reconcilia roles: lo tiene quien tiene el comodín `'*'` (en Salchimelo, el owner `7f697c91…`, que
+  es el único usuario activo; decidido 2026-10-13). Un admin lo recibe desde Roles y permisos, o con
+  una migración de UNIÓN por UUID de organización.
+- **Mapa y geocodificación solo al configurar:** Leaflet con mapas de OpenStreetMap y Nominatim (un
+  botón, una consulta). Su política de uso no aguanta el tráfico de clientes: el mapa del portal
+  (P2) se decide aparte.
+- **El horario guarda varias franjas por día, el editor sí las maneja (hasta 3); el portal (P2)
+  tiene que leerlas de `portal_estado`, no recalcularlas** (R1 #12).
+
 ### 🔴 Una mesa que tuvo ventas NO se puede borrar — y TablesPage deja intentarlo (confirmado 2026-09-30)
 
 **Precondición de M2** (varios celulares en mesas). No se construye ahora.

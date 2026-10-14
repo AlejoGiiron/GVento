@@ -25,11 +25,15 @@ import {
   Puzzle,
   Package,
   Smartphone,
+  Globe,
+  ShoppingBag,
   type LucideIcon,
 } from 'lucide-react'
 import { useRestaurantConfig } from '@/hooks/useRestaurantConfig'
 import { rolLegacyDeRol } from '@/lib/rolLegacy'
 import { SeccionPosMovil } from '@/components/config/SeccionPosMovil'
+import { SeccionPedidosOnline } from '@/components/config/SeccionPedidosOnline'
+import { SeccionProductosPortal } from '@/components/config/SeccionProductosPortal'
 import { useUsers } from '@/hooks/useUsers'
 import { useAuth } from '@/hooks/useAuth'
 import { usePermissions } from '@/hooks/usePermissions'
@@ -53,6 +57,7 @@ import type { Tables } from '@/types/database.types'
 // ─── Constants ────────────────────────────────────────────────────
 
 type SectionId = 'restaurante' | 'usuarios' | 'sedes' | 'roles' | 'extras' | 'caja' | 'cocina' | 'delivery' | 'notificaciones' | 'pos_movil'
+  | 'pedidos_online' | 'portal_productos'
 
 const SECTIONS: { id: SectionId; label: string; icon: LucideIcon; permission?: string }[] = [
   { id: 'restaurante', label: 'Restaurante', icon: Building2 },
@@ -65,7 +70,13 @@ const SECTIONS: { id: SectionId; label: string; icon: LucideIcon; permission?: s
   { id: 'delivery', label: 'Delivery', icon: Truck },
   { id: 'notificaciones', label: 'Notificaciones', icon: Bell },
   { id: 'pos_movil', label: 'POS móvil', icon: Smartphone },
+  // Pedidos en línea (P1): el servidor exige el mismo permiso en cada función (portal-config.sql).
+  { id: 'pedidos_online', label: 'Pedidos en línea', icon: Globe, permission: 'pedidos_online.gestionar' },
+  { id: 'portal_productos', label: 'Productos en el portal', icon: ShoppingBag, permission: 'pedidos_online.gestionar' },
 ]
+
+// Secciones con mapa o tablas anchas: el contenido no se limita a 640 px.
+const SECCIONES_ANCHAS: SectionId[] = ['pedidos_online', 'portal_productos']
 
 const DEFAULT_CASH_OUT_REASONS = ['Mercado', 'Domicilio', 'Servicios', 'Otro']
 const DEFAULT_STATIONS = ['Cocina fría', 'Cocina caliente', 'Barra']
@@ -258,14 +269,13 @@ function EditableList({
 // ─── Section 1: Restaurante ───────────────────────────────────────
 
 function SectionRestaurant() {
-  const { restaurant, config, isLoading, updateRestaurant, updateConfig, isSaving } = useRestaurantConfig()
+  const { restaurant, isLoading, updateRestaurant, isSaving } = useRestaurantConfig()
   const { profile } = useAuth()
   const logoInputRef = useRef<HTMLInputElement>(null)
 
   const [name, setName] = useState('')
   const [address, setAddress] = useState('')
   const [phone, setPhone] = useState('')
-  const [slug, setSlug] = useState('')
   const [uploadingLogo, setUploadingLogo] = useState(false)
   const [initialized, setInitialized] = useState(false)
 
@@ -273,7 +283,6 @@ function SectionRestaurant() {
     setName(restaurant.name ?? '')
     setAddress(restaurant.address ?? '')
     setPhone(restaurant.phone ?? '')
-    setSlug((config.slug as string) ?? '')
     setInitialized(true)
   }
 
@@ -289,8 +298,9 @@ function SectionRestaurant() {
   }
 
   const handleSave = async () => {
+    // El "Slug público" que había aquí pasó a ser el link del portal (Configuración › Pedidos en
+    // línea, P1); su valor viejo (config.slug) solo se usa como sugerencia al crear el portal.
     await updateRestaurant({ name, address, phone })
-    await updateConfig({ slug: slug.toLowerCase().replace(/\s+/g, '-') })
   }
 
   return (
@@ -358,14 +368,6 @@ function SectionRestaurant() {
         <div>
           <FieldLabel>Teléfono</FieldLabel>
           <TextInput value={phone} onChange={setPhone} placeholder="601 234 5678" />
-        </div>
-        <div>
-          <FieldLabel>Slug público</FieldLabel>
-          <TextInput
-            value={slug}
-            onChange={v => setSlug(v.toLowerCase().replace(/\s+/g, '-'))}
-            placeholder="mi-restaurante"
-          />
         </div>
       </div>
 
@@ -1914,6 +1916,8 @@ export function ConfigPage() {
     delivery: <SectionDelivery />,
     notificaciones: <SectionNotificaciones />,
     pos_movil: <SeccionPosMovil />,
+    pedidos_online: <SeccionPedidosOnline />,
+    portal_productos: <SeccionProductosPortal />,
   }
 
   return (
@@ -1949,6 +1953,7 @@ export function ConfigPage() {
           return (
             <button
               key={id}
+              data-testid={`config-nav-${id}`}
               onClick={() => setActive(id)}
               style={{
                 display: 'flex',
@@ -1987,7 +1992,7 @@ export function ConfigPage() {
           background: '#fff',
         }}
       >
-        <div style={{ maxWidth: 640 }}>
+        <div style={{ maxWidth: SECCIONES_ANCHAS.includes(active) ? 1180 : 640 }}>
           {SECTION_MAP[active]}
         </div>
       </main>

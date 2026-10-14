@@ -6,7 +6,8 @@ import { cliente, psql } from './helpers/db-local'
 // ============================================================================
 // CADA pantalla que guarda restaurants.config pasa por update_restaurant_config
 // (supabase/restaurant-config-rpc.sql) y lo guardado está en la base:
-// Restaurante (slug), QR de Nequi, Caja, Cocina, Delivery y Notificaciones.
+// QR de Nequi, Caja, Cocina, Delivery y Notificaciones. Restaurante ya NO escribe config: su
+// "Slug público" pasó a ser el link del portal (Pedidos en línea P1, tests/portal-config.spec.ts).
 // El editor de POS móvil está en tests/config-pos-movil.spec.ts.
 //
 // Cada test verifica las tres cosas:
@@ -64,14 +65,20 @@ async function guardar(page: Page) {
   expect((await respuesta).ok(), 'la RPC respondió con error').toBe(true)
 }
 
-test('Restaurante: el slug se guarda por la RPC (el nombre va por columnas, sin config)', async ({ page }) => {
+test('Restaurante: guarda por columnas y ya no toca config (el slug viejo pasó al link del portal)', async ({ page }) => {
   const v = vigilar(page)
+  const slugAntes = clave('slug')
   await abrir(page, 'Restaurante')
-  await page.getByPlaceholder('mi-restaurante').fill('E2E Slug Guardar')
-  await guardar(page)
-  expect(v.rpc).toEqual([['slug']])
+  await expect(page.getByPlaceholder('mi-restaurante')).toHaveCount(0)
+  await expect(page.getByText('Slug público')).toHaveCount(0)
+  const nombre = psql(`select name from public.restaurants where id = '${SEDE}';`)
+  await page.getByTestId('config-restaurant-name').fill(nombre)
+  const patch = page.waitForResponse((r) => r.request().method() === 'PATCH' && r.url().includes('/rest/v1/restaurants'))
+  await page.getByRole('button', { name: 'Guardar', exact: true }).click()
+  expect((await patch).ok(), 'el PATCH de la sede respondió con error').toBe(true)
+  expect(v.rpc, 'Restaurante no debería llamar a update_restaurant_config').toEqual([])
   expect(v.patchConConfig()).toBe(false)
-  expect(clave('slug')).toBe('"e2e-slug-guardar"')
+  expect(clave('slug'), 'config.slug quedó como estaba').toBe(slugAntes)
 })
 
 test('QR de Nequi: subir el archivo guarda nequi_qr_url por la RPC', async ({ page }) => {

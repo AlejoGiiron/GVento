@@ -42,6 +42,11 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
   { module: 'Delivery', perms: [
     { key: 'delivery.gestionar', label: 'Gestionar' },
   ] },
+  // Pedidos en línea (P1, 2026-10-13): configurar el portal y los productos publicados. Pausar
+  // los pedidos también lo puede hacer quien tiene delivery.gestionar (lo decide el servidor).
+  { module: 'Pedidos en línea', perms: [
+    { key: 'pedidos_online.gestionar', label: 'Gestionar' },
+  ] },
   { module: 'Productos', perms: [
     { key: 'productos.ver', label: 'Ver' },
     { key: 'productos.editar', label: 'Editar' },

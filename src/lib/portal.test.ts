@@ -1,0 +1,75 @@
+import { describe, expect, it } from 'vitest'
+import {
+  etiquetaTramo, franjasLegibles, horaLegible, horarioAgrupado, leerPesos, mostrarPesos, normalizarSlug,
+  problemaHorario, problemaTramos, slugValido, textoEstado,
+} from './portal'
+
+describe('link del portal', () => {
+  it('normaliza lo que se escribe: minúsculas, sin tildes ni eñes, espacios a guiones', () => {
+    expect(normalizarSlug('Salchimelo Norte')).toBe('salchimelo-norte')
+    expect(normalizarSlug('  Café Aroma  ')).toBe('cafe-aroma-')
+    expect(normalizarSlug('Piñata & Co.')).toBe('pinata-co-')
+    expect(normalizarSlug('--G10--')).toBe('g10-')
+  })
+  it('el formato es el mismo del CHECK: 3 a 40, sin guion al principio ni al final', () => {
+    expect(['abc', 'salchimelo', 'g-10', 'a'.repeat(40)].map(slugValido)).toEqual([true, true, true, true])
+    expect(['ab', 'a'.repeat(41), '-abc', 'abc-', 'Abc', 'ab c', 'ñam'].map(slugValido))
+      .toEqual([false, false, false, false, false, false, false])
+  })
+})
+
+describe('horario', () => {
+  it('muestra las horas como la pantalla 4', () => {
+    expect(horaLegible('17:00')).toBe('5:00 p. m.')
+    expect(horaLegible('00:00')).toBe('12:00 a. m.')
+    expect(horaLegible('12:30')).toBe('12:30 p. m.')
+    expect(franjasLegibles([])).toBe('Cerrado')
+  })
+  it('agrupa días seguidos con el mismo horario', () => {
+    const h = { '3': [['17:00', '23:30']], '4': [['17:00', '23:30']], '5': [['17:00', '23:30']],
+                '6': [['16:00', '00:00']], '7': [['16:00', '00:00']] } as const
+    expect(horarioAgrupado(h as never)).toEqual([
+      { dias: 'Lunes y martes', horas: 'Cerrado' },
+      { dias: 'Miércoles a viernes', horas: '5:00 p. m. – 11:30 p. m.' },
+      { dias: 'Sábado y domingo', horas: '4:00 p. m. – 12:00 a. m.' },
+    ])
+  })
+  it('avisa lo que el servidor rechazaría (y nada más)', () => {
+    expect(problemaHorario({ '1': [['17:00', '23:00']], '6': [['16:00', '01:00']] })).toBeNull()
+    expect(problemaHorario({ '2': [['17:00', '17:00']] })).toMatch(/Martes/)
+    expect(problemaHorario({ '1': [['5pm', '23:00']] })).toMatch(/HH:MM/)
+    expect(problemaHorario({ '1': [['1:00', '2:00'], ['3:00', '4:00'], ['5:00', '6:00'], ['7:00', '8:00']] } as never)).toMatch(/3 franjas/)
+  })
+})
+
+describe('envío por distancia', () => {
+  const ok = [{ hasta_km: 2, valor: 3000 }, { hasta_km: 4, valor: 4000 }, { hasta_km: null, valor: 6000 }]
+  it('acepta los tramos de la pantalla 4 y los rotula igual', () => {
+    expect(problemaTramos(ok)).toBeNull()
+    expect(ok.map((_, i) => etiquetaTramo(ok, i))).toEqual(['Hasta 2 km', '2 a 4 km', 'Más de 4 km, dentro de la zona'])
+  })
+  it('rechaza km que no crecen, un último tramo con límite o valores fuera de rango', () => {
+    expect(problemaTramos([{ hasta_km: 4, valor: 1 }, { hasta_km: 2, valor: 1 }, { hasta_km: null, valor: 1 }])).toMatch(/menor a mayor/)
+    expect(problemaTramos([{ hasta_km: 2, valor: 1 }, { hasta_km: 5, valor: 1 }])).toMatch(/último tramo/)
+    expect(problemaTramos([{ hasta_km: null, valor: -1 }])).toMatch(/valor/)
+    expect(problemaTramos([])).toMatch(/1 a 10/)
+  })
+})
+
+describe('pesos', () => {
+  it('lee solo dígitos y muestra con puntos de miles', () => {
+    expect(leerPesos('$ 15.000')).toBe(15000)
+    expect(leerPesos('')).toBeNull()
+    expect(mostrarPesos(15000)).toBe('15.000')
+    expect(mostrarPesos(null)).toBe('')
+  })
+})
+
+describe('estado', () => {
+  it('un texto por motivo; el estado lo decide el servidor', () => {
+    expect(textoEstado({ recibe: true, motivo: null, faltantes: [] }).titulo).toBe('Recibiendo pedidos')
+    expect(textoEstado({ recibe: false, motivo: 'incompleto', faltantes: ['el horario', 'la zona de cobertura'] }).detalle)
+      .toBe('Falta: el horario; la zona de cobertura.')
+    expect(textoEstado({ recibe: false, motivo: 'pausado', faltantes: [] }).tono).toBe('pausa')
+  })
+})
