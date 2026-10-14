@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Mis domicilios y ruta</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Outfit:wght@600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#0f172a}a:hover{color:#334155}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #f8fafc; font-family: Manrope, system-ui, sans-serif; color: #0f172a; display: flex; flex-direction: column; overflow: hidden">
+  <header style="background: #0f172a; color: #ffffff; padding: 16px; display: flex; align-items: center; gap: 12px">
+    <svg width="34" height="34" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14.4" fill="#1e293b"/><path d="M18 22L28 42L38 22" fill="none" stroke="#f8fafc" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/><circle cx="47" cy="38.5" r="5.5" fill="#10b981"/></svg>
+    <div style="display: flex; flex-direction: column; gap: 2px; flex-grow: 1">
+      <h1 style="margin: 0; font-size: 18px; font-weight: 800">Mis domicilios</h1>
+      <span style="font-size: 12px; color: #cbd5e1">Jhon R. · Salchimelo · 3 paradas</span>
+    </div>
+  </header>
+
+  <div style="position: relative; height: 210px; background: #e8eef3; flex-shrink: 0; overflow: hidden">
+    <div aria-hidden="true" style="position: absolute; inset: 0; background-image: linear-gradient(90deg, rgba(255,255,255,0.9) 6px, transparent 6px), linear-gradient(rgba(255,255,255,0.9) 6px, transparent 6px); background-size: 74px 52px; background-position: 10px 14px"></div>
+    <svg aria-hidden="true" width="390" height="210" viewBox="0 0 390 210" style="position: absolute; inset: 0">
+      <polyline points="40,170 120,120 200,140 300,70 350,40" fill="none" stroke="#0f172a" stroke-width="4" stroke-dasharray="2 8" stroke-linecap="round"/>
+      <rect x="28" y="158" width="24" height="24" rx="6" fill="#0f172a"/>
+      <circle cx="120" cy="120" r="14" fill="#10b981"/><text x="120" y="125" text-anchor="middle" font-family="Manrope" font-weight="800" font-size="14" fill="#04241a">1</text>
+      <circle cx="300" cy="70" r="14" fill="#0f172a"/><text x="300" y="75" text-anchor="middle" font-family="Manrope" font-weight="800" font-size="14" fill="#ffffff">2</text>
+      <circle cx="350" cy="40" r="14" fill="#0f172a"/><text x="350" y="45" text-anchor="middle" font-family="Manrope" font-weight="800" font-size="14" fill="#ffffff">3</text>
+    </svg>
+    <a href="#" style="position: absolute; left: 12px; right: 12px; bottom: 12px; display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; background: #ffffff; border-radius: 12px; text-decoration: none; font-weight: 800; font-size: 14px; box-shadow: 0 2px 8px rgba(15,23,42,0.15)">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l18-8-8 18-2-8-8-2z"/></svg>
+      Abrir ruta en Google Maps
+    </a>
+  </div>
+
+  <div style="flex-grow: 1; overflow: hidden; padding: 12px; display: flex; flex-direction: column; gap: 10px">
+    <sc-for list="{{paradas}}" as="p" hint-placeholder-count="3">
+      <article style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 8px">
+        <div style="display: flex; align-items: center; gap: 10px">
+          <span style="width: 28px; height: 28px; border-radius: 50%; background: {{p.fondo}}; color: {{p.color}}; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 14px; flex-shrink: 0">{{p.n}}</span>
+          <div style="display: flex; flex-direction: column; gap: 1px; flex-grow: 1; min-width: 0">
+            <strong style="font-size: 15px">{{p.cliente}}</strong>
+            <span style="font-size: 12px; color: #475569">{{p.dir}}</span>
+          </div>
+          <span style="font-size: 11px; font-weight: 800; border-radius: 6px; padding: 3px 7px; background: {{p.pagoFondo}}; color: {{p.pagoColor}}; white-space: nowrap">{{p.pago}}</span>
+        </div>
+        <div style="display: flex; gap: 8px">
+          <a href="#" style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; border-radius: 10px; background: #047857; color: #ffffff; text-decoration: none; font-weight: 700; font-size: 13px">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/></svg>WhatsApp
+          </a>
+          <a href="#" aria-label="Llamar al cliente" style="width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 10px; border: 1px solid #cbd5e1; color: #0f172a">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg>
+          </a>
+          <button type="button" style="flex: 1; min-height: 44px; border-radius: 10px; border: 0; background: #0f172a; color: #ffffff; font: 700 13px Manrope, sans-serif">{{p.accion}}</button>
+        </div>
+      </article>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const pagado = { pagoFondo: '#dbeafe', pagoColor: '#1e3a8a', pago: 'PAGADO' };
+    const cobrar = { pagoFondo: '#fef3c7', pagoColor: '#92400e' };
+    return {
+      paradas: [
+        { n: '1', fondo: '#10b981', color: '#04241a', cliente: 'Laura Gómez', dir: 'Cra. 24 # 9-35, Alameda · reja negra', ...pagado, accion: 'Entregado' },
+        { n: '2', fondo: '#0f172a', color: '#ffffff', cliente: 'Paola R.', dir: 'Calle 9 # 32-10, San Fernando', ...pagado, accion: 'Entregado' },
+        { n: '3', fondo: '#0f172a', color: '#ffffff', cliente: 'Diego S.', dir: 'Av. Roosevelt # 38-55, apto 302', ...cobrar, pago: 'COBRAR $23.000', accion: 'Cobré y entregué' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

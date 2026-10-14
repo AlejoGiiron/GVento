@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Datos de entrega y pago</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Outfit:wght@600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#0f172a}a:hover{color:#334155}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #f8fafc; font-family: Manrope, system-ui, sans-serif; color: #0f172a; display: flex; flex-direction: column; position: relative; overflow: hidden">
+  <header style="background: #ffffff; border-bottom: 1px solid #e2e8f0; padding: 14px 12px; display: flex; align-items: center; gap: 8px">
+    <a href="Main.dc.html" aria-label="Volver al menú" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #0f172a">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+    </a>
+    <h1 style="margin: 0; font-size: 18px; font-weight: 700">Tu pedido · Salchimelo</h1>
+  </header>
+
+  <div style="flex-grow: 1; overflow: hidden; padding: 14px 16px 150px; display: flex; flex-direction: column; gap: 14px">
+    <section style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 8px; font-size: 14px">
+      <div style="display: flex; justify-content: space-between"><span>1 × Promo 2 salchidobles + gaseosa</span><b>$32.000</b></div>
+      <div style="display: flex; justify-content: space-between"><span>1 × Salchidoble para 2</span><b>$16.000</b></div>
+      <a href="Main.dc.html" style="font-size: 13px; font-weight: 600">Editar pedido</a>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 10px">
+      <h2 style="margin: 0; font-size: 15px; font-weight: 700">¿A dónde lo llevamos?</h2>
+      <div style="border-radius: 16px; overflow: hidden; border: 1px solid #e2e8f0; background: #e8eef3; height: 112px; position: relative">
+        <div aria-hidden="true" style="position: absolute; inset: 0; background-image: linear-gradient(90deg, rgba(255,255,255,0.9) 6px, transparent 6px), linear-gradient(rgba(255,255,255,0.9) 6px, transparent 6px); background-size: 74px 52px; background-position: 20px 10px"></div>
+        <div aria-hidden="true" style="position: absolute; left: 50%; top: 42%; transform: translate(-50%, -100%); color: #c2410c">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="currentColor" stroke="#ffffff" stroke-width="1.2"><path d="M12 22s7-6.2 7-12a7 7 0 1 0-14 0c0 5.8 7 12 7 12z"/><circle cx="12" cy="10" r="2.6" fill="#ffffff"/></svg>
+        </div>
+        <span style="position: absolute; left: 10px; bottom: 10px; background: #ffffff; border-radius: 999px; padding: 6px 10px; font-size: 12px; font-weight: 600">Mueve el mapa para ajustar el punto</span>
+      </div>
+      <button type="button" style="display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; border-radius: 12px; border: 1.5px solid #0f172a; background: #ffffff; color: #0f172a; font: 700 14px Manrope, sans-serif">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+        Usar mi ubicación actual
+      </button>
+      <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600">Dirección
+        <input type="text" value="Cra. 24 # 9-35, Alameda" style="min-height: 44px; border: 1px solid #cbd5e1; border-radius: 12px; padding: 0 12px; font: 500 15px Manrope, sans-serif; color: #0f172a">
+      </label>
+      <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600">Indicaciones (opcional)
+        <input type="text" value="Casa esquinera, reja negra" style="min-height: 44px; border: 1px solid #cbd5e1; border-radius: 12px; padding: 0 12px; font: 500 15px Manrope, sans-serif; color: #0f172a">
+      </label>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 10px">
+      <h2 style="margin: 0; font-size: 15px; font-weight: 700">¿Quién lo recibe?</h2>
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+        <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600">Nombre
+          <input type="text" value="Laura Gómez" style="min-height: 44px; border: 1px solid #cbd5e1; border-radius: 12px; padding: 0 12px; font: 500 15px Manrope, sans-serif; color: #0f172a; min-width: 0">
+        </label>
+        <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600">Celular
+          <input type="tel" value="300 123 4567" style="min-height: 44px; border: 1px solid #cbd5e1; border-radius: 12px; padding: 0 12px; font: 500 15px Manrope, sans-serif; color: #0f172a; min-width: 0">
+        </label>
+      </div>
+      <label style="display: flex; gap: 10px; align-items: flex-start; font-size: 12px; color: #475569; line-height: 1.4">
+        <input type="checkbox" checked style="width: 20px; height: 20px; margin: 0; flex-shrink: 0">
+        Acepto que Salchimelo use mis datos para entregar este pedido (política de datos).
+      </label>
+      <label style="display: flex; gap: 10px; align-items: flex-start; font-size: 12px; color: #475569; line-height: 1.4">
+        <input type="checkbox" checked style="width: 20px; height: 20px; margin: 0; flex-shrink: 0">
+        <span><b style="color: #0f172a">Recordar mis datos en este celular</b><br>La próxima vez el formulario sale lleno. Se guardan solo en tu teléfono.</span>
+      </label>
+    </section>
+  </div>
+
+  <div style="position: absolute; left: 0; right: 0; bottom: 0; background: #ffffff; border-top: 1px solid #e2e8f0; padding: 12px 16px 22px; display: flex; flex-direction: column; gap: 8px">
+    <div style="display: flex; justify-content: space-between; font-size: 13px; color: #475569"><span>Productos</span><span>$48.000</span></div>
+    <div style="display: flex; justify-content: space-between; font-size: 13px; color: #475569"><span>Envío · 2,1 km</span><span>$4.000</span></div>
+    <a href="Pago.dc.html" style="display: flex; align-items: center; justify-content: space-between; background: #0f172a; color: #ffffff; text-decoration: none; border-radius: 16px; padding: 14px 16px; min-height: 56px; box-sizing: border-box; font-weight: 700; font-size: 16px">
+      <span>Pagar con Nequi o tu banco</span><span>$52.000</span>
+    </a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

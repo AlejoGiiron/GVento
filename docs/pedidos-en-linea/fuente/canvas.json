@@ -1,0 +1,25 @@
+{
+  "v": 3,
+  "createdOnFiles": {"v": 1, "at": "2026-10-10T20:45:00Z"},
+  "title": "G-Vento · Pedidos en línea",
+  "launch": {"view": "canvas"},
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {"x": 0, "y": 0, "w": 390, "h": 844, "title": "1 · Cliente: menú del negocio"},
+    "Checkout.dc.html": {"x": 470, "y": 0, "w": 390, "h": 844, "title": "2 · Cliente: datos de entrega y pago"},
+    "Seguimiento.dc.html": {"x": 940, "y": 0, "w": 390, "h": 844, "title": "3 · Cliente: seguimiento del pedido"},
+    "FueraDeZona.dc.html": {"x": 1410, "y": 0, "w": 390, "h": 844, "title": "2b · Cliente: dirección fuera de la zona"},
+    "Pago.dc.html": {"x": 1880, "y": 0, "w": 390, "h": 844, "title": "2c · Cliente: pago con Bre-B (llave o QR)"},
+    "Config.dc.html": {"x": 0, "y": 1244, "w": 1280, "h": 1380, "title": "4 · G-Vento: Configuración › Pedidos en línea (con zona)", "expand": "fill"},
+    "Catalogo.dc.html": {"x": 1360, "y": 1244, "w": 1280, "h": 1000, "title": "5 · G-Vento: productos, precios y promociones", "expand": "fill"},
+    "Domicilios.dc.html": {"x": 2720, "y": 1244, "w": 1280, "h": 1000, "title": "6 · G-Vento: Domicilios recibe el pedido", "expand": "fill"},
+    "Ruta.dc.html": {"x": 0, "y": 3024, "w": 390, "h": 844, "title": "7 · Domiciliario: mis domicilios y ruta"}
+  },
+  "order": ["Main.dc.html", "Checkout.dc.html", "Seguimiento.dc.html", "FueraDeZona.dc.html", "Pago.dc.html", "Config.dc.html", "Catalogo.dc.html", "Domicilios.dc.html", "Ruta.dc.html"],
+  "notes": {
+    "fila1": {"x": 0, "y": -300, "text": "Portal del cliente · celular, sin login · pedir.gvento.online/salchimelo", "kind": "title1", "maxW": 2270},
+    "fila2": {"x": 0, "y": 944, "text": "G-Vento · lo que configura y recibe el negocio", "kind": "title1", "maxW": 4000},
+    "fila3": {"x": 0, "y": 2724, "text": "Domiciliario · su usuario en el celular", "kind": "title1", "maxW": 1330}
+  },
+  "designSystems": []
+}

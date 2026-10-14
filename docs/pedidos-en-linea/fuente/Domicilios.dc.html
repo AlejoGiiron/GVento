@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Domicilios: recepción de pedidos en línea</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Outfit:wght@600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#047857}a:hover{color:#065f46}
+</style>
+</helmet>
+<div style="min-height: 1000px; background: #f1f5f9; font-family: Manrope, system-ui, sans-serif; color: #0f172a; display: flex; flex-wrap: wrap">
+  <nav aria-label="Menú principal" style="flex: 1 1 220px; max-width: 240px; background: #0f172a; color: #cbd5e1; padding: 20px 14px; display: flex; flex-direction: column; gap: 4px; box-sizing: border-box">
+    <div style="display: flex; align-items: center; gap: 10px; padding: 0 8px 18px">
+      <svg width="34" height="34" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14.4" fill="#1e293b"/><path d="M18 22L28 42L38 22" fill="none" stroke="#f8fafc" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/><circle cx="47" cy="38.5" r="5.5" fill="#10b981"/></svg>
+      <strong style="color: #ffffff; font-family: Outfit, sans-serif; font-size: 19px">G-Vento</strong>
+    </div>
+    <a href="#" style="color: #cbd5e1; text-decoration: none; padding: 10px; border-radius: 10px; font-size: 14px">Ventas</a>
+    <a href="#" style="color: #cbd5e1; text-decoration: none; padding: 10px; border-radius: 10px; font-size: 14px">Mesas</a>
+    <a href="#" aria-current="page" style="color: #ffffff; background: #1e293b; text-decoration: none; padding: 10px; border-radius: 10px; font-size: 14px; font-weight: 700; display: flex; justify-content: space-between">Domicilios <span style="background: #10b981; color: #04241a; border-radius: 999px; padding: 0 8px; font-size: 12px">1</span></a>
+    <a href="#" style="color: #cbd5e1; text-decoration: none; padding: 10px; border-radius: 10px; font-size: 14px">Cocina</a>
+    <a href="#" style="color: #cbd5e1; text-decoration: none; padding: 10px; border-radius: 10px; font-size: 14px">Inventario</a>
+    <a href="#" style="color: #cbd5e1; text-decoration: none; padding: 10px; border-radius: 10px; font-size: 14px">Reportes</a>
+    <a href="Config.dc.html" style="color: #cbd5e1; text-decoration: none; padding: 10px; border-radius: 10px; font-size: 14px">Configuración</a>
+  </nav>
+
+  <main style="flex: 999 1 560px; min-width: 0; padding: 24px 28px 40px; box-sizing: border-box; display: flex; flex-direction: column; gap: 16px">
+    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px">
+      <h1 style="margin: 0; font-size: 26px; font-weight: 800; flex-grow: 1">Domicilios</h1>
+      <span style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #334155; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 999px; padding: 8px 12px">
+        <span style="width: 8px; height: 8px; border-radius: 50%; background: #10b981"></span>Portal recibiendo pedidos
+      </span>
+      <button type="button" style="min-height: 44px; padding: 0 16px; border-radius: 10px; border: 0; background: #0f172a; color: #ffffff; font: 700 14px Manrope, sans-serif">Nuevo domicilio</button>
+    </div>
+
+    <div role="status" style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; background: #0f172a; color: #ffffff; border-radius: 14px; padding: 14px 16px">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6ee7b7" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg>
+      <span style="flex-grow: 1; font-weight: 700">Nuevo pedido en línea #2618 · Laura Gómez · pagado $52.000</span>
+      <span style="font-size: 13px; color: #cbd5e1">Suena hasta que alguien lo abre</span>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; align-items: start">
+      <section style="background: #e2e8f0; border-radius: 16px; padding: 12px; display: flex; flex-direction: column; gap: 10px">
+        <h2 style="margin: 0; font-size: 14px; font-weight: 800; padding: 2px 4px">En preparación · 2</h2>
+
+        <article style="background: #ffffff; border: 2px solid #10b981; border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 8px">
+          <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center">
+            <span style="font-size: 11px; font-weight: 800; color: #065f46; background: #d1fae5; border-radius: 6px; padding: 3px 7px">EN LÍNEA</span>
+            <span style="font-size: 11px; font-weight: 800; color: #1e3a8a; background: #dbeafe; border-radius: 6px; padding: 3px 7px">PAGADO · FACTUS PAY</span>
+            <span style="margin-left: auto; font-size: 12px; color: #475569">hace 1 min</span>
+          </div>
+          <strong style="font-size: 16px">#2618 · Laura Gómez</strong>
+          <span style="font-size: 13px; color: #334155">1 × Promo 2 salchidobles + gaseosa<br>1 × Salchidoble para 2</span>
+          <span style="font-size: 13px; color: #475569">Cra. 24 # 9-35, Alameda · 2,1 km<br>Casa esquinera, reja negra</span>
+          <div style="display: flex; justify-content: space-between; font-size: 14px; font-weight: 700"><span>Total</span><span>$52.000</span></div>
+          <label style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600">Domiciliario
+            <select style="min-height: 44px; border: 1px solid #cbd5e1; border-radius: 10px; padding: 0 10px; font: 600 14px Manrope, sans-serif; color: #0f172a"><option>Asignar…</option><option>Jhon R.</option><option>Mateo P.</option></select>
+          </label>
+          <div style="display: flex; gap: 8px">
+            <button type="button" style="flex: 1; min-height: 44px; border-radius: 10px; border: 1px solid #cbd5e1; background: #ffffff; font: 700 13px Manrope, sans-serif; color: #0f172a">Imprimir comanda</button>
+            <button type="button" style="flex: 1; min-height: 44px; border-radius: 10px; border: 0; background: #0f172a; color: #ffffff; font: 700 13px Manrope, sans-serif">Listo para salir</button>
+          </div>
+        </article>
+
+        <article style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 6px">
+          <div style="display: flex; gap: 6px; align-items: center">
+            <span style="font-size: 11px; font-weight: 800; color: #334155; background: #f1f5f9; border-radius: 6px; padding: 3px 7px">POR TELÉFONO</span>
+            <span style="font-size: 11px; font-weight: 800; color: #92400e; background: #fef3c7; border-radius: 6px; padding: 3px 7px">CONTRA ENTREGA</span>
+          </div>
+          <strong style="font-size: 15px">#2615 · Carlos M.</strong>
+          <span style="font-size: 13px; color: #475569">Calle 5 # 38-20 · $23.000</span>
+        </article>
+      </section>
+
+      <section style="background: #e2e8f0; border-radius: 16px; padding: 12px; display: flex; flex-direction: column; gap: 10px">
+        <h2 style="margin: 0; font-size: 14px; font-weight: 800; padding: 2px 4px">Listos para salir · 1</h2>
+        <article style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 6px">
+          <div style="display: flex; gap: 6px"><span style="font-size: 11px; font-weight: 800; color: #065f46; background: #d1fae5; border-radius: 6px; padding: 3px 7px">EN LÍNEA</span><span style="font-size: 11px; font-weight: 800; color: #1e3a8a; background: #dbeafe; border-radius: 6px; padding: 3px 7px">PAGADO</span></div>
+          <strong style="font-size: 15px">#2612 · Andrés V.</strong>
+          <span style="font-size: 13px; color: #475569">B/ San Fernando · 3,4 km · Mateo P.</span>
+        </article>
+      </section>
+
+      <section style="background: #e2e8f0; border-radius: 16px; padding: 12px; display: flex; flex-direction: column; gap: 10px">
+        <h2 style="margin: 0; font-size: 14px; font-weight: 800; padding: 2px 4px">En camino · 2</h2>
+        <article style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 6px">
+          <strong style="font-size: 15px">#2609 · Paola R.</strong>
+          <span style="font-size: 13px; color: #475569">Jhon R. · salió 9:12 p. m.</span>
+        </article>
+        <article style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 6px">
+          <strong style="font-size: 15px">#2610 · Diego S.</strong>
+          <span style="font-size: 13px; color: #475569">Jhon R. · misma ruta</span>
+        </article>
+      </section>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

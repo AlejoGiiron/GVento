@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Dirección fuera de la zona de entrega</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Outfit:wght@600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#0f172a}a:hover{color:#334155}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #f8fafc; font-family: Manrope, system-ui, sans-serif; color: #0f172a; display: flex; flex-direction: column; position: relative; overflow: hidden">
+  <header style="background: #ffffff; border-bottom: 1px solid #e2e8f0; padding: 14px 12px; display: flex; align-items: center; gap: 8px">
+    <a href="Main.dc.html" aria-label="Volver al menú" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #0f172a">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+    </a>
+    <h1 style="margin: 0; font-size: 18px; font-weight: 700">Tu pedido · Salchimelo</h1>
+  </header>
+
+  <div style="padding: 14px 16px; display: flex; flex-direction: column; gap: 12px">
+    <h2 style="margin: 0; font-size: 15px; font-weight: 700">¿A dónde lo llevamos?</h2>
+    <div style="border-radius: 16px; overflow: hidden; border: 1px solid #e2e8f0; background: #e8eef3; height: 230px; position: relative">
+      <div aria-hidden="true" style="position: absolute; inset: 0; background-image: linear-gradient(90deg, rgba(255,255,255,0.9) 6px, transparent 6px), linear-gradient(rgba(255,255,255,0.9) 6px, transparent 6px); background-size: 74px 52px; background-position: 20px 10px"></div>
+      <svg role="img" aria-label="La ubicación marcada queda por fuera de la zona de entrega del local" viewBox="0 0 358 230" style="position: absolute; inset: 0; width: 100%; height: 100%">
+        <polygon points="20,20 230,14 300,70 270,120 120,130 30,110" fill="rgba(16,185,129,0.18)" stroke="#047857" stroke-width="2.5" stroke-dasharray="6 5"/>
+        <rect x="140" y="58" width="22" height="22" rx="6" fill="#0f172a"/>
+        <path d="M290 205s16-14 16-27a16 16 0 1 0-32 0c0 13 16 27 16 27z" fill="#b91c1c" stroke="#ffffff" stroke-width="2"/>
+        <circle cx="290" cy="178" r="6" fill="#ffffff"/>
+      </svg>
+      <span style="position: absolute; left: 10px; top: 10px; background: #ffffff; border-radius: 999px; padding: 6px 10px; font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px"><span style="width: 12px; height: 12px; border-radius: 3px; border: 2px dashed #047857"></span>Zona de entrega</span>
+    </div>
+
+    <div role="alert" style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 6px">
+      <strong style="font-size: 15px; color: #991b1b">Todavía no llegamos a esta dirección</strong>
+      <span style="font-size: 13px; color: #7f1d1d; line-height: 1.5">Cra. 1 # 70-15, Floralia queda fuera de la zona de entrega de Salchimelo. No se te cobró nada.</span>
+    </div>
+
+    <button type="button" style="min-height: 48px; border-radius: 12px; border: 1.5px solid #0f172a; background: #ffffff; color: #0f172a; font: 700 14px Manrope, sans-serif">Cambiar la dirección</button>
+    <a href="#" style="display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; border-radius: 12px; background: #047857; color: #ffffff; text-decoration: none; font-weight: 700; font-size: 14px">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/></svg>
+      Preguntarle al local por WhatsApp
+    </a>
+  </div>
+
+  <div style="position: absolute; left: 0; right: 0; bottom: 0; background: #ffffff; border-top: 1px solid #e2e8f0; padding: 12px 16px 22px">
+    <button type="button" disabled style="width: 100%; display: flex; align-items: center; justify-content: space-between; background: #e2e8f0; color: #475569; border: 0; border-radius: 16px; padding: 14px 16px; min-height: 56px; font: 700 16px Manrope, sans-serif">
+      <span>Pagar con Nequi o tu banco</span><span>$48.000</span>
+    </button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

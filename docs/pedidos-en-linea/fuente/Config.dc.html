@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Configuración de pedidos en línea</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Outfit:wght@600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#047857}a:hover{color:#065f46}
+</style>
+</helmet>
+<div style="min-height: 1380px; background: #f1f5f9; font-family: Manrope, system-ui, sans-serif; color: #0f172a; display: flex; flex-wrap: wrap">
+  <nav aria-label="Menú principal" style="flex: 1 1 220px; max-width: 240px; background: #0f172a; color: #cbd5e1; padding: 20px 14px; display: flex; flex-direction: column; gap: 4px; box-sizing: border-box">
+    <div style="display: flex; align-items: center; gap: 10px; padding: 0 8px 18px">
+      <svg width="34" height="34" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14.4" fill="#1e293b"/><path d="M18 22L28 42L38 22" fill="none" stroke="#f8fafc" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/><circle cx="47" cy="38.5" r="5.5" fill="#10b981"/></svg>
+      <strong style="color: #ffffff; font-family: Outfit, sans-serif; font-size: 19px">G-Vento</strong>
+    </div>
+    <a href="#" style="color: #cbd5e1; text-decoration: none; padding: 10px; border-radius: 10px; font-size: 14px">Ventas</a>
+    <a href="#" style="color: #cbd5e1; text-decoration: none; padding: 10px; border-radius: 10px; font-size: 14px">Mesas</a>
+    <a href="Domicilios.dc.html" style="color: #cbd5e1; text-decoration: none; padding: 10px; border-radius: 10px; font-size: 14px">Domicilios</a>
+    <a href="#" style="color: #cbd5e1; text-decoration: none; padding: 10px; border-radius: 10px; font-size: 14px">Cocina</a>
+    <a href="#" style="color: #cbd5e1; text-decoration: none; padding: 10px; border-radius: 10px; font-size: 14px">Inventario</a>
+    <a href="#" style="color: #cbd5e1; text-decoration: none; padding: 10px; border-radius: 10px; font-size: 14px">Reportes</a>
+    <a href="#" aria-current="page" style="color: #ffffff; background: #1e293b; text-decoration: none; padding: 10px; border-radius: 10px; font-size: 14px; font-weight: 700">Configuración</a>
+  </nav>
+
+  <main style="flex: 999 1 560px; min-width: 0; padding: 28px 32px 40px; box-sizing: border-box; display: flex; flex-direction: column; gap: 18px">
+    <div style="display: flex; flex-direction: column; gap: 12px">
+      <h1 style="margin: 0; font-size: 26px; font-weight: 800">Configuración</h1>
+      <div role="tablist" style="display: flex; flex-wrap: wrap; gap: 6px; border-bottom: 1px solid #cbd5e1">
+        <button type="button" role="tab" style="background: none; border: 0; padding: 10px 12px; font: 600 14px Manrope, sans-serif; color: #475569">General</button>
+        <button type="button" role="tab" style="background: none; border: 0; padding: 10px 12px; font: 600 14px Manrope, sans-serif; color: #475569">Usuarios</button>
+        <button type="button" role="tab" style="background: none; border: 0; padding: 10px 12px; font: 600 14px Manrope, sans-serif; color: #475569">POS móvil</button>
+        <button type="button" role="tab" aria-selected="true" style="background: none; border: 0; border-bottom: 3px solid #10b981; padding: 10px 12px; font: 700 14px Manrope, sans-serif; color: #0f172a">Pedidos en línea</button>
+        <a href="Catalogo.dc.html" role="tab" style="padding: 10px 12px; font: 600 14px Manrope, sans-serif; color: #475569; text-decoration: none">Productos y promociones</a>
+      </div>
+    </div>
+
+    <section style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 20px; display: flex; flex-wrap: wrap; gap: 20px; align-items: center">
+      <div style="flex: 1 1 320px; display: flex; flex-direction: column; gap: 6px">
+        <div style="display: flex; align-items: center; gap: 10px">
+          <span style="width: 10px; height: 10px; border-radius: 50%; background: #10b981"></span>
+          <h2 style="margin: 0; font-size: 18px; font-weight: 800">Recibiendo pedidos</h2>
+        </div>
+        <p style="margin: 0; font-size: 14px; color: #475569; line-height: 1.5">El portal acepta pedidos solo con el turno abierto y dentro del horario. Afuera de eso muestra el menú con el aviso "Cerrado, abrimos a las 5:00 p. m.".</p>
+      </div>
+      <label style="display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600">
+        <input type="checkbox" checked style="width: 22px; height: 22px; accent-color: #047857">
+        Pausar pedidos si nos llenamos
+      </label>
+    </section>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 18px">
+      <section style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 14px">
+        <h2 style="margin: 0; font-size: 16px; font-weight: 800">Tu link para clientes</h2>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap">
+          <label style="flex: 1 1 220px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600">Dirección
+            <input type="text" value="pedir.gvento.online/salchimelo" style="min-height: 44px; border: 1px solid #cbd5e1; border-radius: 10px; padding: 0 12px; font: 500 14px Manrope, sans-serif; color: #0f172a">
+          </label>
+          <button type="button" style="align-self: flex-end; min-height: 44px; padding: 0 16px; border-radius: 10px; border: 0; background: #0f172a; color: #ffffff; font: 700 14px Manrope, sans-serif">Copiar</button>
+        </div>
+        <div style="display: flex; gap: 14px; align-items: center">
+          <div aria-hidden="true" style="width: 88px; height: 88px; border-radius: 8px; background-color: #ffffff; background-image: linear-gradient(90deg, #0f172a 50%, transparent 50%), linear-gradient(#0f172a 50%, transparent 50%); background-size: 11px 11px; border: 6px solid #ffffff; outline: 1px solid #e2e8f0"></div>
+          <div style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: #475569">
+            <span>Para el estado de WhatsApp, Instagram y la mesa del local.</span>
+            <a href="#" style="font-weight: 700">Descargar código QR</a>
+          </div>
+        </div>
+        <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600">Color del negocio en el portal
+          <span style="display: flex; gap: 8px; align-items: center"><span style="width: 32px; height: 32px; border-radius: 8px; background: #c2410c"></span><span style="font-weight: 500; color: #475569">#C2410C · se toma con el logo de la sede</span></span>
+        </label>
+      </section>
+
+      <section style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 12px">
+        <h2 style="margin: 0; font-size: 16px; font-weight: 800">Horario de pedidos en línea</h2>
+        <sc-for list="{{horario}}" as="h" hint-placeholder-count="4">
+          <div style="display: flex; align-items: center; gap: 12px; font-size: 14px; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px">
+            <span style="width: 120px; font-weight: 600">{{h.dia}}</span>
+            <span style="color: #334155">{{h.horas}}</span>
+          </div>
+        </sc-for>
+        <a href="#" style="font-size: 13px; font-weight: 700">Editar horario</a>
+      </section>
+
+      <section style="grid-column: 1 / -1; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 20px; display: flex; flex-wrap: wrap; gap: 20px">
+        <div style="flex: 999 1 420px; min-width: 0; position: relative; height: 320px; border-radius: 14px; overflow: hidden; background: #e8eef3; border: 1px solid #e2e8f0">
+          <div aria-hidden="true" style="position: absolute; inset: 0; background-image: linear-gradient(90deg, rgba(255,255,255,0.9) 6px, transparent 6px), linear-gradient(rgba(255,255,255,0.9) 6px, transparent 6px); background-size: 84px 60px; background-position: 18px 12px"></div>
+          <div aria-hidden="true" style="position: absolute; left: 0; right: 0; top: 64%; height: 26px; background: #bfdbfe; transform: rotate(-8deg)"></div>
+          <svg role="img" aria-label="Zona de cobertura dibujada alrededor del local; deja por fuera el otro lado del río" viewBox="0 0 640 320" preserveAspectRatio="none" style="position: absolute; inset: 0; width: 100%; height: 100%">
+            <polygon points="150,40 420,30 540,110 520,190 300,205 170,215 95,140" fill="rgba(16,185,129,0.22)" stroke="#047857" stroke-width="3"/>
+            <circle cx="150" cy="40" r="7" fill="#ffffff" stroke="#047857" stroke-width="3"/><circle cx="420" cy="30" r="7" fill="#ffffff" stroke="#047857" stroke-width="3"/><circle cx="540" cy="110" r="7" fill="#ffffff" stroke="#047857" stroke-width="3"/><circle cx="520" cy="190" r="7" fill="#ffffff" stroke="#047857" stroke-width="3"/><circle cx="300" cy="205" r="7" fill="#ffffff" stroke="#047857" stroke-width="3"/><circle cx="170" cy="215" r="7" fill="#ffffff" stroke="#047857" stroke-width="3"/><circle cx="95" cy="140" r="7" fill="#ffffff" stroke="#047857" stroke-width="3"/>
+            <rect x="300" y="105" width="30" height="30" rx="8" fill="#0f172a"/>
+          </svg>
+          <span style="position: absolute; left: 316px; top: 142px; transform: translateX(-50%); background: #0f172a; color: #ffffff; font-size: 12px; font-weight: 700; border-radius: 6px; padding: 3px 7px; white-space: nowrap">Salchimelo</span>
+          <span style="position: absolute; right: 12px; bottom: 12px; background: #ffffff; border-radius: 8px; padding: 6px 10px; font-size: 12px; color: #334155">Arrastra los puntos para ajustar</span>
+        </div>
+        <div style="flex: 1 1 260px; display: flex; flex-direction: column; gap: 12px">
+          <h2 style="margin: 0; font-size: 16px; font-weight: 800">Zona de cobertura</h2>
+          <p style="margin: 0; font-size: 14px; color: #475569; line-height: 1.5">Hasta dónde llegan tus domiciliarios. Si la ubicación del cliente queda por fuera, el portal se lo dice antes de pagar y no deja hacer el pedido.</p>
+          <fieldset style="border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px">
+            <legend style="font-size: 13px; font-weight: 600; margin-bottom: 6px">Cómo se define</legend>
+            <label style="display: flex; align-items: center; gap: 8px; border: 1px solid #cbd5e1; border-radius: 10px; padding: 10px 12px; font-size: 14px"><input type="radio" name="zona"> Un radio desde el local</label>
+            <label style="display: flex; align-items: center; gap: 8px; border: 2px solid #047857; border-radius: 10px; padding: 10px 12px; font-size: 14px; font-weight: 700"><input type="radio" name="zona" checked> Dibujada en el mapa</label>
+          </fieldset>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap">
+            <button type="button" style="min-height: 44px; padding: 0 14px; border-radius: 10px; border: 0; background: #0f172a; color: #ffffff; font: 700 13px Manrope, sans-serif">Redibujar zona</button>
+            <button type="button" style="min-height: 44px; padding: 0 14px; border-radius: 10px; border: 1px solid #cbd5e1; background: #ffffff; color: #0f172a; font: 700 13px Manrope, sans-serif">Mover el local</button>
+          </div>
+          <span style="font-size: 12px; color: #64748b">El punto del local sale de la dirección de la sede; se puede corregir arrastrándolo.</span>
+        </div>
+      </section>
+
+      <section style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 12px">
+        <h2 style="margin: 0; font-size: 16px; font-weight: 800">Envío</h2>
+        <fieldset style="border: 0; margin: 0; padding: 0; display: flex; gap: 10px; flex-wrap: wrap">
+          <legend style="font-size: 13px; font-weight: 600; margin-bottom: 6px">Cómo se cobra</legend>
+          <label style="display: flex; align-items: center; gap: 8px; border: 1px solid #cbd5e1; border-radius: 10px; padding: 10px 12px; font-size: 14px"><input type="radio" name="envio"> Tarifa fija</label>
+          <label style="display: flex; align-items: center; gap: 8px; border: 2px solid #047857; border-radius: 10px; padding: 10px 12px; font-size: 14px; font-weight: 700"><input type="radio" name="envio" checked> Por distancia</label>
+        </fieldset>
+        <table style="border-collapse: collapse; font-size: 14px; width: 100%">
+          <thead><tr style="color: #475569; font-size: 12px; text-align: left"><th style="padding: 6px 0; font-weight: 600">Desde el local</th><th style="padding: 6px 0; font-weight: 600">Valor</th></tr></thead>
+          <tbody>
+            <tr style="border-top: 1px solid #f1f5f9"><td style="padding: 8px 0">Hasta 2 km</td><td>$3.000</td></tr>
+            <tr style="border-top: 1px solid #f1f5f9"><td style="padding: 8px 0">2 a 4 km</td><td>$4.000</td></tr>
+            <tr style="border-top: 1px solid #f1f5f9"><td style="padding: 8px 0">Más de 4 km, dentro de la zona</td><td>$6.000</td></tr>
+          </tbody>
+        </table>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap">
+          <label style="flex: 1 1 140px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600">Pedido mínimo
+            <input type="text" inputmode="numeric" value="$15.000" style="min-height: 44px; border: 1px solid #cbd5e1; border-radius: 10px; padding: 0 12px; font: 500 14px Manrope, sans-serif">
+          </label>
+          <label style="flex: 1 1 140px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600">Tiempo que se muestra
+            <input type="text" value="30–45 min" style="min-height: 44px; border: 1px solid #cbd5e1; border-radius: 10px; padding: 0 12px; font: 500 14px Manrope, sans-serif">
+          </label>
+        </div>
+        <span style="font-size: 12px; color: #64748b">La distancia se mide en línea recta desde el local. Fuera de la zona de cobertura no se reciben pedidos.</span>
+      </section>
+
+      <section style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 12px">
+        <h2 style="margin: 0; font-size: 16px; font-weight: 800">Pagos en línea</h2>
+        <div style="display: flex; align-items: center; gap: 12px; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 12px; padding: 12px 14px">
+          <span style="font-size: 14px; font-weight: 700; color: #9a3412; flex-grow: 1">Factus Pay · sin conectar</span>
+          <button type="button" style="min-height: 44px; padding: 0 16px; border-radius: 10px; border: 0; background: #0f172a; color: #ffffff; font: 700 14px Manrope, sans-serif">Conectar cuenta</button>
+        </div>
+        <p style="margin: 0; font-size: 13px; color: #475569; line-height: 1.5">El cliente paga con Bre-B desde Nequi, Bancolombia, Daviplata o su banco. La plata queda en la cuenta de Factus Pay del negocio y se retira desde su panel (llega al instante). Costo: $800 + IVA por pedido y $800 + IVA por retiro.</p>
+        <p style="margin: 0; font-size: 13px; color: #475569; line-height: 1.5">Al conectar, G-Vento usa el correo y la contraseña una sola vez para obtener el acceso y no los guarda. Después pega en el panel de Factus Pay la URL y la llave de aviso que te damos aquí.</p>
+        <p style="margin: 0; font-size: 13px; color: #475569; line-height: 1.5">Los pedidos se pagan completos antes de entrar. No hay devoluciones automáticas: si un pedido no se puede entregar, la devolución la hace el negocio con su cliente.</p>
+        <p style="margin: 0; font-size: 13px; color: #475569; line-height: 1.5">En el cierre de caja aparecen aparte, como "Pago en línea", y no se cuentan en el efectivo.</p>
+      </section>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":1380}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      horario: [
+        { dia: 'Lunes', horas: 'Cerrado' },
+        { dia: 'Martes', horas: 'Cerrado' },
+        { dia: 'Miércoles a viernes', horas: '5:00 p. m. – 11:30 p. m.' },
+        { dia: 'Sábado y domingo', horas: '4:00 p. m. – 12:00 a. m.' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
