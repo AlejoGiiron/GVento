@@ -1214,16 +1214,17 @@ devolverían la función que redefinen a la versión por rol viejo, en silencio 
 - **Depende de:** Paso 7 aplicado y verificado. **El orden importa:** este frontend decide por
   `can('pos.vender')` / `can('mesas.cobrar')`; sin la unión del Paso 7, un cajero de una
   organización cuyo rol no tuviera esas claves vería "Cobrar" deshabilitado.
-- **Qué lleva:** `feat/a-permisos` → `develop`. Después del Paso 5, `develop` = `fab23b0`, y
-  `feat/a-permisos` sale de ahí: **fast-forward**, sin merge nuevo:
+- **Qué lleva:** `feat/a-permisos` → `develop`. Rebasada el 2026-10-13 sobre
+  `fix/abonos-fuera-de-ventas` (`e5078c3`): con eso en `develop`, entra por **fast-forward**, sin
+  merge nuevo:
   ```bash
   git fetch origin
   git checkout develop
-  git log -1 --format='%h' develop                              # fab23b0 (si no, avísame)
-  git merge-base --is-ancestor develop feat/a-permisos && echo FF   # tiene que decir FF
-  git merge --ff-only feat/a-permisos
+  git log -1 --format='%h' develop                              # e5078c3 (si no, avísame)
+  git merge-base --is-ancestor develop origin/feat/a-permisos && echo FF   # tiene que decir FF
+  git merge --ff-only origin/feat/a-permisos
   ```
-  **25 archivos** sobre `fab23b0` (6 nuevos, 19 modificados): el SQL del Paso 7 (ya aplicado),
+  **25 archivos** sobre `e5078c3` (6 nuevos, 19 modificados): el SQL del Paso 7 (ya aplicado),
   el catálogo (`permissions.ts` + `seed-system-roles.sql`), `ProtectedRoute`, `MobileShell`,
   `posMovil.ts`, `rolLegacy.ts`, `POSPage`, `TablesPage`, sus pruebas, `preparar-local.mjs`,
   `CLAUDE.md`, `DEUDAS.md`, el hook de SQL y este plan.
@@ -1284,7 +1285,7 @@ Los martes G-10 y Salchimelo no abren: los pasos con SQL van ese día.
 | mar 13/10 (adelantado; HC ya salió: `main` = `976c2ec`) | Cocina, Mesas y Delivery se recargan solas | `feat/cocina-refresco` | rebasada sobre el hotfix combinado (`09945b2`), suite completa y fast-forward (si la suite no está verde a las 18:00: mié 14/10, 7:00) |
 | mar 13/10 (adelantado; R y `fix/cocina-avisos` ya salieron: `develop` = `c3a00c5`) | el arqueo cuenta los abonos de fiado (AA) | `feat/arqueo-abonos` | rebasada sobre `develop` (`c3a00c5`), suite completa y fast-forward; SQL antes del frontend (AA.1–AA.4) |
 | un martes después del arqueo | Paso 6, fase 2 de D | — | parte de la versión de `close_cash_shift` que deja el arqueo (`a395c0a1…`), no de la de hoy |
-| martes siguientes | Pasos 7-8 (permisos de cobro, A) y después 9-10 (Mesas en el servidor) | `feat/a-permisos`, `feat/mesas-servidor` | se fija al llegar |
+| mar 13/10 (adelantado, en cadena) | Pasos 7-8 (permisos de cobro, A), después 9-10 (Mesas en el servidor) y después el 11 (anon sin escritura) | `feat/a-permisos`, `feat/mesas-servidor` y la del 11, cada una encima de la anterior | fast-forward en cadena: cada rama entra cuando la anterior ya está en `develop` |
 | al final | Realtime | `feat/realtime` | después del paquete de Mesas |
 
 ## Resumen
