@@ -278,7 +278,8 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    esquema **sin que `tsc` lo note** — es exactamente el proxy que R4 prohíbe confundir con
    la cosa real.
 
-4. **Tabla de columnas de `src/lib/sentry.test.ts` vs el esquema real — 74 entradas.**
+4. **Tabla de columnas de `src/lib/sentry.test.ts` vs el esquema real** (88 entradas al
+   2026-10-09; para contarlas: `grep -c "{ tabla: '" src/lib/sentry.test.ts`).
    Agregar una columna al esquema obliga a agregarla ahí, en la misma sesión. Si no, el
    allowlist igual la redacta (ese es el punto de invertir el filtro) pero **se pierde la
    verificación**.
@@ -316,7 +317,10 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    Si además toca una ORDEN, la bloquea **después** del turno (`for update`), nunca antes:
    orden→turno contra otro escritor turno→orden, con un cierre esperando en la cola del turno,
    arma un ciclo de espera (40P01) — razonado, NO medido. Desde `supabase/cobro-turno.sql`
-   el cobro también lo cumple, y lo vigila `tests/cobro-concurrente.spec.ts`. Para enumerar
+   el cobro también lo cumple, y lo vigila `tests/cobro-concurrente.spec.ts`. El cobro de mesa
+   (`close_table_sale`, `supabase/mesas-servidor.sql`) toma turno → orden → mesa, también en el
+   fiado y la cortesía, que no pasan por `register_sale_payment`; lo vigila
+   `tests/mesas-servidor.spec.ts` (*"COBRO (fiado) vs CIERRE"*). Para enumerar
    los escritores, buscar por las TABLAS que lee la fórmula (`payments`, `cash_movements`,
    `cash_shifts`, `debt_payments`) y no por `cash_shifts` ni por nombres de función: el cobro
    viejo escribía `payments` sin nombrar el turno, así que un grep por `cash_shifts` no lo
@@ -352,6 +356,14 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    2026-10-05, el ícono agregado desde `/m` abría Cocina. Por la misma razón, entrar y salir de
    `/m` es una carga completa de página (`cargarDocumento` en `src/lib/posMovil.ts`), nunca
    `navigate`.
+
+10. **Tipos de `stock_movements` — 3 lados (agregado 2026-10-08).** El CHECK
+   `stock_movements_type_check` (el último que lo redefine: `supabase/mesas-servidor.sql`, que
+   agregó `merma`), `StockMovementType` en `src/lib/supabase-helpers.ts`, y `MOV_META` / `TYPES`
+   en `src/pages/InventoryPage.tsx` (etiqueta y filtro). Un tipo nuevo se agrega en los tres en
+   la misma pasada; si falta en la pantalla, el movimiento sale con el nombre crudo y sin filtro.
+   El SIGNO es parte del contrato: `sale` y `merma` negativos, `return` y `purchase` positivos.
+   Para reconfirmar los lados: `grep -rn "'purchase'" src/ supabase/*.sql`.
 
 → **Evidencia:** [`docs/BITACORA.md`](docs/BITACORA.md) → *"FASE 1 — estado de suscripción"*
 (el aviso a G-Centro) · el hallazgo del onboarding está en el inventario de arriba · el caso de

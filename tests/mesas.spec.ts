@@ -66,6 +66,8 @@ test.describe.serial('Mesas', () => {
   })
 
   test('eliminar una mesa sin historial la quita de la lista', async ({ page }) => {
+    // eliminar_mesa (Paso 10) pide confirmación: si la mesa vendió, la archiva.
+    page.on('dialog', (dialog) => dialog.accept())
     await page.getByRole('button', { name: 'Configurar' }).click()
     await expect(page.getByText('Configuración de mesas')).toBeVisible()
     // Fila del listado con el nombre exacto → su botón "Eliminar mesa".

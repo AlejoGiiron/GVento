@@ -12,6 +12,9 @@
 
 const ABIERTA = new Set(['pending', 'preparing', 'ready'])
 
+/** La orden sigue abierta (se le puede agregar, cobrar o cerrar). */
+export const estaAbierta = (status: string): boolean => ABIERTA.has(status)
+
 /** La orden como está en la base: estado, total, descuento y la suma de sus líneas. */
 export interface OrdenFresca {
   status: string

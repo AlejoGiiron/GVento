@@ -186,6 +186,7 @@ const MOV_META: Record<string, { bg: string; fg: string; label: string; icon: Re
   adjustment: { bg: '#f5f3ff', fg: '#6d28d9', label: 'Ajuste', icon: <SlidersHorizontal size={12} /> },
   return: { bg: '#ecfdf5', fg: '#065f46', label: 'Devolución', icon: <RotateCcw size={12} /> },
   purchase: { bg: '#ecfdf5', fg: '#047857', label: 'Compra', icon: <ArrowUpCircle size={12} /> },
+  merma: { bg: '#fef2f2', fg: '#b91c1c', label: 'Merma', icon: <ArrowDownCircle size={12} /> },
 }
 
 function MovementsTab() {
@@ -212,6 +213,7 @@ function MovementsTab() {
     { value: 'purchase', label: 'Compras' },
     { value: 'adjustment', label: 'Ajustes' },
     { value: 'return', label: 'Devoluciones' },
+    { value: 'merma', label: 'Mermas' },
   ]
 
   const inputStyle: React.CSSProperties = {

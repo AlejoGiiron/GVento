@@ -17,17 +17,16 @@ import { useProducts } from '@/hooks/useProducts'
 import { useCategories } from '@/hooks/useCategories'
 import { useProductsWithExtras } from '@/hooks/useProductsWithExtras'
 import { useAgregarTanda } from '@/hooks/useAgregarTanda'
+import { useMesaMutations } from '@/hooks/useMesaMutations'
 import {
-  createTable, updateTable, deleteTable,
-  updateTableStatus, createOrder,
-  updateOrderTotal, updateOrderStatus, registerSalePayment,
-  getTableActiveOrderCount, removeOrderItem, markItemsSentToKitchen,
+  createTable, updateTable,
+  createOrder,
+  updateOrderStatus, markItemsSentToKitchen,
   pedirCuentaMesa, ocuparMesaLibre, desocuparMesa, liberarMesaSinCuenta,
-  assignOrderNumber, retryOrderNumber, setOrderFiado, applyOrderDiscount,
   getOrdenFresca,
 } from '@/lib/supabase-helpers'
 import type { SalePaymentPart } from '@/lib/supabase-helpers'
-import { motivoParaNoCobrar, motivoParaNoCerrarVacia } from '@/lib/mesaFresca'
+import { motivoParaNoCobrar, motivoParaNoCerrarVacia, estaAbierta } from '@/lib/mesaFresca'
 import { motivoSinCocina, MESA_VACIA } from '@/lib/cocinaMesa'
 import { OpenShiftModal } from '@/components/shift/OpenShiftModal'
 import { ItemConfigModal } from '@/components/pos/ItemConfigModal'
@@ -40,6 +39,8 @@ import type { ProductWithCategory, CartExtra } from '@/stores/cartStore'
 import { cartItemTotal } from '@/stores/cartStore'
 import type { TableRow, ActiveOrder, OrderItemRow } from '@/hooks/useTables'
 import { mensajeDeError } from '@/lib/errorMessage'
+import { avisoYaExistia, metodoReal } from '@/lib/metodoVenta'
+import { mensajeOtroCobro, type CierreMesa } from '@/lib/cierreMesa'
 
 type TableStatus = TableRow['status']
 type PaymentMethodUI = 'efectivo' | 'tarjeta' | 'transferencia' | 'nequi' | 'fiado'
@@ -696,15 +697,15 @@ function TableCheckoutModal({
   const { refetchSales } = useCashShift()
   const { restaurant } = useRestaurantConfig()
   const queryClient = useQueryClient()
-  const [step, setStep] = useState<'method' | 'amount' | 'success'>('method')
+  // 'otro': la mesa ya la había cobrado OTRO cobro (otro equipo, u otra pestaña):
+  // se dice quién, cuándo y con qué, y NO se presenta como una venta propia.
+  const [step, setStep] = useState<'method' | 'amount' | 'success' | 'otro'>('method')
   const [method, setMethod] = useState<PaymentMethodUI>('efectivo')
   const [received, setReceived] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [orderNumber, setOrderNumber] = useState<number | null>(null)
-  // Numero que la secuencia entrego pero no se pudo grabar: el reintento lo
-  // reusa en vez de pedir otro (ver AssignOrderNumberResult).
-  const [numeroReservado, setNumeroReservado] = useState<number | null>(null)
-  const [reintentandoNumero, setReintentandoNumero] = useState(false)
+  // Lo que devolvió close_table_sale: número, total y métodos REALES de la venta.
+  const [cierre, setCierre] = useState<CierreMesa | null>(null)
+  const { cobrar } = useMesaMutations()
   // Fiado: cliente seleccionado (solo aplica si method === 'fiado').
   const [customerId, setCustomerId] = useState<string | null>(null)
   const [customerName, setCustomerName] = useState<string>('')
@@ -744,80 +745,49 @@ function TableCheckoutModal({
     efectivo: 'cash', tarjeta: 'card', transferencia: 'transfer', nequi: 'nequi',
   }
 
+  // El cobro de la mesa, en UNA llamada (close_table_sale): descuento, pago (o
+  // fiado), número, entregada y mesa libre, en la misma transacción. El total que
+  // se manda es el de la pantalla: el servidor lo compara con las líneas (B1) y,
+  // si la mesa cambió desde que se abrió este modal, rechaza sin cobrar.
   const handleConfirm = async () => {
     if (!profile) return
     if (isFiado && !customerId) { toast.error('Selecciona un cliente para la venta a fiado'); return }
     setSubmitting(true)
     try {
-      // La copia del modal se tomó al tocar "Cobrar": si otro equipo agregó una tanda o
-      // cerró la mesa desde entonces, cobrar con ella deja consumo sin cobrar (cerrar en
-      // $0, o un descuento calculado sobre lo viejo que pisa el total). Se relee la orden
-      // ANTES de escribir nada; si la relectura falla, no se cobra. hotfix/mesa-total-cero.
-      const motivo = motivoParaNoCobrar(await getOrdenFresca(order.id), subtotal, total, isFiado)
+      // La copia del modal se tomó al tocar "Cobrar": si otro equipo agregó una tanda,
+      // se avisa ANTES de llamar al servidor (que igual lo rechaza: B1 en
+      // close_table_sale). hotfix/mesa-total-cero. Si la orden YA NO está abierta, no se
+      // corta acá: decide el servidor, que con la misma clave devuelve la venta propia
+      // (un reintento tras perder la respuesta) y con otra dice quién la cobró.
+      const fresca = await getOrdenFresca(order.id)
+      const motivo = estaAbierta(fresca.status) ? motivoParaNoCobrar(fresca, subtotal, total, isFiado) : null
       if (motivo) { toast.error(motivo); return }
 
-      // Descuento/vale ANTES del cobro. IDEMPOTENTE: `total` se computó desde el
-      // subtotal invariante, así que reintentar no doble-descuenta. Alimenta tanto
-      // el pago (la RPC valida Σ contra order.total) como el fiado (saldo). Se
-      // llama también si el descuento pasó a 0 pero la orden traía uno (para
-      // restaurar el total).
-      if (discountAmt > 0 || (order.discount_amount ?? 0) > 0) {
-        const { error: discErr } = await applyOrderDiscount(order.id, {
-          total,
-          // Sin monto (0) → kind normal + type null (no es un vale; respeta la
-          // constraint vale⇒fixed). Con monto: mesa siempre es fixed.
-          discount_amount: discountAmt,
-          discount_type: discountAmt > 0 ? 'fixed' : null,
-          discount_kind: discountAmt > 0 && isVale ? 'vale' : 'normal',
-          discount_reason: discountAmt > 0 ? (discountReason.trim() || null) : null,
-        })
-        if (discErr) throw discErr
-      }
-
-      // Venta a fiado de mesa: la orden YA existe con sus ítems y el stock YA se
-      // descontó al agregarlos (etapa de "Agregar a mesa", no aquí). Solo la
-      // marcamos como pendiente de pago y ligada al cliente; NO entra dinero
-      // (no toca caja) y NO se vuelve a tocar stock (sin doble descuento).
-      if (isFiado) {
-        const { error: fiadoErr } = await setOrderFiado(order.id, customerId!, customerName)
-        if (fiadoErr) throw fiadoErr
-      } else if (total > 0) {
-        // Un solo camino de cobro: simple = una parte al total; dividir = las
-        // partes del editor. La RPC valida atómicamente Σ = total e inserta una
-        // fila por método. En !split el método nunca es fiado (isFiado lo excluye),
-        // pero el isFiado compuesto impide a TS estrecharlo → cast explícito.
-        const parts: SalePaymentPart[] = split
+      // Simple = una parte al total; dividir = las partes del editor. Fiado y
+      // total 0 (vale o cortesía del 100 %) no llevan pagos. En !split el método
+      // nunca es fiado (isFiado lo excluye) → cast explícito.
+      const pagos: SalePaymentPart[] = isFiado || total === 0
+        ? []
+        : split
           ? splitParts
           : [{ method: methodMap[method as Exclude<PaymentMethodUI, 'fiado'>], amount: total }]
-        const { error: payErr } = await registerSalePayment(order.id, parts)
-        if (payErr) throw payErr
-      }
-      // total === 0 (vale 100%): venta GRATIS. El descuento ya se aplicó arriba
-      // (applyOrderDiscount); se salta el pago (nada que cobrar). La orden queda
-      // delivered + con número + mesa liberada (abajo), payment_status='paid'.
-
-      // Numeración: es una venta real (cobrada o a fiado) → asignar número.
-      // Si falla, no se tumba la venta (queda registrada igual).
-      const num = await assignOrderNumber(order.id, profile.restaurant_id)
-      setOrderNumber(num.orderNumber)
-      setNumeroReservado(num.numeroReservado)
-
+      const r = await cobrar({
+        orderId: order.id,
+        totalEsperado: total,
+        pagos,
+        descuento: discountAmt > 0
+          ? { amount: discountAmt, kind: isVale ? 'vale' : 'normal', reason: discountReason.trim() || null }
+          : null,
+        fiado: isFiado ? { customer_id: customerId!, customer_name: customerName } : null,
+      })
+      setCierre(r)
       refetchSales()
-      if (isFiado) queryClient.invalidateQueries({ queryKey: ['debts'] })
-
-      const { error: orderErr } = await updateOrderStatus(order.id, 'delivered')
-      if (orderErr) throw orderErr
-
-      const { error: tableErr } = await updateTableStatus(table.id, 'free')
-      if (tableErr) throw tableErr
-
-      setStep('success')
+      if (isFiado || r.fiado) queryClient.invalidateQueries({ queryKey: ['debts'] })
+      setStep(r.otro_cobro ? 'otro' : 'success')
     } catch (err) {
       const msg = mensajeDeError(err, 'Error desconocido')
-      toast.error(`Error al cobrar: ${msg}`)
-      // Cobro de mesa: mismo peso que el del POS. Además puede fallar DESPUÉS
-      // del pago (al marcar delivered o liberar la mesa), y ahí la plata ya
-      // entró — el estado inconsistente hay que verlo sí o sí.
+      toast.error(`No se cobró: ${msg}`)
+      // El servidor hace todo o nada: si falla, la mesa sigue abierta y sin cobrar.
       captureError(err, 'cobro', {
         origen: 'Mesa',
         esFiado: isFiado,
@@ -830,23 +800,14 @@ function TableCheckoutModal({
     }
   }
 
-  // Reintento a pedido del cajero cuando la venta quedó sin número. La venta YA
-  // está cobrada y la mesa liberada: esto solo completa el correlativo.
-  const handleRetryNumero = async () => {
-    if (!profile) return
-    setReintentandoNumero(true)
-    try {
-      const num = await retryOrderNumber(order.id, profile.restaurant_id, numeroReservado)
-      setOrderNumber(num.orderNumber)
-      setNumeroReservado(num.numeroReservado)
-      if (num.orderNumber != null) toast.success(`Número asignado: venta #${num.orderNumber}`)
-      else toast.error('No se pudo asignar el número. La venta está cobrada igual.')
-    } finally {
-      setReintentandoNumero(false)
-    }
-  }
-
   const methodLabel = ({ efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Transferencia', nequi: 'Nequi / QR', fiado: 'Fiado' } as Record<PaymentMethodUI, string>)[method]
+  // Lo que se muestra y se imprime sale de la venta REGISTRADA, no de lo elegido en
+  // pantalla: un reintento con otro método recibe la venta que ya había entrado.
+  const orderNumber = cierre?.order_number ?? null
+  const totalCobrado = cierre ? Number(cierre.total) : total
+  const metodoCobrado = (cierre && metodoReal(cierre)) ?? methodLabel
+  const metodoTicket: Enums<'payment_method'> | null =
+    cierre && !cierre.fiado && cierre.metodos?.length === 1 ? cierre.metodos[0] : null
 
   // Recibo de la venta de mesa. Se arma desde la orden PERSISTIDA (no del carrito,
   // que en Mesas no existe) — por eso sirve printSaleTicket y no el componente
@@ -860,7 +821,7 @@ function TableCheckoutModal({
       type: order.type,
       // En pago dividido no hay UN método: se omite la línea en vez de mentir con
       // el primero. El desglose por método vive en el Historial.
-      method: split || isFiado ? null : methodMap[method as Exclude<PaymentMethodUI, 'fiado'>],
+      method: metodoTicket,
       createdAt: order.created_at,
       items: order.order_items.map((i) => ({
         qty: i.qty,
@@ -873,12 +834,12 @@ function TableCheckoutModal({
           unitPrice: e.unit_price,
         })),
       })),
-      total,
+      total: totalCobrado,
     })
   }
 
-  // En paso success la mesa ya está cobrada: overlay click = onComplete (limpia estado)
-  const overlayClick = step === 'success' ? onComplete : onClose
+  // En success u 'otro' la mesa ya está cobrada: overlay click = onComplete (limpia estado)
+  const overlayClick = step === 'success' || step === 'otro' ? onComplete : onClose
 
   return (
     <div
@@ -1110,49 +1071,20 @@ function TableCheckoutModal({
             <div style={{ fontSize: 20, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>
               {orderNumber != null ? `¡Venta #${orderNumber} registrada!` : '¡Cobro exitoso!'}
             </div>
-            <div style={{ fontSize: 13, color: '#64748b', marginBottom: 4 }}>{table.name} · {formatCOP(total)} · {methodLabel}</div>
-            {method === 'efectivo' && receivedNum > total && (
+            <div style={{ fontSize: 13, color: '#64748b', marginBottom: 4 }}>{table.name} · {formatCOP(totalCobrado)} · {metodoCobrado}</div>
+            {method === 'efectivo' && !cierre?.ya_existia && receivedNum > total && (
               <div style={{ fontSize: 12, color: '#10b981', fontWeight: 600, marginBottom: 4 }}>Vuelto: {formatCOP(receivedNum - total)}</div>
             )}
-            <div data-testid="success-order-number" style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace', marginBottom: orderNumber != null ? 24 : 12 }}>
+            {/* Un reintento que recibió la venta ya registrada: se dice con qué quedó. */}
+            {cierre?.ya_existia && (
+              <div data-testid="mesa-aviso-ya-existia" style={{ fontSize: 12, color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '8px 10px', margin: '8px 0' }}>
+                {avisoYaExistia(cierre)}
+              </div>
+            )}
+            <div data-testid="success-order-number" style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace', marginBottom: 24 }}>
               {orderNumber != null ? `Venta #${orderNumber}` : `#${order.id.slice(-8).toUpperCase()}`}
             </div>
 
-            {/* La venta se cobró, pero quedó sin correlativo. Antes esto fallaba
-                MUDO: la pantalla decía "¡Cobro exitoso!" y nadie se enteraba de
-                que la venta no iba a aparecer en el Historial ni se iba a poder
-                reimprimir. */}
-            {orderNumber == null && (
-              <div
-                data-testid="success-sin-numero"
-                style={{
-                  background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8,
-                  padding: '10px 12px', margin: '0 0 20px',
-                  fontSize: 12, color: '#92400e', lineHeight: 1.5, textAlign: 'left',
-                }}
-              >
-                <div style={{ fontWeight: 600, marginBottom: 6 }}>
-                  Venta registrada — sin número asignado
-                </div>
-                <div style={{ marginBottom: 8 }}>
-                  El cobro está guardado. Falta el número para que aparezca en el
-                  historial y se pueda reimprimir.
-                </div>
-                <button
-                  onClick={handleRetryNumero}
-                  disabled={reintentandoNumero}
-                  data-testid="retry-order-number"
-                  style={{
-                    padding: '6px 14px', border: '1.5px solid #d97706', background: '#fff',
-                    borderRadius: 7, cursor: reintentandoNumero ? 'default' : 'pointer',
-                    fontSize: 12, fontWeight: 600, color: '#92400e',
-                    opacity: reintentandoNumero ? 0.6 : 1,
-                  }}
-                >
-                  {reintentandoNumero ? 'Reintentando…' : 'Reintentar'}
-                </button>
-              </div>
-            )}
             <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
               {/* Recibo de venta: el POS ya lo ofrecía y Mesas no. MANUAL (botón),
                   igual que el POS — auto-imprimir gasta papel cuando el cliente no
@@ -1178,6 +1110,30 @@ function TableCheckoutModal({
             </div>
           </div>
         )}
+
+        {/* La mesa ya estaba cobrada por OTRO cobro: no es una venta de este intento. */}
+        {step === 'otro' && cierre && (
+          <div data-testid="mesa-ya-cobrada" style={{ padding: '36px 28px', textAlign: 'center' }}>
+            <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#fffbeb', display: 'grid', placeItems: 'center', margin: '0 auto 16px', color: '#d97706' }}>
+              <AlertTriangle size={30} strokeWidth={2.2} />
+            </div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>
+              La mesa ya estaba cobrada
+            </div>
+            <div data-testid="mesa-ya-cobrada-mensaje" style={{ fontSize: 14, color: '#334155', marginBottom: 6, lineHeight: 1.5 }}>
+              {mensajeOtroCobro(cierre)}
+            </div>
+            <div style={{ fontSize: 12.5, color: '#64748b', marginBottom: 24 }}>
+              No se registró un cobro nuevo.{cierre.order_number != null ? ` Es la venta #${cierre.order_number}.` : ''}
+            </div>
+            <button
+              onClick={onComplete}
+              style={{ padding: '11px 28px', border: 'none', background: '#10b981', borderRadius: 9, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#fff', boxShadow: '0 6px 16px rgba(16,185,129,.35)' }}
+            >
+              Listo
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -1200,6 +1156,10 @@ function TableConfigModal({
   const [editId, setEditId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const { eliminarMesa } = useMesaMutations()
+  // eliminar_mesa exige config.acceder (el modal lo abre quien tiene mesas.gestionar).
+  const { can } = usePermissions()
+  const puedeEliminar = can('config.acceder')
 
   const startEdit = (t: TableRow) => {
     setEditId(t.id)
@@ -1239,25 +1199,19 @@ function TableConfigModal({
     }
   }
 
+  // El servidor decide (eliminar_mesa): con una orden abierta, rechaza; si la mesa
+  // vendió alguna vez, la ARCHIVA (no se puede borrar sin perder a qué mesa fue cada
+  // venta); si nunca vendió, la borra.
   const handleDelete = async (t: TableRow) => {
-    if (t.status !== 'free') {
-      toast.error('No se puede eliminar una mesa con orden activa')
-      return
-    }
-    const { count } = await getTableActiveOrderCount(t.id)
-    if ((count ?? 0) > 0) {
-      toast.error('La mesa tiene órdenes activas')
-      return
-    }
+    if (!window.confirm(`¿Eliminar ${t.name}? Si tuvo ventas, se archiva: deja de aparecer en el mapa y los reportes la siguen nombrando.`)) return
     setDeletingId(t.id)
     try {
-      const { error } = await deleteTable(t.id)
-      if (error) throw error
-      toast.success(`Mesa ${t.name} eliminada`)
+      const accion = await eliminarMesa(t.id)
+      toast.success(accion === 'archivada' ? `Mesa ${t.name} archivada` : `Mesa ${t.name} eliminada`)
       onChanged()
     } catch (err) {
       const msg = mensajeDeError(err, 'Error desconocido')
-      toast.error(`Error: ${msg}`)
+      toast.error(`No se eliminó: ${msg}`)
     } finally {
       setDeletingId(null)
     }
@@ -1356,14 +1310,16 @@ function TableConfigModal({
                   >
                     <Pencil size={12} />
                   </button>
-                  <button
-                    onClick={() => handleDelete(t)}
-                    disabled={deletingId === t.id}
-                    title="Eliminar mesa"
-                    style={{ width: 28, height: 28, border: '1px solid #fecaca', background: '#fef2f2', borderRadius: 6, cursor: deletingId === t.id ? 'not-allowed' : 'pointer', color: '#dc2626', display: 'grid', placeItems: 'center' }}
-                  >
-                    <Trash size={12} />
-                  </button>
+                  {puedeEliminar && (
+                    <button
+                      onClick={() => handleDelete(t)}
+                      disabled={deletingId === t.id}
+                      title="Eliminar mesa"
+                      style={{ width: 28, height: 28, border: '1px solid #fecaca', background: '#fef2f2', borderRadius: 6, cursor: deletingId === t.id ? 'not-allowed' : 'pointer', color: '#dc2626', display: 'grid', placeItems: 'center' }}
+                    >
+                      <Trash size={12} />
+                    </button>
+                  )}
                 </div>
               )
             })}
@@ -1403,7 +1359,9 @@ function TableSidePanel({
   onCheckout: () => void
   onRefresh: () => void
 }) {
-  const [deletingItemId, setDeletingItemId] = useState<string | null>(null)
+  // El ítem a quitar (abre el modal de motivo y "¿Se alcanzó a preparar?").
+  const [quitando, setQuitando] = useState<OrderItemRow | null>(null)
+  const { cerrarSinConsumo } = useMesaMutations()
   const [sendingToKitchen, setSendingToKitchen] = useState(false)
   const [closingTable, setClosingTable] = useState(false)
   const [liberando, setLiberando] = useState(false)
@@ -1437,6 +1395,10 @@ function TableSidePanel({
   // A: cobrar una mesa exige mesas.cobrar, lo mismo que register_sale_payment (dine_in).
   const { can } = usePermissions()
   const puedeCobrarMesa = can('mesas.cobrar')
+  // Todo ítem guardado ya está ENVIADO ("Agregar a la mesa" lo confirma, pase o no
+  // por cocina): quitarlo exige pos.anular, lo mismo que quitar_item_mesa. Lo que
+  // todavía no se agregó se corrige en el carrito del selector.
+  const puedeQuitar = can('pos.anular')
   const cfg = STATUS_CONFIG[table.status]
 
   const unsentItems = order?.order_items.filter((i) => !i.sent_to_kitchen) ?? []
@@ -1465,13 +1427,11 @@ function TableSidePanel({
     setClosingTable(true)
     try {
       // El panel puede mostrar la mesa vacía y vieja: si otro equipo ya le agregó una
-      // tanda (o la cerró), cancelarla dejaría ese consumo sin cobrar. Se relee primero.
+      // tanda (o la cerró), se avisa antes (el servidor también lo rechaza). hotfix/mesa-total-cero.
       const motivo = motivoParaNoCerrarVacia(await getOrdenFresca(order.id))
       if (motivo) { toast.error(motivo); onRefresh(); return }
-      const { error: orderErr } = await updateOrderStatus(order.id, 'cancelled')
-      if (orderErr) throw orderErr
-      const { error: tableErr } = await updateTableStatus(table.id, 'free')
-      if (tableErr) throw tableErr
+      // Orden cancelada y mesa libre en UNA llamada (cerrar_mesa_sin_consumo).
+      await cerrarSinConsumo(order.id)
       toast.success(`Mesa ${table.name} liberada`)
       onClose()
       onRefresh()
@@ -1480,34 +1440,6 @@ function TableSidePanel({
       toast.error(`Error al cerrar mesa: ${msg}`)
     } finally {
       setClosingTable(false)
-    }
-  }
-
-  const handleRemoveItem = async (item: OrderItemRow) => {
-    if (!order) return
-    setDeletingItemId(item.id)
-    try {
-      // TODO (inventario, pasada aparte): este ítem YA descontó stock al
-      // agregarse (add_order_items_with_extras descuenta producto/receta/extras al
-      // insertar la línea). Al borrarlo aquí NO se devuelve ese stock, así que
-      // el inventario queda subestimado por la cantidad del ítem.
-      // Pendiente: función SECURITY DEFINER return_stock_for_order_item(p_id)
-      // que emita stock_movements('return', +qty) por el producto (simple),
-      // sus insumos (composite vía product_components) y los insumos de los
-      // extras vinculados, ANTES de borrar la línea — reflejando la lógica de
-      // deducción. Caso borde a resolver: receta cambiada entre venta y borrado.
-      // Solo aplica a ítems no enviados a cocina (los únicos borrables hoy).
-      const { error: rmErr } = await removeOrderItem(item.id)
-      if (rmErr) throw rmErr
-      const newTotal = Math.max(0, order.total - orderItemLineTotal(item))
-      const { error: totalErr } = await updateOrderTotal(order.id, newTotal)
-      if (totalErr) throw totalErr
-      onRefresh()
-    } catch (err) {
-      const msg = mensajeDeError(err, 'Error desconocido')
-      toast.error(`Error: ${msg}`)
-    } finally {
-      setDeletingItemId(null)
     }
   }
 
@@ -1657,9 +1589,11 @@ function TableSidePanel({
                 {formatCOP(orderItemLineTotal(item))}
               </div>
               <button
-                onClick={() => handleRemoveItem(item)}
-                disabled={deletingItemId === item.id || item.sent_to_kitchen}
-                style={{ width: 24, height: 24, border: 'none', background: 'transparent', cursor: item.sent_to_kitchen ? 'not-allowed' : 'pointer', color: '#dc2626', display: 'grid', placeItems: 'center', opacity: deletingItemId === item.id || item.sent_to_kitchen ? 0.2 : 1 }}
+                data-testid="table-item-quitar"
+                onClick={() => setQuitando(item)}
+                disabled={!puedeQuitar}
+                title={puedeQuitar ? 'Quitar ítem' : 'Quitar un ítem de la mesa exige permiso para anular'}
+                style={{ width: 24, height: 24, border: 'none', background: 'transparent', cursor: puedeQuitar ? 'pointer' : 'not-allowed', color: '#dc2626', display: 'grid', placeItems: 'center', opacity: puedeQuitar ? 1 : 0.2 }}
               >
                 <X size={13} />
               </button>
@@ -1794,6 +1728,121 @@ function TableSidePanel({
         )}
       </div>
       )}
+
+      {quitando && order && (
+        <QuitarItemModal
+          item={quitando}
+          tableName={table.name}
+          onClose={() => setQuitando(null)}
+          onDone={() => { setQuitando(null); onRefresh() }}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─── Quitar un ítem de la mesa ────────────────────────────────────
+
+function QuitarItemModal({
+  item,
+  tableName,
+  onClose,
+  onDone,
+}: {
+  item: OrderItemRow
+  tableName: string
+  onClose: () => void
+  onDone: () => void
+}) {
+  const { quitarItem } = useMesaMutations()
+  const [motivo, setMotivo] = useState('')
+  // Sin respuesta por defecto: una merma no se registra por omisión.
+  const [preparado, setPreparado] = useState<boolean | null>(null)
+  const [enviando, setEnviando] = useState(false)
+  const listo = motivo.trim() !== '' && preparado !== null && !enviando
+
+  const confirmar = async () => {
+    if (!listo) return
+    setEnviando(true)
+    try {
+      await quitarItem(item.id, motivo.trim(), preparado)
+      toast.success(preparado ? 'Ítem quitado: queda como merma' : 'Ítem quitado: el stock volvió al inventario')
+      onDone()
+    } catch (err) {
+      const msg = mensajeDeError(err, 'Error desconocido')
+      toast.error(`No se quitó: ${msg}`)
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  const opcion = (valor: boolean, titulo: string, detalle: string, testid: string) => (
+    <button
+      type="button"
+      data-testid={testid}
+      onClick={() => setPreparado(valor)}
+      style={{
+        flex: 1, padding: '10px 12px', borderRadius: 9, cursor: 'pointer', textAlign: 'left',
+        border: preparado === valor ? '2px solid #10b981' : '1.5px solid #e5e7eb',
+        background: preparado === valor ? '#ecfdf5' : '#fff',
+      }}
+    >
+      <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{titulo}</div>
+      <div style={{ fontSize: 11.5, color: '#64748b', marginTop: 2 }}>{detalle}</div>
+    </button>
+  )
+
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.55)', display: 'grid', placeItems: 'center', zIndex: 60 }}
+      onClick={onClose}
+    >
+      <div
+        data-testid="quitar-item-modal"
+        style={{ background: '#fff', borderRadius: 14, width: 440, maxWidth: '92%', boxShadow: '0 25px 50px -12px rgba(0,0,0,.25)', padding: 22 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+          {tableName} · Quitar ítem
+        </div>
+        <div style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', margin: '4px 0 14px' }}>
+          {item.qty}× {item.products?.name ?? '—'} · {formatCOP(orderItemLineTotal(item))}
+        </div>
+
+        <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
+          Motivo <span style={{ color: '#dc2626' }}>*</span>
+        </label>
+        <input
+          autoFocus
+          data-testid="quitar-motivo"
+          value={motivo}
+          onChange={(e) => setMotivo(e.target.value)}
+          placeholder="Ej.: el cliente lo cambió, se equivocó el pedido"
+          style={{ width: '100%', boxSizing: 'border-box', padding: '9px 10px', border: '1.5px solid #e5e7eb', borderRadius: 8, fontSize: 13, outline: 'none', marginBottom: 14 }}
+        />
+
+        <div style={{ fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
+          ¿Se alcanzó a preparar? <span style={{ color: '#dc2626' }}>*</span>
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+          {opcion(true, 'Sí', 'Queda como merma: el stock no vuelve.', 'quitar-preparado-si')}
+          {opcion(false, 'No', 'Vuelve al inventario.', 'quitar-preparado-no')}
+        </div>
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={onClose} style={{ flex: 1, padding: '11px', border: '1.5px solid #e5e7eb', background: '#fff', borderRadius: 9, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#334155' }}>
+            Cancelar
+          </button>
+          <button
+            data-testid="quitar-confirmar"
+            disabled={!listo}
+            onClick={confirmar}
+            style={{ flex: 2, padding: '11px', border: 'none', background: listo ? '#dc2626' : '#cbd5e1', borderRadius: 9, cursor: listo ? 'pointer' : 'not-allowed', fontSize: 13, fontWeight: 600, color: '#fff' }}
+          >
+            {enviando ? 'Quitando...' : 'Quitar ítem'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

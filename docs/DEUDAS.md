@@ -336,7 +336,9 @@ Lo que hay que saber al operarlo:
   pantalla lo avisa (`success-ya-existia`). Es a propósito: entre una venta con el método
   equivocado y una venta DUPLICADA, la duplicada es peor (arqueo y stock).
 - **En el POS ya no existe "venta cobrada sin número"**: el número va en la misma transacción.
-  El aviso y su reintento siguen en Mesas, y `tests/numeracion-fallo.spec.ts` ahora prueba ahí.
+  *(Actualizado 2026-10-09: con el Paso 10, Mesas cobra con `close_table_sale`, que también numera
+  en la misma transacción; el aviso, su reintento y `tests/numeracion-fallo.spec.ts` se borraron
+  en `feat/mesas-servidor`. Para reconfirmar: `grep -rn "assignOrderNumber" src/` no devuelve nada.)*
 - **Reversa:** `pos-sale-lotes-revertir.sql` (raíz, fuera de git), con autoverificación por
   md5 contra el export de prod. **Primero el frontend, después el SQL.**
 
@@ -1079,6 +1081,105 @@ supabase-js 2.104 le pasa a postgrest solo `schema`, `fetch`, `timeout` y `urlLe
 se prueba con la red cortada antes de soltarlo. Para reconfirmar la versión y el número:
 `grep -n "DEFAULT_MAX_RETRIES =" node_modules/.pnpm/@supabase+postgrest-js@*/node_modules/@supabase/postgrest-js/dist/index.mjs`.
 
+### 🔴 Mesas cerradas como pagadas SIN filas en `payments` (hallado 2026-10-09, pre-flight de Mesas)
+
+**Lo medido en producción (consulta 2b de `supabase/diag/mesas-preflight.sql`, la corrió el dueño del
+repo el 2026-10-09):** G-10, 20 órdenes de mesa `delivered` + `paid` + total > 0 sin pagos (17/8 a
+26/9, $613.800); Salchimelo, 18 ($419.000). Y en Salchimelo, 49 mesas entregadas con total 0 y sin
+pagos (48 con descuento).
+**El camino del código (leído en `70d8fcb`, la versión de `TablesPage.tsx` que corrió entre el 10/8
+y el 30/9, y en `develop` `9731272`, igual en esto):** `handleConfirm` de `TableCheckoutModal` saca
+el total de la copia del `order` tomada AL TOCAR "Cobrar" (`setCheckoutOrder(selectedOrder)`); esa
+copia no se actualiza. Si valía 0, `else if (total > 0)` se salta el pago; sin descuento tampoco
+corre `applyOrderDiscount`, así que el total de la base (las tandas que entraron después) queda > 0,
+y la orden pasa a `delivered` con `payment_status = 'paid'`, el DEFAULT de la columna. El botón
+"Cobrar" se habilita con cualquier orden, también con total 0. Por qué el modal valía 0 en cada
+caso NO está probado: es el único camino del código que da esa forma.
+**Mezcladas en la 2b hay otras dos clases:** fiado saldado con abonos (legítimo: la plata está en
+`debt_payments`) y líneas agregadas a una orden YA cerrada (ver la entrada siguiente).
+**Hoy sigue pudiendo pasar** (ni `cobro-turno.sql` ni el Paso 3 tocan ese camino: saltarse el pago
+no llama a `register_sale_payment`). **`close_table_sale` (Paso 9) lo hace imposible:** el total sale
+de las líneas y tiene que ser el que vio la pantalla (B1), y con total > 0 no hay `delivered` sin
+que `register_sale_payment` cobre la suma exacta. Queda abierto hasta que el Paso 10 esté en todos
+los equipos y el Paso 11 cierre el UPDATE directo de `orders.status`.
+**Para medirlo:** `supabase/diag/mesas-sin-pagos.sql` (solo lectura): la consulta 1 da la clase de
+cada orden y el turno en que cayó; la 2, cada turno con su sobrante y lo que esas ventas explicarían
+(una mesa cobrada en efectivo sin `payments` deja la plata en el cajón sin que el sistema la
+espere: sobrante por ese monto); la 3, las de total 0.
+**RESULTADO en producción (corrido por el dueño del repo el 2026-10-09):** en G-10 las 25 son clase
+**A, fiado saldado con abonos: ninguna mesa cobrada sin pago**, y la consulta 2 da 0 ventas sin pago
+en todos los turnos: **el bug no explica ningún sobrante**. Los números de la 2b no eran el bug: la
+2b no separaba los fiados saldados. En Salchimelo, la consulta 3: 54 cortesías del 100 % hechas por
+el dueño ($1.131.500 desde el 1/8) y **una sola clase 4** (sin descuento y con consumo): la orden
+1811 (12/9, $16.000). La consulta 1 de Salchimelo no está corrida. El camino del código sigue siendo
+real (`tests/mesa-total-cero.spec.ts` lo reproduce contra el código anterior y lo cierra el hotfix),
+pero en G-10 no hay rastro de que haya pasado.
+
+### 🔴 Una tanda entra a una orden YA cobrada o cancelada (hallado 2026-10-09)
+
+`add_order_items_with_extras` (`pos-sale-lotes.sql`, `e2e6ec81…`) bloquea la orden y valida sede,
+productos y extras, pero **no mira `orders.status`**. Un equipo con la pantalla vieja (la mesa todavía
+"ocupada" en su copia) puede agregar una tanda a una orden `delivered` o `cancelled`: descuenta
+stock, sube el total y nadie la cobra. `close_table_sale` NO lo cierra. Clase: un escritor de la
+orden que no valida el estado (la misma de la doble anulación).
+**Decidido el 2026-10-09 y construido:** en la pantalla, `hotfix/mesa-total-cero` (relee el estado
+antes de agregar); en el servidor, la guarda 1c de `add_order_items_with_extras` en
+`mesas-servidor.sql` (Paso 9). **Hasta el Paso 9 sigue abierto en el servidor:** la guarda del
+navegador deja una ventana de milisegundos entre releer y escribir.
+
+### Realtime de la base LOCAL no publica ninguna tabla (medido 2026-10-09)
+
+`select tablename from pg_publication_tables where pubname = 'supabase_realtime';` devuelve **cero
+filas** en el Supabase de Docker: localmente la pantalla nunca se entera de cambios de otros equipos
+(Mesas, cocina, delivery). Ningún test lo notaba porque ninguno dependía de eso; lo hizo visible
+`tests/mesas-frontend.spec.ts` (*"otro equipo la cobró"*), que esperaba ver la mesa "Libre". Lo que
+NO se puede probar localmente hoy: que el modal de cobro siga abierto cuando Realtime libera la mesa
+(el arreglo existe en el Paso 10, `checkoutTable`). **Producción tampoco publica ninguna tabla**
+(la misma consulta, corrida por el dueño del repo el 2026-10-09: 0 filas): lo que ve la suite es lo
+que pasa en producción. Consecuencias y propuesta para activarlo (inventario, RLS medido, carga,
+riesgos, SQL con su reversa): `docs/diseno-realtime.md` en la rama `feat/realtime`. Lo más visible:
+Cocina no recibe comandas nuevas sola y su indicador dice "En línea" igual (el canal informa
+`SUBSCRIBED` aunque no llegue nada, medido).
+
+### Diseño C — cuentas abiertas: lo que hay que preservar (anotado 2026-10-09)
+
+G-10 usa mesas con nombre de persona como cuentas abiertas (a la fecha: Camelo $221.000 desde el 3/9,
+Sebastian $126.500, Isabella $47.500, Katerine $23.000; el 2026-10-09 siguen vivas, Camelo con
+consumo hasta el 7/10). Es el flujo intencional de CLAUDE.md
+(*"Mesas abiertas de larga duración"*): **cualquier cambio se habla con el cliente primero.** Para
+migrarlas sin perder lo que deben, el diseño tiene que decidir y probar:
+- **El monto:** `orders.total` contra la suma de las líneas (`supabase/diag/mesas-sin-pagos.sql`,
+  consulta 4). Antes del Paso 3 el total lo calculaba el cliente; si difieren, lo que dice la
+  pantalla no es lo que dicen las líneas y hay que decidir cuál vale ANTES de migrar.
+- **El stock:** ya se descontó al agregar cada tanda; la migración no puede volver a descontarlo.
+- **La fecha de la venta (R7):** convertirlas hoy en fiado (`close_table_sale` con `p_fiado`) las
+  cuenta como venta del día de la conversión, no de cuando se consumieron (Camelo: desde el 3/9).
+- **Las opciones, sin elegir:** (a) dejarlas como mesas y marcarlas como "cuenta" para sacarlas de la
+  operación de mesas; (b) pasarlas a fiado con un cliente (entra al módulo de Fiado con su saldo);
+  (c) una entidad nueva de cuenta abierta ligada a un cliente, que se lleva la orden tal cual.
+- **El objetivo de la migración, por UUID de orden** (R2), nunca por nombre de mesa.
+
+### 🔴 Una venta se anula DOS veces si dos anulaciones llegan juntas: el stock vuelve dos veces (hallado 2026-10-08)
+
+**La clase:** una guarda de estado leída SIN lock antes de escribir (*check-then-act*).
+`register_sale_void` (`2e9d312e…`, de `close-cash-shift.sql`) lee la orden sin bloquearla, comprueba
+"ya está anulada" y recién la bloquea en el `UPDATE` final. Dos anulaciones simultáneas de la misma
+venta (dos clics en "Anular", dos equipos) pasan las dos la guarda: la segunda espera el `UPDATE`
+de la primera y sigue, sin error.
+**Medido en Docker el 2026-10-08** (`tests/mesas-servidor.spec.ts`, *"DOS anulaciones A LA VEZ"*,
+con la versión de producción puesta a propósito): la segunda esperó 2,75 s, no dio error y el
+stock volvió dos veces (`insumo:6,simple:2` en vez de `insumo:3,simple:1`). La plata no se duplica
+(el segundo `DELETE` de `payments` borra 0 filas); el inventario sí, en lo que vendió esa venta.
+**Barrido de la clase (R3), por las tablas y no por nombres:** las funciones que tocan `stock_qty`
+o el estado de anulación son `add_order_items_with_extras` (bloquea la orden), `adjust_stock` y
+`register_purchase` (sin guarda de estado: `adjust_stock` suma de forma atómica),
+`close_cash_shift` (bloquea el turno) y `register_sale_void`, la única instancia.
+**Se cierra en el Paso 9** (`mesas-servidor.sql`): la orden `FOR UPDATE` después del turno y la
+guarda otra vez sobre la fila bloqueada. **Hasta entonces sigue abierto en producción.**
+**¿Ya pasó?** `supabase/diag/mesas-preflight.sql`, consulta 5 (solo lectura): una fila = una venta
+que devolvió su stock más de una vez. Señal verificada con contraste en Docker: 2 anulaciones con
+la versión de producción, 1 con la del Paso 9.
+
 ### 🔴 Fiado en MESA: cualquier usuario de la sede puede pasar una orden a fiado (hallado 2026-10-08)
 
 El cobro de mesa a fiado no pasa por ninguna función: `setOrderFiado` (`src/lib/supabase-helpers.ts`)
@@ -1089,9 +1190,12 @@ rol ni permiso en el servidor**: hoy lo frena solo la pantalla. Un usuario de la
 
 **No lo cubre A** (A cambia quién COBRA: `register_pos_sale` y `register_sale_payment`). Va en el
 paquete Mesas: `close_table_sale` con el parámetro de fiado (decidido 2026-10-07) exige
-`fiado.gestionar` en el servidor, y entonces el UPDATE directo se puede cerrar. Para
-reconfirmarlo: `select policyname, qual, with_check from pg_policies where tablename = 'orders'
-and cmd = 'UPDATE';` y `grep -rn "setOrderFiado" src/`.
+`fiado.gestionar` en el servidor, y entonces el UPDATE directo se puede cerrar.
+**Estado (2026-10-09):** desde el Paso 10 (`feat/mesas-servidor`) la pantalla ya no lo usa
+(`setOrderFiado` se borró; el fiado de mesa va por `close_table_sale`). **La puerta sigue abierta en
+la base** hasta el Paso 11, que saca las columnas de cobro del UPDATE directo. Para reconfirmar lo
+que sigue abierto: `select policyname, qual, with_check from pg_policies where tablename = 'orders'
+and cmd = 'UPDATE';`.
 
 ### 🔴 A (permisos de cobro): `profiles.role` y `profiles.role_id` pueden divergir (anotado 2026-10-07)
 
