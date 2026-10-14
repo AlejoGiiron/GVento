@@ -118,6 +118,7 @@ const COLUMNAS_DEL_ESQUEMA: ColumnaEsquema[] = [
   { tabla: 'payments', columna: 'method', ejemplo: 'nequi', permitida: true },
   { tabla: 'debt_payments', columna: 'payment_method', ejemplo: 'transfer', permitida: true },
   { tabla: 'debt_payments', columna: 'batch_id', ejemplo: '7c1f2e9a-3b4d-4e5f-8a9b-0c1d2e3f4a5b' },
+  { tabla: 'debt_payments', columna: 'shift_id', ejemplo: '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d', permitida: true },
 
   // ── cash_shifts / cash_movements (caja-cierre-cuadre.sql, shift-reconciliation.sql)
   { tabla: 'cash_shifts', columna: 'opening_amount', ejemplo: 200000 },

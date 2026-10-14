@@ -86,6 +86,25 @@ export function useCashShift() {
     refetchInterval: 5_000,
   })
 
+  // Abonos de fiado NO en efectivo de este turno, por método (debt_payments.shift_id, que
+  // pone la función del abono: supabase/arqueo-abonos.sql). Entran al esperado de su método
+  // en el arqueo; el efectivo no, porque ya es un ingreso de caja.
+  const { data: abonosSummary = null } = useQuery({
+    queryKey: ['shift_abonos', currentShift?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('debt_payments')
+        .select('payment_method, amount')
+        .eq('shift_id', currentShift!.id)
+        .neq('payment_method', 'cash')
+      if (error) throw error
+      const suma = (m: string) => (data ?? []).filter((d) => d.payment_method === m).reduce((s, d) => s + Number(d.amount), 0)
+      return { card: suma('card'), transfer: suma('transfer'), nequi: suma('nequi') }
+    },
+    enabled: !!currentShift?.id,
+    refetchInterval: 5_000,
+  })
+
   const invalidateShift = () =>
     queryClient.invalidateQueries({ queryKey: ['cash_shift_open', restaurantId] })
 
@@ -190,6 +209,7 @@ export function useCashShift() {
     /** `movements` vale [] mientras carga: "sin movimientos" solo es cierto con esto en false. */
     isLoadingMovements,
     salesSummary,
+    abonosSummary,
     movements,
     vouchersTotal,
     refetchSales,
