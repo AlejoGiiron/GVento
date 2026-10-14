@@ -1069,8 +1069,21 @@ viejas no la llenan). Con el frontend nuevo en producción, primero el rollback 
 
 ## Paso 6 — Fase 2 de D (cerrar el UPDATE directo de `cash_shifts`)
 
+> **Rehecho el 2026-10-13, después de P0.2.** Sale el **martes 20/10, justo después de
+> `mesas-fase2.sql` (Paso 11)**. La fase 1 (`close-cash-shift.sql`) nunca quitó este UPDATE: lo
+> dejó a propósito para esta fase (punto 2 de su encabezado), y en prod `authenticated` lo tiene
+> porque esta fase no se ha aplicado. El frontend no actualiza `cash_shifts` (solo lee, e inserta
+> al abrir turno; grep de `from('cash_shifts')` en `src/` el 2026-10-13), así que no hay nada que
+> pasar a función antes. Dos cosas cambiaron con P0.2: `anon` ya no tiene el UPDATE (6.3 y 6.5
+> usan ahora `supabase/diag/cash-shifts-preflight.sql`) y la reversa vieja (`fase2-revertir.sql`)
+> **ya no sirve**: le devolvería el UPDATE también a `anon`. La nueva es
+> `cash-shifts-update-revertir.sql` (6.7).
+
 - **Depende de:** Paso 1 (para ver qué versión tiene cada equipo) y de que **G-10 cierre por el
-  servidor**. No depende de los Pasos 2 a 5.
+  servidor**. No depende de los Pasos 2 a 5. Si se corre después de `mesas-fase2.sql` en la misma
+  sesión, la guarda de esa migración ya probó que todos los equipos en `app_versiones` tienen una
+  versión del Paso 10 o posterior (que cierran por `close_cash_shift`); 6.1 sigue haciendo falta
+  para el equipo que nunca reportó versión.
 - **Qué lleva:** solo SQL.
 - **Horario:** el del Paso 0, con **ningún turno abierto en G-10 ni en Salchimelo** (columna
   `turnos_abiertos` de **Q-AHORA** = 0 para las dos). Si alguien cierra con un equipo viejo
@@ -1098,31 +1111,28 @@ Esperado: **cada** usuario que cierra turno (en particular **valeria sanchez**) 
 equipo con versión del Paso 1 o posterior, visto después de ese release. Un usuario con
 `version` vacía no cargó ninguna versión con aviso: su equipo puede seguir con el JS viejo.
 
-**6.3 — ANTES:**
-
-```sql
-select (select count(*) from information_schema.role_table_grants
-         where table_schema = 'public' and table_name = 'cash_shifts'
-           and grantee in ('anon', 'authenticated') and privilege_type = 'UPDATE') as grants_update,
-       exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'cash_shifts'
-                and policyname = 'cash_shifts: cajero/admin cierra turno') as policy_cierre;
-```
-
-Esperado: `2 | t`. Si da `0 | f`, ya está aplicada: no la apliques.
+**6.3 — ANTES:** `supabase/diag/cash-shifts-preflight.sql`. Esperado: `como_antes = t` en las
+11 filas (fase 1 y lo que la redefinió, con sus md5; `anon` sin UPDATE; `authenticated` con UPDATE;
+las 3 políticas). Si las filas 10 y 11 dan `como_despues = t`, ya está aplicada: no la apliques.
+Una fila de 1 a 9 en `f` es una diferencia con el repo que este paso no arregla: parar.
 
 **6.4 — Aplicar:** `fase2-aplicar.sql` (raíz), md5 **`d66e82313f1e7abfa428cdb22e10ccdd`**.
 
-**6.5 — Verificación:** la consulta de 6.3. Esperado: **`0 | f`**.
+**6.5 — Verificación:** la consulta de 6.3. Esperado: **`como_despues = t` en las 11 filas**.
 
 **6.6 — Prueba en Café Aroma:** abrir turno → una venta en efectivo → **cerrar turno**. Tiene
 que cerrar sin error. Si dice "Error al cerrar el turno": recargar (Ctrl+Shift+R) y volver a
 cerrar. Si sigue, reversa.
 
-**6.7 — Reversa:** `fase2-revertir.sql` (raíz), md5 **`034ec0a4a314d3294951a710255a9431`**. No hay
-frontend involucrado. Reabre el UPDATE directo (el camino viejo): es para una emergencia con un
-equipo que no puede recargar, no para un "Error al cerrar", que se arregla recargando.
-Esperado: verifica la policy contra el hash de prod y hace rollback si no da; después,
-6.3 da `2 | t`.
+**6.7 — Reversa:** `cash-shifts-update-revertir.sql` (raíz, fuera de git), md5
+**`12244f272c915169d115f59a401202bf`**. **No usar `fase2-revertir.sql`** (le devuelve el UPDATE a
+`anon`). No hay frontend involucrado. Reabre el UPDATE directo solo para `authenticated` (el camino
+viejo): es para una emergencia con un equipo que no puede recargar, no para un "Error al cerrar",
+que se arregla recargando. Aborta si el paso no está aplicado; verifica la policy contra el hash de
+prod y que `anon` siga sin UPDATE, y hace rollback si no da. Después, 6.3 da `como_antes = t`.
+Probado en Docker el 2026-10-13: después → reversa → antes → reversa otra vez (aborta) → aplicar →
+re-aplicar (idempotente) → después; con la reversa puesta, `cierre-turno-servidor.spec.ts` ("el
+camino viejo está cerrado") se pone rojo.
 
 ---
 
@@ -1582,7 +1592,7 @@ Los martes G-10 y Salchimelo no abren: los pasos con SQL van ese día.
 | mar 13/10 | hotfix combinado de Mesas (HC) | `hotfix/mesas-13-10` | fast-forward desde `fab23b0` (si la suite no está verde a las 12:30: mié 14/10, 7:00) |
 | mar 13/10 (adelantado; HC ya salió: `main` = `976c2ec`) | Cocina, Mesas y Delivery se recargan solas | `feat/cocina-refresco` | rebasada sobre el hotfix combinado (`09945b2`), suite completa y fast-forward (si la suite no está verde a las 18:00: mié 14/10, 7:00) |
 | mar 13/10 (adelantado; R y `fix/cocina-avisos` ya salieron: `develop` = `c3a00c5`) | el arqueo cuenta los abonos de fiado (AA) | `feat/arqueo-abonos` | rebasada sobre `develop` (`c3a00c5`), suite completa y fast-forward; SQL antes del frontend (AA.1–AA.4) |
-| un martes después del arqueo | Paso 6, fase 2 de D | — | parte de la versión de `close_cash_shift` que deja el arqueo (`a395c0a1…`), no de la de hoy |
+| mar 20/10, justo después del Paso 11 | Paso 6, fase 2 de D | — | parte de la versión de `close_cash_shift` que deja el arqueo (`a395c0a1…`); pre-flight `supabase/diag/cash-shifts-preflight.sql` |
 | mar 13/10 (adelantado, en cadena) | Pasos 7-8 (permisos de cobro, A), después 9-10 (Mesas en el servidor) y después el 11 (anon sin escritura) | `feat/a-permisos`, `feat/mesas-servidor` y la del 11, cada una encima de la anterior | fast-forward en cadena: cada rama entra cuando la anterior ya está en `develop` |
 | vie 16/10, con los locales abiertos | una sola cuenta viva por mesa (UC) | `fix/mesas-una-cuenta` | ya en `develop` por fast-forward; SQL antes del frontend (UC.1–UC.4) |
 | al final | Realtime | `feat/realtime` | después del paquete de Mesas |
@@ -1605,7 +1615,7 @@ Los martes G-10 y Salchimelo no abren: los pasos con SQL van ese día.
 | HC | hotfix combinado: relee la orden + mesas pegadas + varias cuentas vivas | — | `hotfix/mesas-13-10` | rollback |
 | R | Cocina, Mesas y Delivery se recargan solas | — | `feat/cocina-refresco` | rollback (vuelve al hotfix combinado) |
 | AA | el arqueo cuenta los abonos de fiado | `arqueo-abonos.sql` (`f6ae9549…`), pre-flight justo antes | `feat/arqueo-abonos` | `arqueo-abonos-revertir.sql` (`b6ebb3fb…`) + rollback |
-| 6 | fase 2 de D | `fase2-aplicar.sql` (`d66e8231…`) | — | `fase2-revertir.sql` (`034ec0a4…`) |
+| 6 | fase 2 de D | `fase2-aplicar.sql` (`d66e8231…`) = `supabase/close-cash-shift-revoke.sql` | — | `cash-shifts-update-revertir.sql` (`12244f27…`); **no** `fase2-revertir.sql` (de antes de P0.2) |
 | 7 | SQL de A (cobrar por permiso) | `permisos-cobro.sql` (`55be33e4…`) + `seed-system-roles.sql` (`83219f0e…`), con pre-flight 1, 3 y 4 justo antes | — | `permisos-cobro-revertir.sql` (`e5ac822d…`) |
 | 8 | frontend de A | — | `feat/a-permisos` | rollback (el SQL del 7 se queda) |
 | 9 | SQL de Mesas en el servidor | `mesas-servidor.sql` (`4adc0197…`), con pre-flight 3, 4 y 5 justo antes | — | `mesas-servidor-revertir.sql` (`2f557c6d…`), solo antes del 10 |
