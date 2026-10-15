@@ -383,6 +383,12 @@ deno_version = 2
 [functions.aplicar-estado]
 verify_jwt = false
 
+# portal: la única puerta pública de Pedidos en línea (P2). El cliente del portal no tiene sesión
+# y la llave anon no protegería nada (es pública): la protección está en la función (allowlist,
+# límite por IP y, en P3, Turnstile). Al desplegar: `supabase functions deploy portal --no-verify-jwt`.
+[functions.portal]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54337

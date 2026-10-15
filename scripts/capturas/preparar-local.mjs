@@ -34,7 +34,7 @@
  * Los dos archivos quedan intactos en el repo. Ver el README de capturas.
  */
 import { execFileSync, spawnSync } from 'node:child_process'
-import { readFileSync, existsSync, writeFileSync } from 'node:fs'
+import { readFileSync, existsSync, writeFileSync, readdirSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve, join } from 'node:path'
@@ -106,6 +106,7 @@ const ORDEN = [
   'mesas-una-cuenta.sql',               // una sola cuenta viva por mesa (índice) + abrir_mesa en una transacción
   'mesas-fase2.sql',                    // Paso 11: sin escrituras directas de cobro, ítems ni mesas (authenticated)
   'portal-config.sql',                  // Pedidos en línea P1: configuración del portal y productos publicados
+  'portal-publico.sql',                 // Pedidos en línea P2: catálogo, cálculo y cotización (solo service_role) + límite por IP
 ]
 
 // ── QUIÉN GANA cuando una función está definida en más de un .sql ─────────────
@@ -341,7 +342,7 @@ function aplicar(nombre) {
     if (corte === -1) {
       throw new Error(
         'organization-subscription.sql cambió: ya no está el marcador de la ' +
-        'sección de verificación manual. Revisá hasta dónde llega la migración real.',
+        'sección de verificación manual. Revisa hasta dónde llega la migración real.',
       )
     }
     sql = sql.slice(0, sql.lastIndexOf('\n', corte))
@@ -383,6 +384,20 @@ if (!existsSync(FN_ENV) || !/^GCENTRO_HMAC_SECRET=\S+/m.test(readFileSync(FN_ENV
   secretoNuevo = true
   console.log('  secreto HMAC local creado en supabase/functions/.env')
 }
+// Edge Function `portal` (P2): la sal del límite por IP y los orígenes del servidor de pruebas.
+// Solo locales: en la nube son secretos aparte (supabase secrets set).
+{
+  let env = readFileSync(FN_ENV, 'utf-8')
+  const agregar = []
+  if (!/^PORTAL_SAL=\S{32,}/m.test(env)) agregar.push(`PORTAL_SAL=local-${randomBytes(24).toString('hex')}`)
+  if (!/^PORTAL_ORIGENES=\S+/m.test(env)) agregar.push('PORTAL_ORIGENES=http://localhost:5180,http://localhost:5173')
+  if (agregar.length > 0) {
+    if (!env.endsWith('\n')) env += '\n'
+    writeFileSync(FN_ENV, env + agregar.join('\n') + '\n')
+    secretoNuevo = true
+    console.log(`  variables del portal agregadas a supabase/functions/.env (${agregar.map((l) => l.split('=')[0]).join(', ')})`)
+  }
+}
 try {
   execFileSync('docker', ['inspect', DB], { stdio: 'ignore' })
   console.log(`  ya está arriba (${DB})`)
@@ -406,14 +421,50 @@ const secretoEnContenedor = () => {
   catch { return '' }
 }
 const secretoArchivo = readFileSync(FN_ENV, 'utf-8').match(/^GCENTRO_HMAC_SECRET=(\S+)/m)[1]
-if (secretoNuevo || secretoEnContenedor() !== secretoArchivo) {
-  console.log('  recreando el stack para que el edge runtime lea el secreto…')
+// El runtime carga la LISTA de funciones y el .env al crearse, desde la carpeta en la que se corrió
+// `supabase start` (SUPABASE_INTERNAL_FUNCTIONS_CONFIG y el bind mount). Una función nueva de esta
+// rama, o un stack levantado desde otro árbol, no se ve hasta recrearlo desde ESTE árbol.
+const funcionesDelArbol = readdirSync(join(SUPA, 'functions'), { withFileTypes: true })
+  .filter((d) => d.isDirectory() && existsSync(join(SUPA, 'functions', d.name, 'index.ts'))).map((d) => d.name)
+// Solo las variables que este script escribe (allowlist): un valor con comillas o una línea que la
+// CLI interpreta distinto no tienen por qué coincidir textualmente con el Env del contenedor.
+const VARS_FN = ['GCENTRO_HMAC_SECRET', 'PORTAL_SAL', 'PORTAL_ORIGENES']
+const varsArchivo = Object.fromEntries(readFileSync(FN_ENV, 'utf-8').split(/\r?\n/)
+  .map((l) => l.match(/^([A-Z_][A-Z0-9_]*)=(\S+)$/)).filter((m) => m && VARS_FN.includes(m[1])).map((m) => [m[1], m[2]]))
+const runtimeDesactualizado = () => {
+  try {
+    const env = execFileSync('docker', ['inspect', EDGE, '--format', '{{range .Config.Env}}{{println .}}{{end}}'], { encoding: 'utf-8' })
+    const montaje = execFileSync('docker', ['inspect', EDGE, '--format', '{{range .Mounts}}{{println .Source}}{{end}}'], { encoding: 'utf-8' })
+    const config = JSON.parse(env.match(/^SUPABASE_INTERNAL_FUNCTIONS_CONFIG=(.*)$/m)?.[1] ?? '{}')
+    const faltan = funcionesDelArbol.filter((f) => !(f in config))
+    const varsMal = Object.entries(varsArchivo).filter(([k, v]) => !env.split(/\r?\n/).includes(`${k}=${v}`)).map(([k]) => k)
+    // El montaje desde OTRO árbol también recrea: las funciones que se probarían serían las de ese
+    // árbol, no las de esta rama (R4). Si este árbol es un worktree que después se borra, hay que
+    // volver a correr el prepare desde el árbol principal (memoria: supabase-local-desde-arbol-principal).
+    const arbol = ROOT.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (_, l) => `/${l.toLowerCase()}`)
+    const otroArbol = !montaje.replace(/\\/g, '/').includes(`${arbol}/supabase/functions`)
+    if (faltan.length || varsMal.length || otroArbol) {
+      console.log(`  el runtime no corresponde a este árbol (funciones que faltan: ${faltan.join(', ') || 'ninguna'}; ` +
+        `variables distintas: ${varsMal.join(', ') || 'ninguna'}; montado desde otro árbol: ${otroArbol ? 'sí' : 'no'})`)
+      return true
+    }
+    return false
+  } catch { return true }
+}
+if (secretoNuevo || secretoEnContenedor() !== secretoArchivo || runtimeDesactualizado()) {
+  console.log('  recreando el stack para que el edge runtime lea las variables y sirva las funciones de este árbol…')
   try { execFileSync('docker', ['rm', '-f', EDGE], { stdio: 'ignore' }) } catch { /* no existía */ }
   execFileSync('supabase', ['stop'], { cwd: ROOT, stdio: 'inherit' })
   execFileSync('supabase', ['start'], { cwd: ROOT, stdio: 'inherit' })
+} else {
+  // El runtime NO recarga un cambio en el código de una función (medido el 2026-10-15 en Windows: a
+  // los 30 s seguía sirviendo la versión vieja; el montaje no avisa los cambios). Sin reiniciarlo, la
+  // suite probaría el código de la última vez que arrancó, no el de este árbol (R4).
+  console.log('  reiniciando el edge runtime para que cargue el código actual de las funciones…')
+  execFileSync('docker', ['restart', EDGE], { stdio: 'ignore' })
 }
-if (secretoEnContenedor() !== secretoArchivo) {
-  console.error(`  🔴 ${EDGE} no tiene el GCENTRO_HMAC_SECRET de supabase/functions/.env.`)
+if (secretoEnContenedor() !== secretoArchivo || runtimeDesactualizado()) {
+  console.error(`  🔴 ${EDGE} no tiene las variables de supabase/functions/.env o no sirve las funciones de este árbol.`)
   process.exit(1)
 }
 let edgeOk = false
@@ -425,10 +476,27 @@ for (let i = 0; i < 20 && !edgeOk; i++) {
   if (!edgeOk) await new Promise((ok) => setTimeout(ok, 1000))
 }
 if (!edgeOk) {
-  console.error(`  🔴 ${EDGE} no sirve /functions/v1/create-user. Revisá \`docker logs ${EDGE}\`.`)
+  console.error(`  🔴 ${EDGE} no sirve /functions/v1/create-user. Revisa \`docker logs ${EDGE}\`.`)
   process.exit(1)
 }
-console.log('  ✅ sirviendo aplicar-estado y create-user')
+// OPTIONS lo contesta Kong (plugin de CORS) sin llegar a la función: no prueba que `portal` corra.
+// Un cuerpo vacío sí llega a su código y vuelve 400 "Acción desconocida." (y prueba que tiene PORTAL_SAL:
+// sin ella respondería 500 antes de mirar el cuerpo).
+if (funcionesDelArbol.includes('portal')) {
+  let portalOk = false
+  for (let i = 0; i < 20 && !portalOk; i++) {
+    try {
+      const r = await fetch('http://127.0.0.1:54331/functions/v1/portal', { method: 'POST', body: '{}' })
+      portalOk = r.status === 400 && /Acción desconocida/.test(await r.text())
+    } catch { /* todavía arrancando */ }
+    if (!portalOk) await new Promise((ok) => setTimeout(ok, 1000))
+  }
+  if (!portalOk) {
+    console.error(`  🔴 /functions/v1/portal no responde su 400 de cuerpo inválido. Revisa \`docker logs ${EDGE}\`.`)
+    process.exit(1)
+  }
+}
+console.log(`  ✅ sirviendo ${funcionesDelArbol.join(', ')}`)
 
 // ── 1. Esquema desde cero ───────────────────────────────────────────────────
 paso(`Esquema (${ORDEN.length} archivos, base en blanco)`)

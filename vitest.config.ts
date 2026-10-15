@@ -5,7 +5,8 @@ import path from 'path'
 // de Playwright que viven en tests/ (esos corren con `pnpm test:e2e`).
 export default defineConfig({
   test: {
-    include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    // + las reglas puras de las Edge Functions (sin Deno ni red; ver supabase/functions/portal/reglas.ts).
+    include: ['src/**/*.{test,spec}.{ts,tsx}', 'supabase/functions/**/*.test.ts'],
     environment: 'node',
   },
   // El alias '@' está en vite.config.ts, pero este archivo es una config

@@ -78,6 +78,10 @@ const COLUMNAS_DEL_ESQUEMA: ColumnaEsquema[] = [
   { tabla: 'portal_sedes', columna: 'tiempo_min', ejemplo: 30 },
   { tabla: 'portal_sedes', columna: 'tiempo_max', ejemplo: 45 },
   { tabla: 'portal_productos', columna: 'precio_domicilio', ejemplo: 10000 },
+  // ── portal_limites (portal-publico.sql, Pedidos en línea P2): el hash de la IP del cliente.
+  { tabla: 'portal_limites', columna: 'clave', ejemplo: 'cotizar:3f1a9c0d5e7b2a4c6e8f0a1b3c5d7e9f1a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d' },
+  { tabla: 'portal_limites', columna: 'ventana', ejemplo: '2026-10-15T19:49:00+00:00' },
+  { tabla: 'portal_limites', columna: 'cuenta', ejemplo: 61 },
 
   // ── profiles / roles (schema.sql, config-profile-active.sql)
   { tabla: 'profiles', columna: 'email', ejemplo: 'cajero@salchimelo.co' },

@@ -1233,6 +1233,42 @@ guarda otra vez sobre la fila bloqueada. **Hasta entonces sigue abierto en produ
 que devolvió su stock más de una vez. Señal verificada con contraste en Docker: 2 anulaciones con
 la versión de producción, 1 con la del Paso 9.
 
+### Portal público (P2): lo que no se pudo medir en local (anotado 2026-10-15)
+
+- **CORS en producción.** El Kong del stack local tiene un plugin de CORS que contesta él mismo el
+  `OPTIONS` y pisa `Access-Control-Allow-Origin` con `*`, así que en local no se ve el encabezado que
+  pone la función `portal`. Lo que SÍ se mide en local es que un origen ajeno recibe **403** (lo
+  rechaza la función, no el encabezado). En producción, después de desplegarla:
+  `curl -s -i -H "Origin: https://evil.example" -d '{"accion":"catalogo","slug":"x"}' <url>/functions/v1/portal`
+  tiene que dar 403, y con `Origin: https://g-vento.vercel.app` tiene que traer
+  `access-control-allow-origin: https://g-vento.vercel.app` (no `*`).
+- **El límite por IP es por minuto fijo y por IP pública.** Con CGNAT (datos móviles) muchos
+  clientes comparten IP: 120 catálogos y 60 cotizaciones por minuto por IP es holgado a propósito.
+  Sin IP (ni `cf-connecting-ip` ni `x-forwarded-for`), un solo balde GLOBAL de 600 por minuto.
+  No es la defensa del pedido: en P3, crear el pedido exige Turnstile.
+- **El hash de la IP:** HMAC-SHA256 con `PORTAL_SAL` (secreta, fija) y el día de Bogotá dentro. Sin
+  la sal no se relaciona un día con otro ni se revierte; **si `PORTAL_SAL` se filtra, los hashes
+  guardados se revierten probando las IPv4.** Lo acota que las filas se purgan a las 24 h (la purga
+  corre en cada consulta al contador: sin tráfico, las filas viejas esperan a la siguiente). Rotar
+  la sal = cambiar el secreto (los contadores del minuto en curso se reinician; no se pierde nada más).
+- **Lo que guarda la plataforma:** el código de la función no registra la IP, pero los logs de
+  Supabase (edge logs) pueden traer los encabezados de la petición. No está medido. Y cada consulta
+  del portal hace 3 peticiones (la función y 2 llamadas a la base): ESTIMADO, sin medir, unas 3
+  líneas de log por consulta, que cuentan para la cuota de ingesta (ya se pasó una vez). Se mide en
+  el panel de uso de Supabase después de desplegar.
+- **Tercer lado de "se puede pedir": la configuración de P1.** `portal_productos_lista`
+  (`portal-config.sql`) calcula `agotado` solo con el stock propio (`stock_tracking and stock_qty <= 0`)
+  y no mira si la categoría está activa; el portal (P2) usa la receta del compuesto
+  (`portal_unidades_disponibles`) y excluye las categorías desactivadas (`portal_producto_vendible`).
+  Consecuencias: un combo sin insumos sale "disponible" en Configuración y agotado en el portal; un
+  producto de una categoría desactivada se puede marcar "En el portal" y no sale en el catálogo, sin
+  aviso. No se cambió `portal-config.sql` porque sale el 2026-10-20 con su md5 ya revisado. Se cierra
+  con un SQL nuevo (R5) que redefina `portal_productos_lista` sobre las funciones de P2 (propuesto,
+  sin aprobar).
+- **El stock exacto se puede deducir.** El catálogo no lo muestra, pero cotizando cantidades de 1 a
+  50 (`sin_stock` / bien) se averigua en unas 6 consultas. Es inherente a no dejar pedir de más; si
+  algún negocio lo considera sensible, se cambia la regla (por ejemplo, no validar stock al cotizar).
+
 ### 🔴 `orders.status` con cualquier valor por la API — se cierra con P4 (decidido 2026-10-14)
 
 Después del Paso 11, `authenticated` todavía puede escribir `orders.status` directo (lo necesitan

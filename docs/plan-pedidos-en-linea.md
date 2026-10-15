@@ -47,6 +47,29 @@ Un portal público por negocio (`pedir.gvento.online/<negocio>`) donde el client
 
 **Cómo se publica:** igual que hasta ahora. Una cosa por día, en la ventana de 7:00 a 14:00, el SQL los martes (G-10 y Salchimelo no abren), pre-flight antes y verificación con `demo@demo.com`. El portal sale apagado: se prende por negocio desde Configuración cuando el piloto esté listo.
 
+## P2 · cómo se publica el servidor (partes 1 y 2, 2026-10-15)
+
+Nada de esto lo ve un cliente hasta que exista la pantalla del portal y un negocio lo publique.
+
+1. **SQL (un martes, después de P1):** consultas 1 y 2 de `supabase/diag/portal-publico-preflight.sql`
+   → `supabase/portal-publico.sql` → consultas 1 y 3. Reversa: `portal-publico-revertir.sql` (raíz,
+   fuera de git), después de borrar la función.
+2. **Secretos de la función** (una sola vez, desde la carpeta del repo):
+   ```bash
+   supabase secrets set --project-ref <ref> PORTAL_SAL=$(openssl rand -hex 32) \
+     PORTAL_ORIGENES=https://pedir.gvento.online,https://g-vento.vercel.app
+   ```
+   Opcional, para las vistas previas de Vercel: `PORTAL_PREVIEW_SUFIJO=-<equipo>.vercel.app`.
+3. **Desplegar:** `supabase functions deploy portal --no-verify-jwt --project-ref <ref>`.
+4. **Verificar** (sin negocio publicado responde `{"disponible":false}`):
+   - `curl -s -d '{"accion":"catalogo","slug":"no-existe"}' https://<ref>.supabase.co/functions/v1/portal`
+     → `{"disponible":false}`;
+   - con `-H "Origin: https://evil.example"` → **403**;
+   - con `-H "Origin: https://g-vento.vercel.app"` → `access-control-allow-origin: https://g-vento.vercel.app`
+     (en local no se puede medir: ver DEUDAS → *"Portal público (P2)"*);
+   - `-d '{"accion":"catalogo","slug":"x","total":1}'` → **400** "Clave no permitida: total.".
+5. **Quitar:** `supabase functions delete portal --project-ref <ref>` y, si se quiere, la reversa del SQL.
+
 ## Lo que hace falta de tu lado
 
 - [x] Documentación de Factus Pay y respuestas a las dudas (13/10): devuelve la llave Bre-B, mínimo $1.000, estados `ready`/`paid`, vencimiento en segundos, 6 reintentos, una cuenta por negocio, retiro inmediato.
