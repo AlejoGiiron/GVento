@@ -404,13 +404,14 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    producto activo, de una categoría activa, con precio, publicado, y agotado por su stock, por los
    insumos de la receta o, para un extra, por el producto ligado. La usan `portal_faltantes_de`,
    `portal_productos_lista` y `guardar_portal_productos` (P1) y el catálogo y el cálculo del portal
-   (P2). La pantalla de Configuración recibe el `motivo` de la regla y decide con una ALLOWLIST
-   (`sePuedePublicar` en `src/lib/portal.ts`); lo único que mira por su cuenta es el precio a domicilio
-   que se está escribiendo, que puede resolver "sin precio". **Un motivo nuevo toca 3 lados:** la
-   función (en un archivo NUEVO, R5), su mensaje en `guardar_portal_productos` y su texto en
-   `avisoProducto`; si falta alguno, falla cerrado (no deja publicar, con un texto genérico). Si el
-   motivo nuevo NO bloquea la venta (como `agotado`), además va en `vendible` dentro de la función:
-   los llamadores leen esa columna, no repiten la lista.
+   (P2). Las decisiones salen de dos columnas de la función: `vendible` (está a la venta; el stock de
+   hoy decide) y `publicable` (se puede marcar "En el portal"). Las leen `portal_faltantes_de`,
+   `guardar_portal_productos`, el catálogo, el cálculo y la pantalla (`sePuedePublicar`); nadie repite
+   la lista de motivos. Lo único que la pantalla mira por su cuenta es el precio a domicilio que se
+   está escribiendo, que puede resolver "sin precio". **Un motivo nuevo toca 3 lados:** la función (en
+   un archivo NUEVO, R5, con `vendible`/`publicable` ahí mismo), su mensaje en
+   `guardar_portal_productos` y su texto en `avisoProducto`; si falta alguno de los dos últimos, falla
+   cerrado (no deja publicar, con un texto genérico).
    (e) **El consumo de stock de una unidad — 2 lados:** `portal_consumo` (`portal-config.sql`: el
    stock propio si es simple, los insumos de la receta si es compuesto, el producto ligado al extra;
    siempre solo los que llevan stock), que usan `portal_disponibilidad` (unidades y agotado) y, en P2,

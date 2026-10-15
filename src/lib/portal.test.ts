@@ -93,12 +93,12 @@ describe('estado', () => {
 })
 
 describe('productos del portal: la pantalla decide con el motivo de la regla del servidor (allowlist)', () => {
-  it('se puede marcar solo con null, sin_publicar, agotado, o sin_precio resuelto por el precio escrito', () => {
-    const casos: [string | null, number | null][] = [[null, null], ['sin_publicar', null], ['agotado', null],
-      ['sin_precio', null], ['sin_precio', 5000], ['categoria_inactiva', 5000], ['inactivo', null], ['motivo_nuevo', 5000]]
-    expect(casos.map(([m, pr]) => `${m}/${pr}: ${sePuedePublicar(m, pr)}`)).toEqual([
-      'null/null: true', 'sin_publicar/null: true', 'agotado/null: true', 'sin_precio/null: false',
-      'sin_precio/5000: true', 'categoria_inactiva/5000: false', 'inactivo/null: false', 'motivo_nuevo/5000: false'])
+  it('decide el servidor (publicable); la pantalla solo resuelve "sin precio" con el precio que se escribe', () => {
+    const casos: [boolean, string | null, number | null][] = [[true, null, null], [true, 'agotado', null],
+      [false, 'sin_precio', null], [false, 'sin_precio', 5000], [false, 'categoria_inactiva', 5000], [false, 'motivo_nuevo', 5000]]
+    expect(casos.map(([pb, m, pr]) => `${pb}/${m}/${pr}: ${sePuedePublicar(pb, m, pr)}`)).toEqual([
+      'true/null/null: true', 'true/agotado/null: true', 'false/sin_precio/null: false', 'false/sin_precio/5000: true',
+      'false/categoria_inactiva/5000: false', 'false/motivo_nuevo/5000: false'])
   })
   it('cada motivo tiene su aviso; uno desconocido, el genérico (nunca el código crudo)', () => {
     expect(avisoProducto('categoria_inactiva', null, true)).toMatch(/Despublícalo/)

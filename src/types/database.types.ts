@@ -1588,6 +1588,7 @@ export type Database = {
           publicado: boolean
           agotado: boolean
           motivo: string | null
+          publicable: boolean
         }[]
       }
       guardar_portal_productos: {

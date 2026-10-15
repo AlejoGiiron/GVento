@@ -65,16 +65,17 @@ export interface ProductoPortal {
    * categoria_inactiva, sin_precio, sin_publicar, agotado; null = se vende.
    */
   motivo: string | null
+  /** La regla del servidor dice que se puede marcar "En el portal" (portal_disponibilidad). */
+  publicable: boolean
 }
 
 /**
- * ¿Se puede marcar "En el portal"? ALLOWLIST de motivos de la regla del servidor: un motivo que no
- * esté aquí no deja publicar (fail-closed). La única cosa que mira la pantalla por su cuenta es el
- * precio que se está ESCRIBIENDO: "sin precio" se resuelve si el precio a domicilio escrito es > 0.
+ * ¿Se puede marcar "En el portal"? Lo decide el servidor (`publicable`). Lo único que mira la
+ * pantalla por su cuenta es el precio que se está ESCRIBIENDO: "sin precio" se resuelve si el precio
+ * a domicilio escrito es > 0.
  */
-export function sePuedePublicar(motivo: string | null, precioEscrito: number | null): boolean {
-  if (motivo === null || motivo === 'sin_publicar' || motivo === 'agotado') return true
-  return motivo === 'sin_precio' && precioEscrito !== null && precioEscrito > 0
+export function sePuedePublicar(publicable: boolean, motivo: string | null, precioEscrito: number | null): boolean {
+  return publicable || (motivo === 'sin_precio' && precioEscrito !== null && precioEscrito > 0)
 }
 
 /**
@@ -87,7 +88,7 @@ export function avisoProducto(motivo: string | null, precioEscrito: number | nul
       : 'Su categoría está desactivada en el POS: no sale en el portal'
   }
   if (motivo === 'inactivo') return 'Inactivo en el POS: no sale en el portal'
-  if (motivo === 'sin_precio') return sePuedePublicar(motivo, precioEscrito) ? '' : 'No se publica: no tiene precio'
+  if (motivo === 'sin_precio') return precioEscrito !== null && precioEscrito > 0 ? '' : 'No se publica: no tiene precio'
   if (motivo === 'agotado') return 'Agotado hoy · no se puede pedir'
   if (motivo === null || motivo === 'sin_publicar') return agotado ? 'Agotado hoy · no se puede pedir' : ''
   return 'No se puede publicar en el portal'

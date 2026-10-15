@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { cashierCreds, hasWaiterCreds, loginAsOwner, ownerCreds, waiterCreds } from './helpers/auth'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { cliente, psql, psqlResultado } from './helpers/db-local'
 import { otraCreds } from './helpers/storage'
 import { CLAVES_PORTAL, type PortalCambios } from '../src/lib/portal'
@@ -244,7 +244,7 @@ test.describe('Pedidos en línea · configuración (servidor)', () => {
 
   test('regla única (portal_disponibilidad): agotado por receta, categoría desactivada, y agotado no deja el portal incompleto', async () => {
     const guardar = (c: unknown) => owner.rpc('guardar_portal_productos', { p_cambios: c })
-    const lista = async () => ((await owner.rpc('portal_productos_lista')).data as { product_id: string; agotado: boolean; motivo: string | null }[])
+    const lista = async () => ((await owner.rpc('portal_productos_lista')).data as { product_id: string; agotado: boolean; motivo: string | null; publicable: boolean }[])
     const cat = insertarId(`insert into public.categories (name, restaurant_id) values ('E2E Portal regla', '${SEDE}') returning id;`)
     const ids: string[] = []
     try {
@@ -268,11 +268,13 @@ test.describe('Pedidos en línea · configuración (servidor)', () => {
       expect(await agot()).toEqual([false, false])
       // 2. Categoría desactivada en el POS: la lista lo dice y no se puede publicar. Contraste: reactivada, sí.
       psql(`update public.categories set is_active = false where id = '${cat}';`)
-      expect((await lista()).find((p) => p.product_id === combo)?.motivo).toBe('categoria_inactiva')
+      const fc = (await lista()).find((p) => p.product_id === combo)
+      expect([fc?.motivo, fc?.publicable]).toEqual(['categoria_inactiva', false])
       expect(err(await guardar([{ product_id: combo, publicado: true, precio_domicilio: null }]))).toMatch(/categoría desactivada/)
       psql(`update public.categories set is_active = true where id = '${cat}';`)
       expect((await guardar([{ product_id: combo, publicado: true, precio_domicilio: null }])).error).toBeNull()
-      expect((await lista()).find((p) => p.product_id === combo)?.motivo).toBeNull()
+      const fd = (await lista()).find((p) => p.product_id === combo)
+      expect([fd?.motivo, fd?.publicable], 'contraste: reactivada').toEqual([null, true])
       // Inactivo en el POS: no se publica (antes no había prueba de este rechazo). Contraste: activo, sí.
       psql(`update public.products set is_active = false where id = '${insumo}';`)
       expect(err(await guardar([{ product_id: insumo, publicado: true, precio_domicilio: null }]))).toMatch(/está inactivo en el POS/)
@@ -391,6 +393,24 @@ test.describe('Pedidos en línea · configuración (servidor)', () => {
 })
 
 // ─── Las guardas de supabase/portal-config.sql (corren el archivo en una transacción que se deshace) ──
+
+test.describe('el pre-flight de portal-config.sql', () => {
+  // Si alguien cambia una función sin actualizar su md5, la consulta 6 (y la reversa, que usa la
+  // misma lista) quedan mintiendo: esta prueba lo pone rojo en el momento.
+  test('consulta 6: las 17 funciones tienen el md5 que dice el pre-flight (el mismo de la reversa)', () => {
+    const pre = readFileSync('supabase/diag/portal-config-preflight.sql', 'utf-8').replace(/\r\n/g, '\n')
+    const c6 = pre.slice(pre.indexOf('-- ── Consulta 6'))
+    const filas = psql(c6).split(/\r?\n/).filter(Boolean)
+    expect(filas.length).toBe(17)
+    expect(filas.filter((f) => !f.endsWith('|t'))).toEqual([])
+    const rev = '../gvento/portal-config-revertir.sql'
+    if (existsSync(rev)) {
+      const md5 = (txt: string) => [...txt.matchAll(/'([a-z_]+\([^']*\))',\s*'([0-9a-f]{32})'/g)].map((m) => `${m[1]}=${m[2]}`).sort()
+      expect(md5(c6).length, 'la consulta 6 trae sus 17 pares').toBe(17)
+      expect(md5(readFileSync(rev, 'utf-8')), 'la reversa (fuera de git) tiene la misma lista').toEqual(md5(c6))
+    }
+  })
+})
 
 test.describe('la guarda de portal-config.sql', () => {
   const cuerpo = () => readFileSync('supabase/portal-config.sql', 'utf-8').replace(/\r\n/g, '\n').split('\n')
