@@ -81,7 +81,7 @@ test.describe('Pedidos en línea · configuración (servidor)', () => {
     const app = ['portal_estado', 'portal_config', 'portal_slug_disponible', 'actualizar_portal',
       'pausar_pedidos_online', 'portal_productos_lista', 'guardar_portal_productos']
     const internas = ['geo_distancia_m', 'geo_en_poligono', 'portal_poligono_valido', 'portal_tramos_validos',
-      'portal_horario_valido', 'portal_faltantes_de', 'portal_estado_de', 'portal_mensaje_restriccion', 'portal_disponibilidad']
+      'portal_horario_valido', 'portal_faltantes_de', 'portal_estado_de', 'portal_mensaje_restriccion', 'portal_disponibilidad', 'portal_consumo']
     const ejec = (nombres: string[]) => psql(`select string_agg(proname || ':' || has_function_privilege('anon', oid, 'EXECUTE')
         || ':' || has_function_privilege('authenticated', oid, 'EXECUTE'), ',' order by proname)
         from pg_proc where pronamespace = 'public'::regnamespace and proname in (${nombres.map((n) => `'${n}'`).join(',')});`)

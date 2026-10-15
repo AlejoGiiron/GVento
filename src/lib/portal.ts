@@ -77,8 +77,11 @@ export function sePuedePublicar(motivo: string | null, precioEscrito: number | n
   return motivo === 'sin_precio' && precioEscrito !== null && precioEscrito > 0
 }
 
-/** El aviso de la fila, por el motivo de la regla. Un motivo desconocido tiene su texto genérico. */
-export function avisoProducto(motivo: string | null, precioEscrito: number | null, publicado: boolean): string {
+/**
+ * El aviso de la fila, por el motivo de la regla. Un motivo desconocido tiene su texto genérico.
+ * `agotado` es la columna de la regla: un producto sin publicar también avisa que hoy está agotado.
+ */
+export function avisoProducto(motivo: string | null, precioEscrito: number | null, publicado: boolean, agotado = false): string {
   if (motivo === 'categoria_inactiva') {
     return publicado ? 'Su categoría está desactivada en el POS: no sale en el portal. Despublícalo para guardar cambios.'
       : 'Su categoría está desactivada en el POS: no sale en el portal'
@@ -86,7 +89,7 @@ export function avisoProducto(motivo: string | null, precioEscrito: number | nul
   if (motivo === 'inactivo') return 'Inactivo en el POS: no sale en el portal'
   if (motivo === 'sin_precio') return sePuedePublicar(motivo, precioEscrito) ? '' : 'No se publica: no tiene precio'
   if (motivo === 'agotado') return 'Agotado hoy · no se puede pedir'
-  if (motivo === null || motivo === 'sin_publicar') return ''
+  if (motivo === null || motivo === 'sin_publicar') return agotado ? 'Agotado hoy · no se puede pedir' : ''
   return 'No se puede publicar en el portal'
 }
 

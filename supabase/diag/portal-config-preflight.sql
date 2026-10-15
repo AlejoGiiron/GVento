@@ -58,11 +58,11 @@ select (select count(*) from information_schema.role_table_grants
          where pronamespace = 'public'::regnamespace
            and proname in ('geo_distancia_m', 'geo_en_poligono', 'portal_poligono_valido', 'portal_tramos_validos',
                            'portal_horario_valido', 'portal_faltantes_de', 'portal_estado_de', 'portal_mensaje_restriccion',
-                           'portal_disponibilidad')
+                           'portal_disponibilidad', 'portal_consumo')
            and not has_function_privilege('authenticated', oid, 'EXECUTE')
            and not has_function_privilege('anon', oid, 'EXECUTE'))                   as funciones_internas_ok,
        (select count(*) from public.portal_sedes)                                     as portales;
--- DESPUÉS: 0 · 7 · 9 · 0 (portales = 0 hasta que alguien cree el suyo en la pantalla).
+-- DESPUÉS: 0 · 7 · 10 · 0 (portales = 0 hasta que alguien cree el suyo en la pantalla).
 
 -- ── Consulta 5 (ANTES): la precondición de la guarda — las funciones de permisos vigentes ──
 select p.oid::regprocedure as funcion,
@@ -73,3 +73,27 @@ select p.oid::regprocedure as funcion,
 -- Esperado: get_my_restaurant_id() 7ed39b96b4fa8da1101030aba03ee557 · has_permission(text)
 -- 1a79ece7f371a2afd3a8e195d27ddb87 (las de profiles-is-active-enforced.sql). Si no, portal-config.sql
 -- aborta en su guarda: no la corras y avísame.
+
+-- ── Consulta 6 (DESPUÉS): ¿es ESTA versión? Las 17 funciones con su md5 (normalizado) ──
+-- La consulta 1 solo dice si están las piezas; esta distingue una versión anterior del archivo.
+select f.firma, md5(regexp_replace(regexp_replace(pg_get_functiondef(to_regprocedure('public.' || f.firma)), E'\r','','g'), E'[ \t]+\n', E'\n','g')) = f.esperado as como_este_archivo
+  from (values
+    ('actualizar_portal(jsonb)',                           '9d79a6ae85394e501d067a1902397fd9'),
+    ('geo_distancia_m(numeric,numeric,numeric,numeric)',   'a44665562016bdfdc22097466577f6b4'),
+    ('geo_en_poligono(numeric,numeric,jsonb)',             'c462b6ef6ac36622da383d063f511a8c'),
+    ('guardar_portal_productos(jsonb)',                    'c079497b067391ba8c3dbb03f5568616'),
+    ('pausar_pedidos_online(boolean)',                     'b49854e3158ff8010df07d580da7fe5a'),
+    ('portal_config()',                                    'd29aa45ad9694123397dcd569ef83dae'),
+    ('portal_consumo(uuid,uuid,uuid)',                     'e75f6b0bfb744c0219f024724e60cf3c'),
+    ('portal_disponibilidad(uuid,uuid,uuid)',              '902763cecae24bbd5ae877c46bf34f74'),
+    ('portal_estado_de(uuid,timestamptz)',                 '767360ed8650f2286688f6e22e1a6222'),
+    ('portal_estado(timestamptz)',                         '1d2e115ad4004022ca826db9e453ed8a'),
+    ('portal_faltantes_de(uuid)',                          '61a6cbce7bf2d023f33155f210ad3711'),
+    ('portal_horario_valido(jsonb)',                       '68fe9c08c32513707c0c567eaf45cbf7'),
+    ('portal_mensaje_restriccion(text)',                   '342339e61f82bb48eea139fe1e22a470'),
+    ('portal_poligono_valido(jsonb)',                      'd1cc825e1025523aea23099b788e4994'),
+    ('portal_productos_lista()',                           '9099bcb614ebfcbcf738ac5cd45f4fee'),
+    ('portal_slug_disponible(text)',                       '6ac364a79a218e05b0d3ca8bffd6fc6b'),
+    ('portal_tramos_validos(jsonb)',                       '31285d61c13186d008ae6906390810ba')) f(firma, esperado);
+-- DESPUÉS: 17 filas con como_este_archivo = t. Una f o vacía: lo aplicado no es este archivo (o
+-- pg_get_functiondef formatea distinto en prod). Avísame con la fila; la reversa también abortaría.

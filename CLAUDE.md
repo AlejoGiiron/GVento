@@ -385,7 +385,7 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    nueva a otra columna compila y falla en prod con 42501. Antes de agregar una:
    `node scripts/escrituras-directas.mjs`, y si de verdad hace falta, un SQL NUEVO con el grant.
 
-12. **Configuración del portal de Pedidos en línea — 2 contratos (agregado 2026-10-13, P1).**
+12. **Configuración del portal de Pedidos en línea — contratos (a) a (e) (agregado 2026-10-13, P1).**
    (a) Las claves de `actualizar_portal` (`c_claves` en `supabase/portal-config.sql`) y
    `CLAVES_PORTAL` en `src/lib/portal.ts`, atada por el compilador al tipo `PortalCambios`; lo vigila
    `tests/portal-config.spec.ts` ("contrato R1"), que escribe cada clave por la RPC. Una clave nueva =
@@ -408,13 +408,16 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    (`sePuedePublicar` en `src/lib/portal.ts`); lo único que mira por su cuenta es el precio a domicilio
    que se está escribiendo, que puede resolver "sin precio". **Un motivo nuevo toca 3 lados:** la
    función (en un archivo NUEVO, R5), su mensaje en `guardar_portal_productos` y su texto en
-   `avisoProducto`; si falta alguno, falla cerrado (no deja publicar, con un texto genérico).
-   (e) **El consumo de stock de una línea — 3 lados, sin fuente única:** cómo descuenta el POS
-   (`add_order_items_with_extras`: insumos con stock por receta, y el producto ligado al extra solo si
-   lleva stock), cuántas unidades le quedan a un producto (`portal_disponibilidad`) y la demanda de todo
-   el carrito (`portal_calcular`, P2). Hoy coinciden. Lo vigila `tests/portal-publico.spec.ts`
-   ("lo que el portal acepta es lo que el POS descuenta"), que pasa por el POS el carrito que cotizar
-   deja justo en el límite y compara el stock que queda.
+   `avisoProducto`; si falta alguno, falla cerrado (no deja publicar, con un texto genérico). Si el
+   motivo nuevo NO bloquea la venta (como `agotado`), además va en `vendible` dentro de la función:
+   los llamadores leen esa columna, no repiten la lista.
+   (e) **El consumo de stock de una unidad — 2 lados:** `portal_consumo` (`portal-config.sql`: el
+   stock propio si es simple, los insumos de la receta si es compuesto, el producto ligado al extra;
+   siempre solo los que llevan stock), que usan `portal_disponibilidad` (unidades y agotado) y, en P2,
+   `portal_calcular` (la demanda del carrito); y cómo descuenta el POS (`add_order_items_with_extras`).
+   Si el POS cambia cómo descuenta, cambia `portal_consumo` en la misma pasada (archivo NUEVO, R5). En
+   P2, `tests/portal-publico.spec.ts` ("lo que el portal acepta es lo que el POS descuenta") pasa por
+   el POS el carrito que cotizar deja justo en el límite y compara el stock que queda.
    🔴 **"¿Recibe pedidos ahora?" NO es un contrato de dos lados, a propósito:** lo decide SOLO
    `portal_estado` en el servidor (horario en Bogotá, turno, pausa, faltantes). La pantalla muestra
    el motivo que devuelve; nadie lo recalcula en el navegador. El portal de P2 tiene que leer la

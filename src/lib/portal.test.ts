@@ -106,5 +106,8 @@ describe('productos del portal: la pantalla decide con el motivo de la regla del
     expect([avisoProducto('sin_precio', null, false), avisoProducto('sin_precio', 5000, false)]).toEqual(['No se publica: no tiene precio', ''])
     expect(avisoProducto('motivo_nuevo', null, false)).toBe('No se puede publicar en el portal')
     expect([avisoProducto(null, null, true), avisoProducto('sin_publicar', null, false)]).toEqual(['', ''])
+    // Sin publicar pero agotado hoy: también avisa (la regla pone sin_publicar antes que agotado).
+    expect([avisoProducto('sin_publicar', null, false, true), avisoProducto(null, null, true, true)])
+      .toEqual(['Agotado hoy · no se puede pedir', 'Agotado hoy · no se puede pedir'])
   })
 })

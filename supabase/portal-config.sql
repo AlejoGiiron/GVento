@@ -15,8 +15,9 @@
 --   3. Las dos tablas tienen RLS sin políticas y SIN privilegios para anon ni authenticated:
 --      todo pasa por las funciones de abajo (SECURITY DEFINER, sede = get_my_restaurant_id()).
 --   4. portal_disponibilidad: la ÚNICA regla de "se puede vender en el portal" (producto activo, de una
---      categoría activa, con precio, publicado, y agotado por su stock, por los insumos de la receta o,
---      para un extra, por el producto ligado). La usan la configuración (P1) y el portal (P2).
+--      categoría activa, con precio, publicado, y agotado según portal_consumo: su stock, los insumos
+--      de la receta o, para un extra, el producto ligado). La usan la configuración (P1) y el portal
+--      (P2, portal-publico.sql).
 --   5. portal_estado: la ÚNICA fuente de "¿el portal recibe pedidos ahora?". La lee la pantalla
 --      de configuración (P1) y la leerá el portal (P2); nadie lo recalcula en el navegador (R1).
 --      Motivos, en este orden: sin_configurar, desactivado, incompleto, pausado,
@@ -52,6 +53,7 @@
 --          to_regprocedure('public.portal_disponibilidad(uuid,uuid,uuid)') is not null;
 --   -- null, null, f, f = no está · con valor, con valor, t, t = está, con WhatsApp y con la regla
 --   -- única · con valor pero alguna f = corrió una versión anterior de este archivo: avísame.
+--   -- Para saber si es EXACTAMENTE esta versión: la consulta 6 del pre-flight (md5 de las 17 funciones).
 -- ============================================================================
 
 begin;
@@ -306,22 +308,49 @@ revoke all on table public.portal_productos from public, anon, authenticated;
 
 -- ── 3. Funciones internas (no ejecutables desde la app) ──
 
+-- 🔴 QUÉ STOCK CONSUME UNA UNIDAD: del producto (p_extra null) o de ese extra puesto en ese producto.
+-- Devuelve (product_id, cantidad) de cada producto CON stock que se descuenta: el propio si es simple
+-- y lleva stock; los insumos con stock de la receta si es compuesto (cantidad = la de la receta); el
+-- producto ligado al extra si lleva stock. Es la misma regla con la que descuenta el POS
+-- (add_order_items_with_extras, R1 #12 e). Sin filas = no consume stock (sin límite).
+-- La usan portal_disponibilidad (cuántas unidades quedan) y portal_calcular (la demanda del carrito, P2).
+create function public.portal_consumo(p_sede uuid, p_producto uuid, p_extra uuid default null)
+returns table (product_id uuid, cantidad integer)
+language sql stable security definer
+set search_path = public
+as $$
+  select pr.id, 1
+    from public.products pr
+   where p_extra is null and pr.id = p_producto and pr.restaurant_id = p_sede
+     and pr.kind = 'simple' and pr.stock_tracking
+  union all
+  select pc.component_id, pc.qty
+    from public.product_components pc
+    join public.products pr on pr.id = pc.parent_id and pr.restaurant_id = p_sede and pr.kind = 'composite'
+    join public.products ins on ins.id = pc.component_id and ins.restaurant_id = p_sede and ins.stock_tracking
+   where p_extra is null and pc.parent_id = p_producto and pc.restaurant_id = p_sede
+  union all
+  select lp.id, 1
+    from public.extras ex
+    join public.products lp on lp.id = ex.linked_product_id and lp.restaurant_id = p_sede and lp.stock_tracking
+   where p_extra is not null and ex.id = p_extra and ex.restaurant_id = p_sede
+$$;
+
 -- 🔴 LA REGLA ÚNICA de "se puede vender en el portal" (R1 #12 d). La usan portal_faltantes_de,
 -- portal_productos_lista y guardar_portal_productos (P1), y el catálogo y el cálculo del portal (P2).
--- Nadie más decide si un producto o un extra está disponible, ni a qué precio sale.
---   · p_extra null → el PRODUCTO: precio = el de domicilio o el del local; unidades = su stock propio
---     (simple con stock) o lo que alcanzan los insumos con stock según la receta (compuesto); null =
---     sin límite. motivo, en este orden: no_existe (no es de la sede), inactivo, categoria_inactiva,
---     sin_precio, sin_publicar, agotado; null = se puede vender.
---   · p_extra con valor → ese EXTRA para ese producto: precio = el del extra; unidades = el stock del
---     producto ligado si lleva stock (la misma regla con la que el POS lo descuenta). motivo: no_existe,
---     inactivo, no_asignado (no está en product_extras de ese producto), agotado; null = se puede pedir.
---     No mira el estado del producto: eso es la llamada sin p_extra.
--- "agotado" = unidades ≤ 0. Va de último: un producto agotado está bien configurado (es de hoy).
+--   · p_extra null → el PRODUCTO: precio = el de domicilio o el del local. motivo, en este orden:
+--     no_existe (no es de la sede), inactivo, categoria_inactiva, sin_precio, sin_publicar, agotado.
+--   · p_extra con valor → ese EXTRA para ese producto: precio = el del extra. motivo: no_existe,
+--     inactivo, no_asignado (no está en product_extras de ese producto), agotado. No mira el estado
+--     del producto: eso es la llamada sin p_extra.
+--   · unidades = cuántas se pueden vender con el stock de hoy, según portal_consumo (null = sin
+--     límite); agotado = unidades ≤ 0. Va de último: un producto agotado está bien configurado.
+--   · vendible = motivo null o 'agotado': está a la venta y lo que decide es el stock de hoy. Es la
+--     columna que leen los llamadores (no repiten la lista de motivos).
 -- Quien la llama NO expone `unidades` al cliente (regla para los llamadores, no algo que esta función
 -- pueda impedir): el portal solo dice agotado / no alcanza.
 create function public.portal_disponibilidad(p_sede uuid, p_producto uuid, p_extra uuid default null)
-returns table (precio numeric, unidades integer, agotado boolean, motivo text)
+returns table (precio numeric, unidades integer, agotado boolean, vendible boolean, motivo text)
 language plpgsql stable security definer
 set search_path = public
 as $$
@@ -329,7 +358,7 @@ declare
   p record;
   e record;
 begin
-  select pr.price, pr.kind, pr.is_active, pr.stock_tracking, pr.stock_qty,
+  select pr.price, pr.kind, pr.is_active,
          coalesce(c.is_active, false) as categoria_activa,
          coalesce(pp.publicado, false) as publicado, pp.precio_domicilio
     into p
@@ -338,22 +367,19 @@ begin
     left join public.portal_productos pp on pp.product_id = pr.id and pp.restaurant_id = pr.restaurant_id
    where pr.id = p_producto and pr.restaurant_id = p_sede;
   if not found then
-    return query select null::numeric, null::integer, false, 'no_existe'::text;
+    return query select null::numeric, null::integer, false, false, 'no_existe'::text;
     return;
   end if;
 
+  -- Lo que queda: el mínimo, entre los productos con stock que consume, de stock / cantidad.
+  select min(greatest(coalesce(s.stock_qty, 0), 0) / c.cantidad)
+    into unidades
+    from portal_consumo(p_sede, p_producto, p_extra) c
+    join public.products s on s.id = c.product_id;
+  agotado := coalesce(unidades <= 0, false);
+
   if p_extra is null then
     precio := coalesce(p.precio_domicilio, p.price);
-    unidades := case p.kind
-      when 'simple' then case when p.stock_tracking then greatest(coalesce(p.stock_qty, 0), 0) end
-      when 'composite' then (
-        select min(greatest(coalesce(ins.stock_qty, 0), 0) / pc.qty)
-          from public.product_components pc
-          join public.products ins on ins.id = pc.component_id and ins.restaurant_id = p_sede
-         where pc.parent_id = p_producto and pc.restaurant_id = p_sede and ins.stock_tracking)
-      else 0
-    end;
-    agotado := coalesce(unidades <= 0, false);
     motivo := case
       when not p.is_active or p.kind not in ('simple', 'composite') then 'inactivo'
       when not p.categoria_activa then 'categoria_inactiva'
@@ -363,25 +389,22 @@ begin
     end;
   else
     select ex.price, ex.is_active,
-           exists (select 1 from public.product_extras pe where pe.extra_id = ex.id and pe.product_id = p_producto) as asignado,
-           coalesce(lp.stock_tracking, false) as ligado_con_stock, lp.stock_qty as ligado_stock
+           exists (select 1 from public.product_extras pe where pe.extra_id = ex.id and pe.product_id = p_producto) as asignado
       into e
       from public.extras ex
-      left join public.products lp on lp.id = ex.linked_product_id and lp.restaurant_id = p_sede
      where ex.id = p_extra and ex.restaurant_id = p_sede;
     if not found then
-      return query select null::numeric, null::integer, false, 'no_existe'::text;
+      return query select null::numeric, null::integer, false, false, 'no_existe'::text;
       return;
     end if;
     precio := e.price;
-    unidades := case when e.ligado_con_stock then greatest(coalesce(e.ligado_stock, 0), 0) end;
-    agotado := coalesce(unidades <= 0, false);
     motivo := case
       when not e.is_active or e.price is null or e.price < 0 then 'inactivo'
       when not e.asignado then 'no_asignado'
       when agotado then 'agotado'
     end;
   end if;
+  vendible := motivo is null or motivo = 'agotado';
   return next;
 end $$;
 
@@ -421,7 +444,7 @@ begin
     select 1
       from public.portal_productos pp
       cross join lateral portal_disponibilidad(p_sede, pp.product_id) d
-     where pp.restaurant_id = p_sede and (d.motivo is null or d.motivo = 'agotado')) then
+     where pp.restaurant_id = p_sede and d.vendible) then
     v := array_append(v, 'al menos un producto publicado que se pueda vender (activo, de una categoría activa y con precio)'::text);
   end if;
   return v;
@@ -814,6 +837,7 @@ revoke execute on function public.portal_poligono_valido(jsonb)                 
 revoke execute on function public.portal_tramos_validos(jsonb)                        from public, anon, authenticated;
 revoke execute on function public.portal_horario_valido(jsonb)                        from public, anon, authenticated;
 revoke execute on function public.portal_disponibilidad(uuid, uuid, uuid)            from public, anon, authenticated;
+revoke execute on function public.portal_consumo(uuid, uuid, uuid)                   from public, anon, authenticated;
 revoke execute on function public.portal_faltantes_de(uuid)                           from public, anon, authenticated;
 revoke execute on function public.portal_estado_de(uuid, timestamptz)                 from public, anon, authenticated;
 revoke execute on function public.portal_mensaje_restriccion(text)                    from public, anon, authenticated;
@@ -845,7 +869,7 @@ begin
      and g.grantee in ('anon', 'authenticated', 'PUBLIC');
   if v_mal is not null then raise exception 'Quedaron privilegios de tabla: %. No se cambió nada.', v_mal; end if;
 
-  -- Las 7 de la app: authenticated sí, anon no. Las 9 internas: ninguno de los dos.
+  -- Las 7 de la app: authenticated sí, anon no. Las 10 internas: ninguno de los dos.
   select string_agg(p.oid::regprocedure::text, ', ') into v_mal
     from pg_proc p
    where p.pronamespace = 'public'::regnamespace
@@ -858,7 +882,7 @@ begin
    where p.pronamespace = 'public'::regnamespace
      and p.proname in ('geo_distancia_m', 'geo_en_poligono', 'portal_poligono_valido', 'portal_tramos_validos',
                        'portal_horario_valido', 'portal_faltantes_de', 'portal_estado_de', 'portal_mensaje_restriccion',
-                       'portal_disponibilidad')
+                       'portal_disponibilidad', 'portal_consumo')
      and (has_function_privilege('anon', p.oid, 'EXECUTE') or has_function_privilege('authenticated', p.oid, 'EXECUTE'));
   if v_mal is not null then raise exception 'Funciones internas ejecutables desde la app: %. No se cambió nada.', v_mal; end if;
 

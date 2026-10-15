@@ -81,9 +81,9 @@ export function SeccionProductosPortal() {
                   // se mira aquí es el precio a domicilio que se está escribiendo (todavía no guardado),
                   // que puede resolver "sin precio"; al guardar decide el servidor.
                   const puede = sePuedePublicar(p.motivo, precioDom)
-                  const aviso = avisoProducto(p.motivo, precioDom, f.publicado)
+                  const aviso = avisoProducto(p.motivo, precioDom, f.publicado, p.agotado)
                   const notaTexto = aviso || (precioDom !== null && precioDom !== p.precio_local ? 'Precio distinto a domicilio' : '')
-                  const notaColor = p.motivo === 'agotado' ? '#b91c1c' : !aviso && precioDom !== null ? VERDE : '#64748b'
+                  const notaColor = p.agotado && sePuedePublicar(p.motivo, precioDom) ? '#b91c1c' : !aviso && precioDom !== null ? VERDE : '#64748b'
                   return (
                     <tr key={p.product_id} data-testid={`portal-producto-${p.product_id}`} style={{ borderTop: '1px solid #f1f5f9' }}>
                       <td style={{ padding: '10px 6px', fontWeight: 600 }}>
