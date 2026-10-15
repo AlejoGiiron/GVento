@@ -58,7 +58,10 @@ export interface ProductoPortal {
   precio_local: number
   precio_domicilio: number | null
   publicado: boolean
+  /** Por la regla única del servidor (portal_disponibilidad): stock propio o insumos de la receta. */
   agotado: boolean
+  /** false = su categoría está desactivada en el POS: no sale en el portal ni se puede publicar. */
+  categoria_activa: boolean
 }
 
 export interface CambioProducto {

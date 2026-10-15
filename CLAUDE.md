@@ -400,6 +400,13 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    (c) El formato del WhatsApp del local: el CHECK `portal_sedes_whatsapp` contra `RE_WHATSAPP` y
    `normalizarWhatsapp` (`src/lib/portal.ts`). Los ata `CASOS_WHATSAPP` (`src/lib/portalCasos.ts`):
    `portal.test.ts` por `RE_WHATSAPP` y el spec por `actualizar_portal`.
+   (d) **"Se puede vender en el portal" es UNA función, `portal_disponibilidad`** (`portal-config.sql`):
+   producto activo, de una categoría activa, con precio, publicado, y agotado por su stock, por los
+   insumos de la receta o, para un extra, por el producto ligado. La usan `portal_faltantes_de`,
+   `portal_productos_lista` y `guardar_portal_productos` (P1) y el catálogo y el cálculo del portal
+   (P2). La pantalla de Configuración solo mira por su cuenta "sin precio" sobre el precio que se está
+   escribiendo (un aviso; al guardar decide el servidor). Una condición nueva de disponibilidad va
+   ahí, en un archivo NUEVO (R5), nunca en uno de los que la usan.
    🔴 **"¿Recibe pedidos ahora?" NO es un contrato de dos lados, a propósito:** lo decide SOLO
    `portal_estado` en el servidor (horario en Bogotá, turno, pausa, faltantes). La pantalla muestra
    el motivo que devuelve; nadie lo recalcula en el navegador. El portal de P2 tiene que leer la

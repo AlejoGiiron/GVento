@@ -81,7 +81,7 @@ test.describe('Pedidos en línea · configuración (servidor)', () => {
     const app = ['portal_estado', 'portal_config', 'portal_slug_disponible', 'actualizar_portal',
       'pausar_pedidos_online', 'portal_productos_lista', 'guardar_portal_productos']
     const internas = ['geo_distancia_m', 'geo_en_poligono', 'portal_poligono_valido', 'portal_tramos_validos',
-      'portal_horario_valido', 'portal_faltantes_de', 'portal_estado_de', 'portal_mensaje_restriccion']
+      'portal_horario_valido', 'portal_faltantes_de', 'portal_estado_de', 'portal_mensaje_restriccion', 'portal_disponibilidad']
     const ejec = (nombres: string[]) => psql(`select string_agg(proname || ':' || has_function_privilege('anon', oid, 'EXECUTE')
         || ':' || has_function_privilege('authenticated', oid, 'EXECUTE'), ',' order by proname)
         from pg_proc where pronamespace = 'public'::regnamespace and proname in (${nombres.map((n) => `'${n}'`).join(',')});`)
@@ -240,6 +240,43 @@ test.describe('Pedidos en línea · configuración (servidor)', () => {
     expect([de(PROD_B)?.publicado, de(PROD_B)?.precio_domicilio]).toEqual([true, 12345])
     expect([de(PROD_CERO)?.publicado, de(PROD_CERO)?.precio_domicilio]).toEqual([true, 5000])
     expect(lista.some((p) => p.product_id === PROD_AJENO), 'la lista es solo de la sede').toBe(false)
+  })
+
+  test('regla única (portal_disponibilidad): agotado por receta, categoría desactivada, y agotado no deja el portal incompleto', async () => {
+    const guardar = (c: unknown) => owner.rpc('guardar_portal_productos', { p_cambios: c })
+    const lista = async () => ((await owner.rpc('portal_productos_lista')).data as { product_id: string; agotado: boolean; categoria_activa: boolean }[])
+    const cat = insertarId(`insert into public.categories (name, restaurant_id) values ('E2E Portal regla', '${SEDE}') returning id;`)
+    const ids: string[] = []
+    try {
+      const insumo = insertarId(`insert into public.products (name, price, restaurant_id, category_id, stock_tracking, stock_qty)
+        values ('E2E Portal insumo', 100, '${SEDE}', '${cat}', true, 1) returning id;`); ids.push(insumo)
+      const combo = insertarId(`insert into public.products (name, price, restaurant_id, category_id, kind)
+        values ('E2E Portal combo', 15000, '${SEDE}', '${cat}', 'composite') returning id;`); ids.unshift(combo)
+      psql(`insert into public.product_components (restaurant_id, parent_id, component_id, qty) values ('${SEDE}', '${combo}', '${insumo}', 2);`)
+      // 1. El combo necesita 2 insumos y hay 1: agotado en la lista (antes solo miraba el stock propio,
+      //    que un compuesto no tiene). Contraste: con 2 insumos, disponible.
+      expect((await lista()).find((p) => p.product_id === combo)?.agotado).toBe(true)
+      psql(`update public.products set stock_qty = 2 where id = '${insumo}';`)
+      expect((await lista()).find((p) => p.product_id === combo)?.agotado).toBe(false)
+      // 2. Categoría desactivada en el POS: la lista lo dice y no se puede publicar. Contraste: reactivada, sí.
+      psql(`update public.categories set is_active = false where id = '${cat}';`)
+      expect((await lista()).find((p) => p.product_id === combo)?.categoria_activa).toBe(false)
+      expect(err(await guardar([{ product_id: combo, publicado: true, precio_domicilio: null }]))).toMatch(/categoría desactivada/)
+      psql(`update public.categories set is_active = true where id = '${cat}';`)
+      expect((await guardar([{ product_id: combo, publicado: true, precio_domicilio: null }])).error).toBeNull()
+      // 3. Con el combo como único publicado y agotado, el portal NO queda incompleto por eso (el stock es
+      //    de hoy). Contraste: con su categoría desactivada, sí falta "al menos un producto".
+      expect((await owner.rpc('actualizar_portal', { p_cambios: { slug: LAB_SLUG } })).error).toBeNull()
+      psql(`update public.products set stock_qty = 0 where id = '${insumo}';`)
+      const faltan = () => fila(`select array_to_string(portal_faltantes_de('${SEDE}'), '|');`)
+      expect(faltan()).not.toContain('al menos un producto')
+      psql(`update public.categories set is_active = false where id = '${cat}';`)
+      expect(faltan()).toContain('al menos un producto')
+    } finally {
+      psql(`delete from public.portal_productos where product_id in (${ids.map((i) => `'${i}'`).join(',') || 'null'});`)
+      for (const i of ids) psql(`delete from public.products where id = '${i}';`)
+      psql(`delete from public.categories where id = '${cat}';`)
+    }
   })
 
   test('publicar: incompleto no se puede (y dice qué falta); completo sí; publicado no se deja incompleto', async () => {

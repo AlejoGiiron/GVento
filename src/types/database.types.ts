@@ -1587,6 +1587,7 @@ export type Database = {
           precio_domicilio: number | null
           publicado: boolean
           agotado: boolean
+          categoria_activa: boolean
         }[]
       }
       guardar_portal_productos: {

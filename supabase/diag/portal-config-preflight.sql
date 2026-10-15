@@ -54,11 +54,12 @@ select (select count(*) from information_schema.role_table_grants
        (select count(*) from pg_proc
          where pronamespace = 'public'::regnamespace
            and proname in ('geo_distancia_m', 'geo_en_poligono', 'portal_poligono_valido', 'portal_tramos_validos',
-                           'portal_horario_valido', 'portal_faltantes_de', 'portal_estado_de', 'portal_mensaje_restriccion')
+                           'portal_horario_valido', 'portal_faltantes_de', 'portal_estado_de', 'portal_mensaje_restriccion',
+                           'portal_disponibilidad')
            and not has_function_privilege('authenticated', oid, 'EXECUTE')
            and not has_function_privilege('anon', oid, 'EXECUTE'))                   as funciones_internas_ok,
        (select count(*) from public.portal_sedes)                                     as portales;
--- DESPUÉS: 0 · 7 · 8 · 0 (portales = 0 hasta que alguien cree el suyo en la pantalla).
+-- DESPUÉS: 0 · 7 · 9 · 0 (portales = 0 hasta que alguien cree el suyo en la pantalla).
 
 -- ── Consulta 5 (ANTES): la precondición de la guarda — las funciones de permisos vigentes ──
 select p.oid::regprocedure as funcion,

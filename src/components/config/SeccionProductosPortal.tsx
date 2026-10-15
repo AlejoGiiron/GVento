@@ -77,11 +77,16 @@ export function SeccionProductosPortal() {
                 {visibles.map((p) => {
                   const f = filas[p.product_id] ?? filaDe(p)
                   const precioDom = leerPesos(f.precio)
+                  // "Sin precio" se mira sobre lo que se está ESCRIBIENDO (todavía no guardado): es solo un
+                  // aviso; al guardar decide el servidor con portal_disponibilidad. Agotado y categoría
+                  // vienen del servidor, por esa misma regla.
                   const sinPrecio = (precioDom ?? p.precio_local) <= 0
-                  const notaTexto = sinPrecio ? 'No se publica: no tiene precio'
+                  const noSePuede = sinPrecio || !p.categoria_activa
+                  const notaTexto = !p.categoria_activa ? 'Su categoría está desactivada en el POS: no sale en el portal'
+                    : sinPrecio ? 'No se publica: no tiene precio'
                     : p.agotado ? 'Agotado hoy · no se puede pedir'
                     : precioDom !== null && precioDom !== p.precio_local ? 'Precio distinto a domicilio' : ''
-                  const notaColor = p.agotado && !sinPrecio ? '#b91c1c' : precioDom !== null && !sinPrecio ? VERDE : '#64748b'
+                  const notaColor = p.agotado && !noSePuede ? '#b91c1c' : precioDom !== null && !noSePuede ? VERDE : '#64748b'
                   return (
                     <tr key={p.product_id} data-testid={`portal-producto-${p.product_id}`} style={{ borderTop: '1px solid #f1f5f9' }}>
                       <td style={{ padding: '10px 6px', fontWeight: 600 }}>
@@ -99,7 +104,7 @@ export function SeccionProductosPortal() {
                       <td style={{ padding: '10px 6px' }}>
                         <input type="checkbox" aria-label={`Publicar ${p.nombre} en el portal`}
                           data-testid={`portal-publicado-${p.product_id}`} checked={f.publicado}
-                          disabled={sinPrecio && !f.publicado}
+                          disabled={noSePuede && !f.publicado}
                           onChange={(e) => cambiar(p.product_id, { publicado: e.target.checked })}
                           style={{ width: 22, height: 22, accentColor: VERDE }} />
                       </td>
