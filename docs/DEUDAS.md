@@ -1256,15 +1256,6 @@ la versión de producción, 1 con la del Paso 9.
   del portal hace 3 peticiones (la función y 2 llamadas a la base): ESTIMADO, sin medir, unas 3
   líneas de log por consulta, que cuentan para la cuota de ingesta (ya se pasó una vez). Se mide en
   el panel de uso de Supabase después de desplegar.
-- **Tercer lado de "se puede pedir": la configuración de P1.** `portal_productos_lista`
-  (`portal-config.sql`) calcula `agotado` solo con el stock propio (`stock_tracking and stock_qty <= 0`)
-  y no mira si la categoría está activa; el portal (P2) usa la receta del compuesto
-  (`portal_unidades_disponibles`) y excluye las categorías desactivadas (`portal_producto_vendible`).
-  Consecuencias: un combo sin insumos sale "disponible" en Configuración y agotado en el portal; un
-  producto de una categoría desactivada se puede marcar "En el portal" y no sale en el catálogo, sin
-  aviso. No se cambió `portal-config.sql` porque sale el 2026-10-20 con su md5 ya revisado. Se cierra
-  con un SQL nuevo (R5) que redefina `portal_productos_lista` sobre las funciones de P2 (propuesto,
-  sin aprobar).
 - **El stock exacto se puede deducir.** El catálogo no lo muestra, pero cotizando cantidades de 1 a
   50 (`sin_stock` / bien) se averigua en unas 6 consultas. Es inherente a no dejar pedir de más; si
   algún negocio lo considera sensible, se cambia la regla (por ejemplo, no validar stock al cotizar).

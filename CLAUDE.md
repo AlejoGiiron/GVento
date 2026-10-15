@@ -432,14 +432,12 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    allowlist de claves por línea y por extra), las claves por acción de `ACCIONES` en
    `supabase/functions/portal/reglas.ts` (la función pasa `items` sin tocarlos) y los tipos del portal
    en el navegador (llegan con las pantallas de P2). Lo vigila `tests/portal-publico.spec.ts`.
-   🔴 En el PORTAL, el precio y "se puede pedir" de un producto salen de UNA función,
-   `portal_producto_vendible` (y `portal_extra_vendible`), que usan el catálogo y `portal_calcular`;
-   cotizar (P2), crear el pedido (P3) y las promociones (P6) pasan por `portal_calcular`. La pantalla
-   del portal nunca calcula un precio. El spec compara, producto por producto, el precio y el agotado
-   del catálogo con lo que devuelve cotizar.
-   ⚠️ **Hay un tercer lado que NO usa esa regla:** la lista de Configuración de P1
-   (`portal_productos_lista` + `SeccionProductosPortal.tsx`) calcula "agotado" y "sin precio" por su
-   cuenta (sin receta ni categoría). Está en DEUDAS → *"Tercer lado de 'se puede pedir'"*.
+   🔴 El precio y "se puede pedir" de un producto y de un extra salen de `portal_disponibilidad` (P1,
+   #12 d), que usan el catálogo y `portal_calcular`; cotizar (P2), crear el pedido (P3) y las
+   promociones (P6) pasan por `portal_calcular`. Lo único propio de `portal_calcular` es la DEMANDA de
+   todo el carrito contra el stock. La pantalla del portal nunca calcula un precio. El spec compara,
+   producto por producto, el precio y el agotado del catálogo con lo que devuelve cotizar, y fija las
+   claves de la respuesta: nunca sale cuántas unidades quedan.
    (b) La forma de la clave del límite por IP: el CHECK `portal_limites_clave` (`acción:` + 64 hex, o
    `global:sin-ip`) contra `claveLimite` y `ACCIONES` en `reglas.ts`. Si divergen, el contador rechaza
    la clave y la función responde 503 (falla cerrada, pero esa acción cae entera). Lo vigilan

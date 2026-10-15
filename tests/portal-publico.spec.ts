@@ -78,7 +78,7 @@ function restablecer() {
     update public.products set stock_qty = 5 where id = '${id.pan}';
     update public.products set is_active = true where id = '${id.perro}';
     update public.extras set is_active = true where id = '${id.queso}';
-    update public.categories set is_active = true where id = '${id.cat}';`)
+    update public.categories set is_active = true where id in ('${id.cat}', '${id.cat2}');`)
 }
 
 test.beforeAll(async () => {
@@ -89,13 +89,14 @@ test.beforeAll(async () => {
         delete from public.portal_sedes where slug in ('${SLUG}', '${SLUG_OTRA}') or restaurant_id in ('${SEDE}', '${SEDE_OTRA}');`)
 
   id.cat = insertarId(`insert into public.categories (name, restaurant_id, sort_order) values ('E2E P2 Comidas', '${SEDE}', 1) returning id;`)
+  id.cat2 = insertarId(`insert into public.categories (name, restaurant_id, sort_order) values ('E2E P2 Bebidas', '${SEDE}', 2) returning id;`)
   id.catOtra = insertarId(`insert into public.categories (name, restaurant_id) values ('E2E P2 Ajena', '${SEDE_OTRA}') returning id;`)
   const prod = (nombre: string, precio: number, extra = '', sede = SEDE, cat = id.cat) => insertarId(
     `insert into public.products (name, price, restaurant_id, category_id${extra ? ', ' + extra.split('=')[0] : ''})
      values ('${nombre}', ${precio}, '${sede}', '${cat}'${extra ? ', ' + extra.split('=')[1] : ''}) returning id;`)
   id.perro = prod('E2E P2 Perro', 10000)
   id.gaseosa = insertarId(`insert into public.products (name, price, restaurant_id, category_id, stock_tracking, stock_qty)
-     values ('E2E P2 Gaseosa', 3000, '${SEDE}', '${id.cat}', true, 3) returning id;`)
+     values ('E2E P2 Gaseosa', 3000, '${SEDE}', '${id.cat2}', true, 3) returning id;`)
   id.pan = insertarId(`insert into public.products (name, price, restaurant_id, category_id, stock_tracking, stock_qty)
      values ('E2E P2 Pan', 500, '${SEDE}', '${id.cat}', true, 5) returning id;`)
   id.combo = prod('E2E P2 Combo', 20000, `kind='composite'`)
@@ -154,8 +155,7 @@ test.describe('Pedidos en línea · portal público (servidor)', () => {
   test('permisos: solo service_role ejecuta las funciones; el contador no se toca directo; anon no ejecuta nada DEFINER', async () => {
     const FUNCIONES = ['portal_catalogo(text,timestamptz)', 'portal_cotizar(text,jsonb,numeric,numeric,timestamptz)',
       'portal_calcular(uuid,jsonb,numeric,numeric,timestamptz)', 'portal_contar(text,integer)', 'portal_sede_de_slug(text)',
-      'portal_unidades_disponibles(uuid)', 'portal_proxima_apertura(uuid,timestamptz)', 'portal_estado_publico(uuid,timestamptz)',
-      'portal_producto_vendible(uuid,uuid)', 'portal_extra_vendible(uuid,uuid,uuid)',
+      'portal_proxima_apertura(uuid,timestamptz)', 'portal_estado_publico(uuid,timestamptz)',
       'portal_entero_entre(jsonb,integer,integer)', 'portal_uuid(jsonb)']
     expect(psql(`select string_agg(f || ':' || r || ':' || has_function_privilege(r, f::regprocedure, 'EXECUTE'), ',' order by f collate "C", r collate "C")
         from unnest(${`array[${FUNCIONES.map((f) => `'${f}'`).join(',')}]`}) f, unnest(array['anon', 'authenticated', 'service_role']) r;`))
@@ -177,9 +177,10 @@ test.describe('Pedidos en línea · portal público (servidor)', () => {
     expect(Object.keys(c.negocio).sort()).toEqual(['color', 'direccion', 'lat', 'lng', 'logo_url', 'nombre', 'whatsapp'])
     expect(Object.keys(c.estado).sort()).toEqual(['abre_en', 'motivo', 'recibe'])
     expect(Object.keys(c.entrega).sort()).toEqual(['envio_desde', 'envio_tipo', 'pedido_minimo', 'tiempo_max', 'tiempo_min'])
-    const cat = c.categorias.find((x: { nombre: string }) => x.nombre === 'E2E P2 Comidas')
-    expect(Object.keys(cat).sort()).toEqual(['id', 'nombre', 'productos'])
-    const prods = Object.fromEntries(cat.productos.map((p: { nombre: string }) => [p.nombre, p]))
+    const cats = c.categorias.filter((x: { nombre: string }) => x.nombre.startsWith('E2E P2 '))
+    expect(cats.map((x: { nombre: string }) => x.nombre), 'en el orden de la categoría').toEqual(['E2E P2 Comidas', 'E2E P2 Bebidas'])
+    expect(Object.keys(cats[0]).sort()).toEqual(['id', 'nombre', 'productos'])
+    const prods = Object.fromEntries(cats.flatMap((x: { productos: { nombre: string }[] }) => x.productos).map((p: { nombre: string }) => [p.nombre, p]))
     expect(Object.keys(prods).sort(), 'ni el oculto, ni el inactivo, ni el de $0, ni el insumo sin publicar')
       .toEqual(['E2E P2 Combo', 'E2E P2 Gaseosa', 'E2E P2 Perro'])
     expect(Object.keys(prods['E2E P2 Perro']).sort()).toEqual(['agotado', 'descripcion', 'extras', 'id', 'imagen_url', 'nombre', 'precio'])
@@ -194,9 +195,9 @@ test.describe('Pedidos en línea · portal público (servidor)', () => {
 
   test('catálogo: agotado por stock propio, por receta y del extra vinculado (con contraste)', () => {
     const agotados = () => {
-      const cat = catalogo().categorias.find((x: { nombre: string }) => x.nombre === 'E2E P2 Comidas')
-      const p = Object.fromEntries(cat.productos.map((x: { nombre: string; agotado: boolean; extras: { nombre: string; agotado: boolean }[] }) =>
-        [x.nombre, x]))
+      const todos = catalogo().categorias.flatMap((x: { productos: unknown[] }) => x.productos) as
+        { nombre: string; agotado: boolean; extras: { nombre: string; agotado: boolean }[] }[]
+      const p = Object.fromEntries(todos.map((x) => [x.nombre, x]))
       return [p['E2E P2 Gaseosa'].agotado, p['E2E P2 Combo'].agotado,
         p['E2E P2 Perro'].extras.find((e: { nombre: string }) => e.nombre === 'E2E P2 Pan extra').agotado]
     }
@@ -252,9 +253,14 @@ test.describe('Pedidos en línea · portal público (servidor)', () => {
 
   test('categoría desactivada en el POS: sus productos salen del catálogo y no se cobran (contraste: reactivada)', () => {
     psql(`update public.categories set is_active = false where id = '${id.cat}';`)
-    expect(JSON.stringify(catalogo())).not.toContain('E2E P2 Perro')
+    const c = JSON.stringify(catalogo())
+    expect([c.includes('E2E P2 Perro'), c.includes('E2E P2 Gaseosa')], 'sale la de Comidas; Bebidas sigue').toEqual([false, true])
     expect(cotizar([linea(id.perro, 2)]).lineas[0].problema).toBe('no_disponible')
-    psql(`update public.categories set is_active = true where id = '${id.cat}';`)
+    // Sin NINGUNA categoría activa no queda nada vendible: el portal queda incompleto (la misma regla
+    // que la configuración de P1, portal_faltantes_de) y no responde más que {disponible: false}.
+    psql(`update public.categories set is_active = false where id = '${id.cat2}';`)
+    expect(catalogo()).toEqual({ disponible: false })
+    psql(`update public.categories set is_active = true where id in ('${id.cat}', '${id.cat2}');`)
     expect(JSON.stringify(catalogo())).toContain('E2E P2 Perro')
     expect(cotizar([linea(id.perro, 2)]).lineas[0].problema).toBeNull()
   })
@@ -307,6 +313,37 @@ test.describe('Pedidos en línea · portal público (servidor)', () => {
     expect(prob([linea(id.combo, 2), linea(id.perro, 1, [{ extra_id: id.panExtra, cantidad: 1 }])])).toEqual(['ok', 'ok'])
     expect(prob([linea(id.combo, 2), linea(id.perro, 2, [{ extra_id: id.panExtra, cantidad: 1 }])])).toEqual(['sin_stock', 'sin_stock'])
     expect(prob([linea(id.perro, 30)]), 'el perro no lleva stock').toEqual(['ok'])
+    // Nunca sale CUÁNTO queda: la respuesta tiene estas claves y ninguna más, y "sin_stock" solo dice
+    // que no alcanza para esa cantidad (decisión del 2026-10-16).
+    const q = cotizar([linea(id.gaseosa, 4, []), linea(id.combo, 3)])
+    expect(Object.keys(q).sort()).toEqual(['disponible', 'distancia_m', 'en_zona', 'envio', 'estado', 'falta_para_minimo',
+      'lineas', 'motivos', 'pedido_minimo', 'puede_pedir', 'subtotal', 'total'])
+    expect(q.lineas.map((l) => Object.keys(l).sort().join(','))).toEqual(Array(2).fill('cantidad,extras,nombre,precio_unitario,problema,product_id,total'))
+    expect(JSON.stringify(q)).not.toMatch(/unidades|stock_qty|"stock"|disponibles/)
+  })
+
+  test('lo que el portal acepta es lo que el POS descuenta (R1 #12 e): el carrito justo en el límite deja el stock en 0', () => {
+    // 2 combos (4 panes) + 1 perro con 1 pan extra (1 pan) = 5 panes de 5; 3 gaseosas de 3.
+    const carrito = [linea(id.combo, 2), linea(id.perro, 1, [{ extra_id: id.panExtra, cantidad: 1 }]), linea(id.gaseosa, 3)]
+    const q = cotizar(carrito)
+    expect(q.lineas.map((l) => l.problema)).toEqual([null, null, null])
+    // Contraste: un pan más ya no alcanza según el portal.
+    expect(cotizar([...carrito.slice(0, 1), linea(id.perro, 2, [{ extra_id: id.panExtra, cantidad: 1 }])]).lineas.map((l) => l.problema))
+      .toEqual(['sin_stock', 'sin_stock'])
+    // El MISMO carrito por el POS (add_order_items_with_extras), como el dueño, sin confirmar.
+    const items = q.lineas.map((l) => ({ product_id: l.product_id, qty: l.cantidad, unit_price: l.precio_unitario,
+      extras: l.extras.map((e) => ({ extra_id: e.extra_id, qty: e.cantidad })) }))
+    const orden = '00000000-0000-4000-8000-0000000000e2'
+    const quedan = psql(`begin;
+      insert into public.orders (id, type, restaurant_id, created_by) values ('${orden}', 'takeaway', '${SEDE}', '${OWNER}');
+      select set_config('request.jwt.claims', '{"sub":"${OWNER}","role":"authenticated"}', true);
+      set local role authenticated;
+      select public.add_order_items_with_extras('${orden}', ${lit(items)}, null);
+      reset role;
+      select string_agg(name || ':' || coalesce(stock_qty::text, '-'), ',' order by name)
+        from public.products where id in ('${id.pan}', '${id.gaseosa}', '${id.perro}');
+      rollback;`).split(/\r?\n/).filter((l) => l.includes(':')).pop()
+    expect(quedan, 'el POS descuenta exactamente lo que el portal contó').toBe('E2E P2 Gaseosa:0,E2E P2 Pan:0,E2E P2 Perro:-')
   })
 
   test('zona y envío: tramos por distancia, fuera del radio, polígono y sin ubicación', () => {

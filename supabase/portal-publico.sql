@@ -18,9 +18,9 @@
 --        · la FORMA (allowlist de claves por línea y por extra, cantidades enteras, 1 a 30 líneas):
 --          si no cumple, el error propio PT400 (ver ERRORES) — solo lo produce un cliente que no
 --          es el portal;
---        · cada línea: producto de la sede, activo, publicado y con precio; cada extra de la sede,
---          activo y asignado a ESE producto (product_extras). Si no, la línea queda con
---          problema y sin precio (un carrito viejo es legítimo: no es un error, es "ya no está");
+--        · cada línea: lo que diga portal_disponibilidad (P1) del producto y de cada extra para ESE
+--          producto. Si no se puede vender, la línea queda con problema y sin precio (un carrito
+--          viejo es legítimo: no es un error, es "ya no está");
 --        · el stock: lo que pide todo el carrito (simples, insumos de los compuestos por receta y
 --          productos vinculados a extras) contra el stock de cada producto que lleva stock;
 --        · el estado (portal_estado_de), la zona, el envío y el pedido mínimo.
@@ -48,8 +48,12 @@
 --     navegador (los trae la parte de las pantallas de P2). Lo vigila tests/portal-publico.spec.ts.
 --   · La forma de la clave del límite: el CHECK portal_limites_clave y claveLimite() / ACCIONES en
 --     supabase/functions/portal/reglas.ts.
---   · El precio y "se puede vender": portal_producto_vendible y portal_extra_vendible son la ÚNICA
---     regla; la usan el catálogo y portal_calcular (el spec compara los dos, producto por producto).
+--   · El precio y "se puede vender": los decide portal_disponibilidad (portal-config.sql, P1), la
+--     ÚNICA regla (R1 #12 d); la usan el catálogo y portal_calcular (el spec compara los dos, producto
+--     por producto). Lo único que se calcula aquí es la DEMANDA de todo el carrito contra el stock (un
+--     carrito puede pedir varias veces el mismo insumo): con cantidad 1 coincide con su "agotado".
+--   · Nunca sale al cliente cuántas unidades quedan: solo agotado / sin_stock ("no alcanza para esa
+--     cantidad"). El spec fija las claves exactas de la respuesta.
 --
 -- PRECONDICIONES: portal-config.sql (P1), con las versiones de abajo (md5 en la guarda).
 -- FRONTEND: nada del frontend actual lo usa. Va ANTES de desplegar la Edge Function `portal`.
@@ -77,10 +81,11 @@ begin
   if (select count(*) from pg_proc p
        where (p.oid::regprocedure::text, md5(regexp_replace(regexp_replace(pg_get_functiondef(p.oid), E'\r','','g'), E'[ \t]+\n', E'\n','g'))) in (
                ('portal_estado_de(uuid,timestamp with time zone)', '767360ed8650f2286688f6e22e1a6222'),
-               ('portal_faltantes_de(uuid)',                       '06591a0126f9c50a9a28094a96f26b39'),
+               ('portal_faltantes_de(uuid)',                       'a1103ee7eebbbfa0e79705fe2f9de1ad'),
+               ('portal_disponibilidad(uuid,uuid,uuid)',           '062b1a81cd955da4a022e0fbf6a0e574'),
                ('geo_distancia_m(numeric,numeric,numeric,numeric)', 'a44665562016bdfdc22097466577f6b4'),
-               ('geo_en_poligono(numeric,numeric,jsonb)',          'c462b6ef6ac36622da383d063f511a8c'))) <> 4 then
-    raise exception 'Precondición: portal_estado_de, portal_faltantes_de, geo_distancia_m o geo_en_poligono no son las de portal-config.sql (md5). No se cambió nada.';
+               ('geo_en_poligono(numeric,numeric,jsonb)',          'c462b6ef6ac36622da383d063f511a8c'))) <> 5 then
+    raise exception 'Precondición: portal_estado_de, portal_faltantes_de, portal_disponibilidad, geo_distancia_m o geo_en_poligono no son las de portal-config.sql (md5). No se cambió nada.';
   end if;
 end $$;
 
@@ -121,58 +126,6 @@ as $$
   select case when jsonb_typeof(j) = 'string'
                    and (j #>> '{}') ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
               then (j #>> '{}')::uuid end
-$$;
-
--- Unidades que se pueden vender de un producto. null = sin límite (no lleva stock).
--- Simple con stock: su stock (piso 0). Compuesto: lo que alcanzan los insumos con stock según la
--- receta (null si ninguno lleva stock). Es la misma regla con la que el POS descuenta.
-create function public.portal_unidades_disponibles(p_producto uuid)
-returns integer
-language sql stable security definer
-set search_path = public
-as $$
-  select case p.kind
-           when 'simple' then case when p.stock_tracking then greatest(coalesce(p.stock_qty, 0), 0) end
-           when 'composite' then (
-             select min(greatest(coalesce(c.stock_qty, 0), 0) / pc.qty)
-               from public.product_components pc
-               join public.products c on c.id = pc.component_id and c.restaurant_id = p.restaurant_id
-              where pc.parent_id = p.id and pc.restaurant_id = p.restaurant_id and c.stock_tracking)
-           else 0
-         end
-    from public.products p
-   where p.id = p_producto
-$$;
-
--- 🔴 El precio de un producto en el portal, o null si ahí no se puede vender. LA ÚNICA regla: la
--- usan portal_catalogo (qué se muestra y a qué precio) y portal_calcular (qué se cobra); las
--- promociones de precio (P6) entran aquí. De la sede, activo, publicado, de una categoría activa
--- (la que el POS borra queda is_active = false), simple o compuesto y con precio > 0.
-create function public.portal_producto_vendible(p_producto uuid, p_sede uuid)
-returns numeric
-language sql stable security definer
-set search_path = public
-as $$
-  select coalesce(pp.precio_domicilio, p.price)
-    from public.products p
-    join public.portal_productos pp on pp.product_id = p.id and pp.restaurant_id = p.restaurant_id
-    join public.categories c on c.id = p.category_id and c.is_active
-   where p.id = p_producto and p.restaurant_id = p_sede and p.is_active and pp.publicado
-     and p.kind in ('simple', 'composite')
-     and coalesce(pp.precio_domicilio, p.price) > 0
-$$;
-
--- 🔴 El precio de un extra PARA ESE producto, o null si no se puede pedir con él: de la sede, activo
--- y asignado al producto (product_extras). La misma regla que add_order_items_with_extras.
-create function public.portal_extra_vendible(p_extra uuid, p_producto uuid, p_sede uuid)
-returns numeric
-language sql stable security definer
-set search_path = public
-as $$
-  select e.price
-    from public.extras e
-    join public.product_extras pe on pe.extra_id = e.id and pe.product_id = p_producto
-   where e.id = p_extra and e.restaurant_id = p_sede and e.is_active and e.price >= 0
 $$;
 
 -- El portal de un slug, solo si está publicado y completo. null en cualquier otro caso.
@@ -333,12 +286,14 @@ begin
     v_usa := '{}'::jsonb;
     v_total_lin := null;
 
-    -- Por id y contra la sede; precio y "se puede vender" por la regla única (portal_producto_vendible).
-    select p.id, p.name, p.kind, p.stock_tracking, portal_producto_vendible(p.id, p_sede) as precio
+    -- Por id y contra la sede; precio y "se puede vender" por la regla única de P1. "agotado" no es
+    -- problema aquí: lo decide abajo la demanda de TODO el carrito contra el stock.
+    select p.id, p.name, p.kind, p.stock_tracking, d.precio, d.motivo
       into v_prod
       from public.products p
+      cross join lateral portal_disponibilidad(p_sede, p.id) d
      where p.id = v_pid and p.restaurant_id = p_sede;
-    if not found or v_prod.precio is null then
+    if not found or (v_prod.motivo is not null and v_prod.motivo <> 'agotado') then
       v_problema := 'no_disponible';
     else
       v_total_lin := v_prod.precio * v_cant;
@@ -360,13 +315,14 @@ begin
       for v_extra in select value from jsonb_array_elements(coalesce(v_item->'extras', '[]'::jsonb)) loop
         v_eid := portal_uuid(v_extra->'extra_id');
         v_ecant := (v_extra->>'cantidad')::numeric::integer;
-        select e.name, portal_extra_vendible(e.id, v_pid, p_sede) as price, e.linked_product_id,
+        select e.name, d.precio as price, d.motivo, e.linked_product_id,
                coalesce(lp.stock_tracking, false) as vinculado_con_stock
           into v_ext
           from public.extras e
+          cross join lateral portal_disponibilidad(p_sede, v_pid, e.id) d
           left join public.products lp on lp.id = e.linked_product_id and lp.restaurant_id = p_sede
          where e.id = v_eid and e.restaurant_id = p_sede;
-        if not found or v_ext.price is null then
+        if not found or (v_ext.motivo is not null and v_ext.motivo <> 'agotado') then
           v_problema := 'extra_no_disponible';
           exit;
         end if;
@@ -499,22 +455,22 @@ begin
                    'nombre', p.name,
                    'descripcion', p.description,
                    'imagen_url', p.image_url,
-                   'precio', portal_producto_vendible(p.id, v_sede),
-                   'agotado', coalesce(portal_unidades_disponibles(p.id) <= 0, false),
+                   'precio', d.precio,
+                   'agotado', d.agotado,
                    'extras', (
                      select coalesce(jsonb_agg(jsonb_build_object(
-                              'id', e.id, 'nombre', e.name, 'precio', portal_extra_vendible(e.id, p.id, v_sede),
-                              'agotado', coalesce(lp.stock_tracking and coalesce(lp.stock_qty, 0) <= 0, false))
+                              'id', e.id, 'nombre', e.name, 'precio', de.precio, 'agotado', de.agotado)
                               order by e.name), '[]'::jsonb)
                        from public.product_extras pe
                        join public.extras e on e.id = pe.extra_id
-                       left join public.products lp on lp.id = e.linked_product_id and lp.restaurant_id = v_sede
-                      where pe.product_id = p.id and portal_extra_vendible(e.id, p.id, v_sede) is not null)
+                       cross join lateral portal_disponibilidad(v_sede, p.id, e.id) de
+                      where pe.product_id = p.id and (de.motivo is null or de.motivo = 'agotado'))
                  ) order by p.name)) as j
             from public.portal_productos pp
             join public.products p on p.id = pp.product_id and p.restaurant_id = v_sede
             join public.categories c on c.id = p.category_id
-           where pp.restaurant_id = v_sede and portal_producto_vendible(p.id, v_sede) is not null
+            cross join lateral portal_disponibilidad(v_sede, p.id) d
+           where pp.restaurant_id = v_sede and (d.motivo is null or d.motivo = 'agotado')
            group by c.id, c.sort_order, c.name
         ) cat), '[]'::jsonb));
 end $$;
@@ -558,8 +514,7 @@ declare
 begin
   foreach f in array array[
     'portal_entero_entre(jsonb,integer,integer)', 'portal_uuid(jsonb)',
-    'portal_unidades_disponibles(uuid)', 'portal_sede_de_slug(text)',
-    'portal_producto_vendible(uuid,uuid)', 'portal_extra_vendible(uuid,uuid,uuid)',
+    'portal_sede_de_slug(text)',
     'portal_proxima_apertura(uuid,timestamptz)', 'portal_estado_publico(uuid,timestamptz)',
     'portal_calcular(uuid,jsonb,numeric,numeric,timestamptz)',
     'portal_catalogo(text,timestamptz)', 'portal_cotizar(text,jsonb,numeric,numeric,timestamptz)',
@@ -601,8 +556,7 @@ begin
   select string_agg(f, ', ') into v_mal
     from unnest(array[
       'portal_entero_entre(jsonb,integer,integer)', 'portal_uuid(jsonb)',
-      'portal_unidades_disponibles(uuid)', 'portal_sede_de_slug(text)',
-      'portal_producto_vendible(uuid,uuid)', 'portal_extra_vendible(uuid,uuid,uuid)',
+      'portal_sede_de_slug(text)',
       'portal_proxima_apertura(uuid,timestamptz)', 'portal_estado_publico(uuid,timestamptz)',
       'portal_calcular(uuid,jsonb,numeric,numeric,timestamptz)',
       'portal_catalogo(text,timestamptz)', 'portal_cotizar(text,jsonb,numeric,numeric,timestamptz)',
@@ -616,7 +570,7 @@ begin
    where p.pronamespace = 'public'::regnamespace and p.prosecdef
      and has_function_privilege('anon', p.oid, 'EXECUTE');
   if v_mal is not null then raise exception 'anon ejecuta funciones SECURITY DEFINER: %. No se cambió nada.', v_mal; end if;
-  raise notice 'portal-publico: listo — 12 funciones solo para service_role, contador sin acceso directo';
+  raise notice 'portal-publico: listo — 9 funciones solo para service_role, contador sin acceso directo';
 end $$;
 
 commit;

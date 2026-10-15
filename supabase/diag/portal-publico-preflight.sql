@@ -13,10 +13,11 @@ select f.firma,
        md5(regexp_replace(regexp_replace(pg_get_functiondef(to_regprocedure('public.' || f.firma)), E'\r','','g'), E'[ \t]+\n', E'\n','g')) as md5,
        md5(regexp_replace(regexp_replace(pg_get_functiondef(to_regprocedure('public.' || f.firma)), E'\r','','g'), E'[ \t]+\n', E'\n','g')) = f.esperado as como_se_espera
   from (values ('portal_estado_de(uuid,timestamptz)',                 '767360ed8650f2286688f6e22e1a6222'),
-               ('portal_faltantes_de(uuid)',                          '06591a0126f9c50a9a28094a96f26b39'),
+               ('portal_faltantes_de(uuid)',                          'a1103ee7eebbbfa0e79705fe2f9de1ad'),
+               ('portal_disponibilidad(uuid,uuid,uuid)',              '062b1a81cd955da4a022e0fbf6a0e574'),
                ('geo_distancia_m(numeric,numeric,numeric,numeric)',   'a44665562016bdfdc22097466577f6b4'),
                ('geo_en_poligono(numeric,numeric,jsonb)',             'c462b6ef6ac36622da383d063f511a8c')) f(firma, esperado);
--- Esperado: 4 filas con como_se_espera = t. Una f o vacía (la función no existe): P1 no
+-- Esperado: 5 filas con como_se_espera = t. Una f o vacía (la función no existe): P1 no
 -- está, o está otra versión. No apliques; avísame con la fila.
 
 -- ── Consulta 3 (DESPUÉS): quién ejecuta qué ──
@@ -43,22 +44,19 @@ select (select count(*) from pg_proc p
            and grantee in ('anon', 'authenticated', 'PUBLIC'))                         as privilegios_contador;
 -- DESPUÉS: 0 · 0 · 3 · 0 · 0
 
--- ── Consulta 4 (DESPUÉS): las 12 funciones con el md5 que espera la reversa, y la RLS del contador ──
+-- ── Consulta 4 (DESPUÉS): las 9 funciones con el md5 que espera la reversa, y la RLS del contador ──
 select f.firma,
        md5(regexp_replace(regexp_replace(pg_get_functiondef(to_regprocedure('public.' || f.firma)), E'\r','','g'), E'[ \t]+\n', E'\n','g')) = f.esperado as como_la_reversa,
        (select relrowsecurity from pg_class where oid = 'public.portal_limites'::regclass) as rls_contador
   from (values
     ('portal_entero_entre(jsonb,integer,integer)',              '873a49c6a8155a3dad14d8bf9b513132'),
     ('portal_uuid(jsonb)',                                      '2f04226324a92b3ca53ae52129b3ba6e'),
-    ('portal_unidades_disponibles(uuid)',                       'c1eff8a327a98df86fb607d39214fa95'),
     ('portal_sede_de_slug(text)',                               'eb901b623062769e3461edec8a1aa55f'),
-    ('portal_producto_vendible(uuid,uuid)',                     '469c2617162b87b36b72796220a631b5'),
-    ('portal_extra_vendible(uuid,uuid,uuid)',                   '167254ec5feca64ee6826c6b3e6ba83a'),
     ('portal_proxima_apertura(uuid,timestamptz)',               '8139ac42233e9122b7e5e19d362b84ee'),
     ('portal_estado_publico(uuid,timestamptz)',                 'eba92cbd2cb296d0626b94ef935ab11a'),
-    ('portal_calcular(uuid,jsonb,numeric,numeric,timestamptz)', '855850fbaf538c698d8779f8eab58536'),
-    ('portal_catalogo(text,timestamptz)',                       'd2e66bb0ac20bb9e6aefdc8bc41b4a31'),
+    ('portal_calcular(uuid,jsonb,numeric,numeric,timestamptz)', '505fb553c0ab4aab0b7e5c3ac589a81c'),
+    ('portal_catalogo(text,timestamptz)',                       'd49a9270c442db8f98ed10b93d0d210a'),
     ('portal_cotizar(text,jsonb,numeric,numeric,timestamptz)',  'eb2724105e78bcd6efd0250d6b7ebd32'),
     ('portal_contar(text,integer)',                             'a9be6cef366b66ac009e06cf1d12c6c1')) f(firma, esperado);
--- DESPUÉS: 12 filas con como_la_reversa = t y rls_contador = t. Una f: lo aplicado no es este archivo
+-- DESPUÉS: 9 filas con como_la_reversa = t y rls_contador = t. Una f: lo aplicado no es este archivo
 -- (o pg_get_functiondef formatea distinto en prod); la reversa abortaría. Avísame con la fila.
