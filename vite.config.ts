@@ -96,8 +96,20 @@ function identidadPorRuta(): Plugin {
 // En dev/E2E, /pedir y /pedir/<negocio> (y cualquier ruta si el Host es el del portal) reciben
 // pedido.html, como en Vercel (vercel.json; la regla es esDelPortal en src/lib/identidadRutas.ts).
 function portalDelCliente(): Plugin {
+  let outDir = 'dist'
   return {
     name: 'gvento-portal-del-cliente',
+    configResolved(c) { outDir = path.resolve(c.root, c.build.outDir) },
+    // vite preview (lo usa aviso-version.spec.ts): el pedido.html del build.
+    configurePreviewServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const aceptaHtml = String(req.headers.accept ?? '').includes('text/html')
+        if (req.method !== 'GET' || !aceptaHtml || !esDelPortal(req.url ?? '/', req.headers.host)) return next()
+        res.setHeader('Content-Type', 'text/html; charset=utf-8')
+        res.setHeader('Cache-Control', 'no-cache')
+        res.end(fs.readFileSync(path.join(outDir, DOCUMENTO_PORTAL), 'utf-8'))
+      })
+    },
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         const aceptaHtml = String(req.headers.accept ?? '').includes('text/html')

@@ -44,15 +44,18 @@
 --
 -- 🔴 CONTRATOS EN DOS LADOS (R1):
 --   · La forma de los ítems (claves de línea y de extra) y la del resultado: este archivo, la
---     Edge Function `portal` (que pasa los ítems sin tocarlos) y los tipos del portal en el
---     navegador (los trae la parte de las pantallas de P2). Lo vigila tests/portal-publico.spec.ts.
+--     Edge Function `portal` (que pasa los ítems sin tocarlos) y los tipos del navegador en
+--     src/portal/api.ts. Lo vigila tests/portal-publico.spec.ts (claves exactas); tsc no mira el SQL.
 --   · La forma de la clave del límite: el CHECK portal_limites_clave y claveLimite() / ACCIONES en
 --     supabase/functions/portal/reglas.ts.
 --   · El precio y "se puede vender": los decide portal_disponibilidad (portal-config.sql, P1), la
 --     ÚNICA regla (R1 #12 d), por su columna vendible; la usan el catálogo y portal_calcular (el spec
 --     compara los dos, producto por producto). Qué stock consume cada unidad lo dice portal_consumo
 --     (P1, R1 #12 e); aquí solo se SUMA el carrito (puede pedir varias veces el mismo insumo) y se
---     compara contra el stock: con cantidad 1 coincide con el "agotado" de la regla.
+--     compara contra el stock: con cantidad 1 coincide con el "agotado" de la regla, para un producto
+--     solo. Si un extra consume el mismo stock que su producto (el producto ligado es el mismo o un
+--     insumo de su receta), el carrito suma los dos y puede dar sin_stock aunque el catálogo muestre
+--     los dos disponibles: es la demanda real, la misma que descontaría el POS.
 --   · Nunca sale al cliente cuántas unidades quedan: solo agotado / sin_stock ("no alcanza para esa
 --     cantidad"). El spec fija las claves exactas de la respuesta.
 --
@@ -63,7 +66,8 @@
 -- NO DEDUZCAS EL ESTADO DE ESTE COMENTARIO — correlo:
 --   select to_regclass('public.portal_limites'),
 --          to_regprocedure('public.portal_calcular(uuid,jsonb,numeric,numeric,timestamptz)');
---   -- null, null = no está · con valor, con valor = está · una con valor y la otra null = estado
+--   -- null, null = no está · con valor, con valor = está. Para saber si es EXACTAMENTE esta versión:
+--   -- la consulta 4 del pre-flight (md5 de las 9 funciones). · una con valor y la otra null = estado
 --   -- parcial (no debería poder pasar: todo va en una transacción): no apliques ni reviertas, avísame.
 -- ============================================================================
 
@@ -83,7 +87,7 @@ begin
        where (p.oid::regprocedure::text, md5(regexp_replace(regexp_replace(pg_get_functiondef(p.oid), E'\r','','g'), E'[ \t]+\n', E'\n','g'))) in (
                ('portal_estado_de(uuid,timestamp with time zone)', '767360ed8650f2286688f6e22e1a6222'),
                ('portal_faltantes_de(uuid)',                       '61a6cbce7bf2d023f33155f210ad3711'),
-               ('portal_disponibilidad(uuid,uuid,uuid)',           '902763cecae24bbd5ae877c46bf34f74'),
+               ('portal_disponibilidad(uuid,uuid,uuid)',           '74bd007f093a7be9d41131835e043090'),
                ('portal_consumo(uuid,uuid,uuid)',                  'e75f6b0bfb744c0219f024724e60cf3c'),
                ('geo_distancia_m(numeric,numeric,numeric,numeric)', 'a44665562016bdfdc22097466577f6b4'),
                ('geo_en_poligono(numeric,numeric,jsonb)',          'c462b6ef6ac36622da383d063f511a8c'))) <> 6 then

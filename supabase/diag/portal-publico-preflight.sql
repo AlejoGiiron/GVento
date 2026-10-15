@@ -14,7 +14,7 @@ select f.firma,
        md5(regexp_replace(regexp_replace(pg_get_functiondef(to_regprocedure('public.' || f.firma)), E'\r','','g'), E'[ \t]+\n', E'\n','g')) = f.esperado as como_se_espera
   from (values ('portal_estado_de(uuid,timestamptz)',                 '767360ed8650f2286688f6e22e1a6222'),
                ('portal_faltantes_de(uuid)',                          '61a6cbce7bf2d023f33155f210ad3711'),
-               ('portal_disponibilidad(uuid,uuid,uuid)',              '902763cecae24bbd5ae877c46bf34f74'),
+               ('portal_disponibilidad(uuid,uuid,uuid)',              '74bd007f093a7be9d41131835e043090'),
                ('portal_consumo(uuid,uuid,uuid)',                     'e75f6b0bfb744c0219f024724e60cf3c'),
                ('geo_distancia_m(numeric,numeric,numeric,numeric)',   'a44665562016bdfdc22097466577f6b4'),
                ('geo_en_poligono(numeric,numeric,jsonb)',             'c462b6ef6ac36622da383d063f511a8c')) f(firma, esperado);

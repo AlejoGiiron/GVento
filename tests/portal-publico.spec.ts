@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { ownerCreds } from './helpers/auth'
 import { cliente, psql, psqlResultado } from './helpers/db-local'
 import { otraCreds } from './helpers/storage'
@@ -417,6 +417,25 @@ test.describe('Pedidos en línea · portal público (servidor)', () => {
     expect([1, 2, 3].map(() => sinSet(contar(k, 2).stdout))).toEqual(['t', 't', 'f'])
     expect(psql(`select count(*) from public.portal_limites where clave = '${k}' and ventana < now() - interval '1 day';`), 'purga').toBe('0')
     expect(sinSet(contar('global:sin-ip', 1).stdout)).toBe('t')
+  })
+})
+
+test.describe('el pre-flight de portal-publico.sql', () => {
+  test('consultas 2 y 4: los md5 de P1 que exige y los de sus 9 funciones dan t; la reversa tiene las mismas listas', () => {
+    const pre = readFileSync('supabase/diag/portal-publico-preflight.sql', 'utf-8').replace(/\r\n/g, '\n')
+    const c2 = pre.slice(pre.indexOf('-- ── Consulta 2'), pre.indexOf('-- ── Consulta 3'))
+    const c4 = pre.slice(pre.indexOf('-- ── Consulta 4'))
+    const f2 = psql(c2).split(/\r?\n/).filter(Boolean)
+    const f4 = psql(c4).split(/\r?\n/).filter(Boolean)
+    expect([f2.length, f4.length]).toEqual([6, 9])
+    expect([...f2.filter((f) => !f.endsWith('|t')), ...f4.filter((f) => !f.endsWith('|t|t'))]).toEqual([])
+    const rev = '../gvento/portal-publico-revertir.sql'
+    if (existsSync(rev)) {
+      const md5 = (txt: string) => new Set([...txt.matchAll(/'([a-z_]+\([^']*\))',\s*'([0-9a-f]{32})'/g)].map((m) => `${m[1].replace('timestamp with time zone', 'timestamptz')}=${m[2]}`))
+      const enRev = md5(readFileSync(rev, 'utf-8'))
+      const faltan = [...md5(c2), ...md5(c4)].filter((x) => !enRev.has(x))
+      expect([md5(c2).size + md5(c4).size, faltan], 'la reversa (fuera de git) exige los mismos md5').toEqual([15, []])
+    }
   })
 })
 

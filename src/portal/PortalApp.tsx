@@ -36,7 +36,7 @@ export function PortalApp() {
       : vista.tipo === 'sin_negocio' ? 'Este link no corresponde a ningún negocio. Revisa que esté completo.'
       : vista.tipo === 'no_disponible' ? 'Este negocio no está recibiendo pedidos en línea por ahora.'
       : vista.mensaje
-    return <main style={{ ...caja, paddingTop: 48 }}><p data-testid="portal-mensaje" style={{ fontSize: 16, color: '#334155' }}>{texto}</p></main>
+    return <main style={{ ...caja, paddingTop: 48 }}><p data-testid="pedido-mensaje" style={{ fontSize: 16, color: '#334155' }}>{texto}</p></main>
   }
 
   const { negocio, estado, entrega, categorias } = vista.catalogo
@@ -45,8 +45,8 @@ export function PortalApp() {
     <main>
       <header style={{ background: color, color: '#fff', padding: '20px 0' }}>
         <div style={caja}>
-          <h1 data-testid="portal-negocio" style={{ margin: 0, fontSize: 22 }}>{negocio.nombre}</h1>
-          <p data-testid="portal-estado" style={{ margin: '6px 0 0', fontSize: 14 }}>{textoEstado(estado)}</p>
+          <h1 data-testid="pedido-negocio" style={{ margin: 0, fontSize: 22 }}>{negocio.nombre}</h1>
+          <p data-testid="pedido-estado" style={{ margin: '6px 0 0', fontSize: 14 }}>{textoEstado(estado)}</p>
           <p style={{ margin: '4px 0 0', fontSize: 13, opacity: 0.9 }}>
             Entrega en {entrega.tiempo_min}–{entrega.tiempo_max} min
             {entrega.envio_desde !== null && ` · envío desde ${pesos(entrega.envio_desde)}`}
@@ -59,7 +59,7 @@ export function PortalApp() {
           <section key={c.id} style={{ marginBottom: 20 }}>
             <h2 style={{ fontSize: 17, color: '#0f172a', margin: '0 0 8px' }}>{c.nombre}</h2>
             {c.productos.map((p) => (
-              <div key={p.id} data-testid={`portal-item-${p.id}`}
+              <div key={p.id} data-testid={`pedido-item-${p.id}`}
                 style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '10px 0', borderTop: '1px solid #e2e8f0' }}>
                 <span style={{ color: p.agotado ? '#94a3b8' : '#0f172a' }}>
                   {p.nombre}{p.agotado && ' · agotado'}

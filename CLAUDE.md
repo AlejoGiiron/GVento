@@ -351,11 +351,17 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    y en el build, que genera `movil.html` y `cocina.html` desde el ÚNICO `index.html`) y las
    `rewrites` de `vercel.json` (producción). Lo vigila `src/lib/identidadRutas.test.ts`, que emula las
    rewrites de `vercel.json` y las compara con la regla.
-   Desde P2 (2026-10-16) también decide el documento del PORTAL del cliente: `esDelPortal` (todo
+   Desde P2 (2026-10-15) también decide el documento del PORTAL del cliente: `esDelPortal` (todo
    `pedir.gvento.online`, y `/pedir`, `/pedir/<negocio>` en los demás dominios) → `pedido.html`, otro
    paquete (`src/portal/main.tsx`). En `vercel.json` la regla del dominio va PRIMERO, con
    `has: host`; el test emula esa condición y falla ruidoso con una de otro tipo. El plugin
-   `portalDelCliente` de `vite.config.ts` hace lo mismo en dev.
+   `portalDelCliente` de `vite.config.ts` hace lo mismo en dev y en `vite preview`. En ese dominio los
+   ARCHIVOS del POS (`/index.html`, `/movil.html`, `/cocina.html`) se redirigen a `/` con `redirects`
+   (Vercel sirve los archivos antes que las rewrites); el test exige un redirect por cada documento.
+   Más lados del portal: la forma de la URL también la lee `slugDeRuta` (`src/portal/ruta.ts`), y el
+   dominio vive en 4 lugares (`HOST_PORTAL`, el `has` de `vercel.json`, `ORIGENES_POR_DEFECTO` en
+   `supabase/functions/portal/reglas.ts` y el secreto `PORTAL_ORIGENES`). Si cambian en un solo lado,
+   falla ruidoso ("Este link no corresponde…" o 403), pero falla.
    🔴 **Por qué un HTML por identidad y no JS:** Safari de iPhone toma el manifest del DOCUMENTO
    al "Agregar a inicio". Cambiar el `<link>` por JS no alcanzó: medido en un iPhone 16 Pro Max el
    2026-10-05, el ícono agregado desde `/m` abría Cocina. Por la misma razón, entrar y salir de
@@ -435,8 +441,9 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
 13. **El portal público — 2 contratos (agregado 2026-10-15, P2).**
    (a) La forma del carrito y de la cotización: `portal_calcular` (`supabase/portal-publico.sql`,
    allowlist de claves por línea y por extra), las claves por acción de `ACCIONES` en
-   `supabase/functions/portal/reglas.ts` (la función pasa `items` sin tocarlos) y los tipos del portal
-   en el navegador (llegan con las pantallas de P2). Lo vigila `tests/portal-publico.spec.ts`.
+   `supabase/functions/portal/reglas.ts` (la función pasa `items` sin tocarlos) y los tipos del
+   navegador en `src/portal/api.ts`. Lo vigila `tests/portal-publico.spec.ts`, que fija las claves
+   exactas de la respuesta; nada ata `api.ts` al SQL salvo esas pruebas (`tsc` no mira el SQL).
    🔴 El precio y "se puede pedir" de un producto y de un extra salen de `portal_disponibilidad` (P1,
    #12 d), que usan el catálogo y `portal_calcular`; cotizar (P2), crear el pedido (P3) y las
    promociones (P6) pasan por `portal_calcular`. Lo único propio de `portal_calcular` es SUMAR el

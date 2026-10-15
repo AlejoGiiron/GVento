@@ -52,9 +52,9 @@ test.describe('Pedidos en línea · entrada del portal (pedido.html)', () => {
     const pedidas: string[] = []
     page.on('request', (r: Request) => pedidas.push(r.url()))
     await page.goto(`/pedir/${SLUG}`)
-    await expect(page.getByTestId('portal-negocio')).toHaveText(NOMBRE_SEDE)
-    await expect(page.getByTestId('portal-estado')).toHaveText('Recibiendo pedidos')
-    await expect(page.getByTestId(`portal-item-${PROD}`)).toContainText('12.345')
+    await expect(page.getByTestId('pedido-negocio')).toHaveText(NOMBRE_SEDE)
+    await expect(page.getByTestId('pedido-estado')).toHaveText('Recibiendo pedidos')
+    await expect(page.getByTestId(`pedido-item-${PROD}`)).toContainText('12.345')
     await expect(page).toHaveTitle(`${NOMBRE_SEDE} · Pedidos en línea`)
     // El paquete del portal, no el del POS: ni su main.tsx, ni supabase-js, ni el service worker de Cocina.
     expect(pedidas.filter((u) => /\/src\/main\.tsx|@supabase|supabase-js|\/sw\.js/.test(u))).toEqual([])
@@ -67,7 +67,7 @@ test.describe('Pedidos en línea · entrada del portal (pedido.html)', () => {
     psql(`update public.portal_sedes set pausado = true where restaurant_id = '${SEDE}';`)
     try {
       await page.goto(`/pedir/${SLUG}`)
-      await expect(page.getByTestId('portal-estado')).toHaveText('Pausamos los pedidos por un momento')
+      await expect(page.getByTestId('pedido-estado')).toHaveText('Pausamos los pedidos por un momento')
     } finally {
       psql(`update public.portal_sedes set pausado = false where restaurant_id = '${SEDE}';`)
     }
@@ -81,20 +81,24 @@ test.describe('Pedidos en línea · entrada del portal (pedido.html)', () => {
     ]
     for (const [ruta, texto] of casos) {
       await page.goto(ruta)
-      await expect(page.getByTestId('portal-mensaje'), ruta).toHaveText(texto)
+      await expect(page.getByTestId('pedido-mensaje'), ruta).toHaveText(texto)
     }
     psql(`update public.portal_sedes set activo = false where restaurant_id = '${SEDE}';`)
     try {
       await page.goto(`/pedir/${SLUG}`)
-      await expect(page.getByTestId('portal-mensaje'), 'sin publicar').toHaveText(/no está recibiendo pedidos en línea/)
+      await expect(page.getByTestId('pedido-mensaje'), 'sin publicar').toHaveText(/no está recibiendo pedidos en línea/)
     } finally {
       psql(`update public.portal_sedes set activo = true where restaurant_id = '${SEDE}';`)
     }
   })
 
   test('contraste: las rutas del POS siguen siendo del POS (no del portal)', async ({ page }) => {
+    const pedidas: string[] = []
+    page.on('request', (r: Request) => pedidas.push(r.url()))
     await page.goto('/login')
     await expect(page.getByRole('heading', { name: 'Ingresa a tu cuenta' })).toBeVisible()
-    await expect(page.getByTestId('portal-mensaje')).toHaveCount(0)
+    await expect(page.getByTestId('pedido-mensaje')).toHaveCount(0)
+    // La regex con la que la primera prueba dice "no descargó el POS" SÍ atrapa el POS aquí.
+    expect(pedidas.some((u) => /\/src\/main\.tsx|@supabase|supabase-js/.test(u)), 'contraste de la regex').toBe(true)
   })
 })

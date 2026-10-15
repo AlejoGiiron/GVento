@@ -1,4 +1,39 @@
 {
+  "redirects": [
+    {
+      "source": "/index.html",
+      "has": [
+        {
+          "type": "host",
+          "value": "pedir.gvento.online"
+        }
+      ],
+      "destination": "/",
+      "permanent": false
+    },
+    {
+      "source": "/movil.html",
+      "has": [
+        {
+          "type": "host",
+          "value": "pedir.gvento.online"
+        }
+      ],
+      "destination": "/",
+      "permanent": false
+    },
+    {
+      "source": "/cocina.html",
+      "has": [
+        {
+          "type": "host",
+          "value": "pedir.gvento.online"
+        }
+      ],
+      "destination": "/",
+      "permanent": false
+    }
+  ],
   "rewrites": [
     {
       "source": "/(.*)",

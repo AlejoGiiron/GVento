@@ -77,14 +77,14 @@ Nada de esto lo ve un cliente hasta que exista la pantalla del portal y un negoc
      invocaciones: las líneas de arranque y apagado de la función (más en un arranque en frío) son de
      la plataforma, no de cada consulta. Después compara en Usage la ingesta de logs del día con la
      de un día normal.
-   - **Aceptable:** hasta **3 líneas y 10 KB de log por consulta**. Con el piloto (unos 50 pedidos al
-     día y unas 10 consultas por pedido, entre catálogo y cotizaciones) serían unas 45.000 líneas y
-     unos 150 MB al mes. Es un cálculo, no una medición: si con eso la ingesta mensual se acerca al
-     límite del plan (la última medida fue 2,58 GB contra 1 GB, el 2026-09-30), se aplica lo de abajo
-     antes de abrir más negocios.
-   - **Lo que ya se hace igual** (no es un remedio): el navegador cotiza solo al cambiar la dirección o
-     el carrito en el checkout, nunca en cada clic (parte 4).
-   - **Si se pasa** (más de 3 líneas por consulta, o más de 10 KB), en este orden:
+   - **Aceptable:** hasta **3 líneas y 10 KB de log por consulta**, y el portal en total **hasta
+     300 MB de ingesta al mes** (lo que sube Usage frente a un día normal, por 30). Con el piloto (unos
+     50 pedidos al día y unas 10 consultas por pedido, entre catálogo y cotizaciones) serían unas
+     45.000 líneas y unos 150 MB al mes: es un cálculo, no una medición. Ojo: la ingesta de todo el
+     proyecto ya pasó el GB del plan (2,58 GB el 2026-09-30), así que el portal suma sobre eso.
+   - **Requisito de la parte 4** (todavía no existe): el navegador cotizará solo al cambiar la
+     dirección o el carrito en el checkout, nunca en cada clic.
+   - **Si se pasa** (más de 3 líneas o 10 KB por consulta, o más de 300 MB al mes), en este orden:
      1. juntar el contador y la consulta en una sola llamada a la base (una función que cuente y
         responda): baja a 2 líneas por consulta;
      2. guardar el catálogo en la memoria de la función 30 s por negocio: la mayoría de las visitas no
@@ -96,14 +96,20 @@ Nada de esto lo ve un cliente hasta que exista la pantalla del portal y un negoc
 
 ## P2 · el dominio del portal (parte 3, 2026-10-15)
 
-`pedido.html` sale con el frontend (no necesita SQL ni la Edge Function para desplegarse; sin ellas
-el portal dice que el negocio no está disponible). Lo sirven `/pedir/<negocio>` en
-`g-vento.vercel.app` y en las vistas previas, y TODO `pedir.gvento.online` (ahí no se sirve el POS:
-`/m`, `/login` o `/cocina` también abren el portal).
+`pedido.html` sale con el frontend. Sin el SQL de P2 y la Edge Function desplegada, el portal no
+puede cargar nada y dice "No hay conexión…" o "No pudimos atender tu consulta…": por eso la
+verificación del paso 3 va DESPUÉS de publicar el servidor de P2 (partes 1 y 2). Lo sirven
+`/pedir/<negocio>` en `g-vento.vercel.app` y en las vistas previas, y TODO `pedir.gvento.online`:
+ahí no se sirve el POS (`/m`, `/login` o `/cocina` abren el portal, y `/index.html`, `/movil.html` y
+`/cocina.html` se redirigen a `/`).
 
+0. **Antes:** `nslookup -type=NS gvento.online` → tienen que salir los servidores de GoDaddy
+   (`…domaincontrol.com`); si son otros, el registro va donde digan esos. `nslookup -type=CAA
+   gvento.online` → si sale algún registro CAA, tiene que permitir `letsencrypt.org` (el certificado de
+   Vercel); si no sale nada, no hay restricción.
 1. **Vercel:** proyecto → Settings → Domains → agregar `pedir.gvento.online`. Vercel muestra el
-   registro que espera. Funciona en Hobby; el paso a Pro es por el uso comercial, antes de abrir el
-   portal a clientes.
+   registro que espera. Agregar el dominio funciona en Hobby; el paso a Pro antes de abrir el portal a
+   clientes es decisión tuya (el uso comercial).
 2. **GoDaddy** (DNS de `gvento.online` → Agregar registro):
 
    | campo | valor |
@@ -118,8 +124,11 @@ el portal dice que el negocio no está disponible). Lo sirven `/pedir/<negocio>`
    - `nslookup pedir.gvento.online` → responde con direcciones de Vercel;
    - `https://pedir.gvento.online/no-existe` → "Este negocio no está recibiendo pedidos en línea";
    - `https://pedir.gvento.online/m` → el mismo mensaje del portal, NO el login del POS. Si sale el
-     login, la regla `has: host` de `vercel.json` no se aplicó (hay reportes de eso): avísame y la
-     paso a un middleware de Vercel, que también funciona en Hobby;
+     login, la regla `has: host` de `vercel.json` no se aplicó (hay un reporte en el foro de Vercel:
+     https://community.vercel.com/t/vercel-json-the-has-condition-on-host-doesnt-seem-to-work/9863):
+     avísame y la paso a un middleware de Vercel, que también funciona en Hobby;
+   - `curl -sI https://pedir.gvento.online/index.html` → un 307 con `location: /` (lo mismo con
+     `/movil.html` y `/cocina.html`): en ese dominio los archivos del POS no se sirven;
    - `https://g-vento.vercel.app/pedir/no-existe` → el mismo mensaje.
 4. **Quitar:** borrar el dominio en Vercel y el registro en GoDaddy. El frontend puede quedarse.
 

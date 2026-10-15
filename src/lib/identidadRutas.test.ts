@@ -10,7 +10,8 @@ import { DOCUMENTO_PORTAL, HOST_PORTAL, esDelPortal, identidadDeRuta, htmlConIde
 // Emula también la condición `has: host` (el dominio del portal). Una condición de otro tipo no
 // la sabe evaluar: el test falla ruidoso en vez de ignorarla.
 type Rewrite = { source: string; destination: string; has?: { type: string; value: string }[] }
-const vercel = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../vercel.json'), 'utf-8')) as { rewrites: Rewrite[] }
+const vercel = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../vercel.json'), 'utf-8')) as
+  { rewrites: Rewrite[]; redirects?: (Rewrite & { permanent?: boolean })[] }
 const destinoVercel = (ruta: string, host = 'g-vento.vercel.app'): string => {
   const p = ruta.split('?')[0]
   for (const r of vercel.rewrites) {
@@ -45,6 +46,15 @@ describe('el portal del cliente = vercel.json (también por dominio)', () => {
     const id = identidadDeRuta(ruta)
     const esperado = esDelPortal(ruta, host) ? `/${DOCUMENTO_PORTAL}` : id ? `/${IDENTIDADES[id].archivo}` : '/index.html'
     expect(destinoVercel(ruta, host)).toBe(esperado)
+  })
+  it('en el dominio del portal, los ARCHIVOS del POS se redirigen a / (Vercel sirve archivos antes que rewrites)', () => {
+    const documentos = ['index.html', ...Object.values(IDENTIDADES).map((i) => i.archivo)]
+    const redirigidos = (vercel.redirects ?? [])
+      .filter((r) => r.destination === '/' && (r.has ?? []).some((h) => h.type === 'host' && h.value === HOST_PORTAL))
+      .map((r) => r.source.replace(/^\//, ''))
+    expect(documentos.filter((d) => !redirigidos.includes(d))).toEqual([])
+    // Contraste: fuera del dominio del portal no se redirige nada (los redirects llevan su has).
+    expect((vercel.redirects ?? []).filter((r) => !(r.has ?? []).length)).toEqual([])
   })
   it('en el dominio del portal NO se sirve el POS; fuera de él, /pedidos sigue siendo del POS', () => {
     expect([esDelPortal('/m', HOST_PORTAL), esDelPortal('/login', 'PEDIR.gvento.online:443'), esDelPortal('/pedidos', 'g-vento.vercel.app')])
