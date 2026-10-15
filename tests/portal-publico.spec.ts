@@ -314,7 +314,7 @@ test.describe('Pedidos en línea · portal público (servidor)', () => {
     expect(prob([linea(id.combo, 2), linea(id.perro, 2, [{ extra_id: id.panExtra, cantidad: 1 }])])).toEqual(['sin_stock', 'sin_stock'])
     expect(prob([linea(id.perro, 30)]), 'el perro no lleva stock').toEqual(['ok'])
     // Nunca sale CUÁNTO queda: la respuesta tiene estas claves y ninguna más, y "sin_stock" solo dice
-    // que no alcanza para esa cantidad (decisión del 2026-10-16).
+    // que no alcanza para esa cantidad (decisión del 2026-10-15).
     const q = cotizar([linea(id.gaseosa, 4, []), linea(id.combo, 3)])
     expect(Object.keys(q).sort()).toEqual(['disponible', 'distancia_m', 'en_zona', 'envio', 'estado', 'falta_para_minimo',
       'lineas', 'motivos', 'pedido_minimo', 'puede_pedir', 'subtotal', 'total'])

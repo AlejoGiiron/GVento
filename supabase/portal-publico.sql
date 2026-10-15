@@ -49,9 +49,10 @@
 --   · La forma de la clave del límite: el CHECK portal_limites_clave y claveLimite() / ACCIONES en
 --     supabase/functions/portal/reglas.ts.
 --   · El precio y "se puede vender": los decide portal_disponibilidad (portal-config.sql, P1), la
---     ÚNICA regla (R1 #12 d); la usan el catálogo y portal_calcular (el spec compara los dos, producto
---     por producto). Lo único que se calcula aquí es la DEMANDA de todo el carrito contra el stock (un
---     carrito puede pedir varias veces el mismo insumo): con cantidad 1 coincide con su "agotado".
+--     ÚNICA regla (R1 #12 d), por su columna vendible; la usan el catálogo y portal_calcular (el spec
+--     compara los dos, producto por producto). Qué stock consume cada unidad lo dice portal_consumo
+--     (P1, R1 #12 e); aquí solo se SUMA el carrito (puede pedir varias veces el mismo insumo) y se
+--     compara contra el stock: con cantidad 1 coincide con el "agotado" de la regla.
 --   · Nunca sale al cliente cuántas unidades quedan: solo agotado / sin_stock ("no alcanza para esa
 --     cantidad"). El spec fija las claves exactas de la respuesta.
 --
@@ -81,11 +82,12 @@ begin
   if (select count(*) from pg_proc p
        where (p.oid::regprocedure::text, md5(regexp_replace(regexp_replace(pg_get_functiondef(p.oid), E'\r','','g'), E'[ \t]+\n', E'\n','g'))) in (
                ('portal_estado_de(uuid,timestamp with time zone)', '767360ed8650f2286688f6e22e1a6222'),
-               ('portal_faltantes_de(uuid)',                       'a1103ee7eebbbfa0e79705fe2f9de1ad'),
-               ('portal_disponibilidad(uuid,uuid,uuid)',           '062b1a81cd955da4a022e0fbf6a0e574'),
+               ('portal_faltantes_de(uuid)',                       '61a6cbce7bf2d023f33155f210ad3711'),
+               ('portal_disponibilidad(uuid,uuid,uuid)',           '902763cecae24bbd5ae877c46bf34f74'),
+               ('portal_consumo(uuid,uuid,uuid)',                  'e75f6b0bfb744c0219f024724e60cf3c'),
                ('geo_distancia_m(numeric,numeric,numeric,numeric)', 'a44665562016bdfdc22097466577f6b4'),
-               ('geo_en_poligono(numeric,numeric,jsonb)',          'c462b6ef6ac36622da383d063f511a8c'))) <> 5 then
-    raise exception 'Precondición: portal_estado_de, portal_faltantes_de, portal_disponibilidad, geo_distancia_m o geo_en_poligono no son las de portal-config.sql (md5). No se cambió nada.';
+               ('geo_en_poligono(numeric,numeric,jsonb)',          'c462b6ef6ac36622da383d063f511a8c'))) <> 6 then
+    raise exception 'Precondición: portal_estado_de, portal_faltantes_de, portal_disponibilidad, portal_consumo, geo_distancia_m o geo_en_poligono no son las de portal-config.sql (md5). No se cambió nada.';
   end if;
 end $$;
 
@@ -288,51 +290,41 @@ begin
 
     -- Por id y contra la sede; precio y "se puede vender" por la regla única de P1. "agotado" no es
     -- problema aquí: lo decide abajo la demanda de TODO el carrito contra el stock.
-    select p.id, p.name, p.kind, p.stock_tracking, d.precio, d.motivo
+    select p.id, p.name, d.precio, d.vendible
       into v_prod
       from public.products p
       cross join lateral portal_disponibilidad(p_sede, p.id) d
      where p.id = v_pid and p.restaurant_id = p_sede;
-    if not found or (v_prod.motivo is not null and v_prod.motivo <> 'agotado') then
+    if not found or not v_prod.vendible then
       v_problema := 'no_disponible';
     else
       v_total_lin := v_prod.precio * v_cant;
-      if v_prod.kind = 'simple' and v_prod.stock_tracking then
-        v_usa := jsonb_build_object(v_pid::text, v_cant);
-      elsif v_prod.kind = 'composite' then
-        for v_comp in
-          select pc.component_id, pc.qty
-            from public.product_components pc
-            join public.products c on c.id = pc.component_id and c.restaurant_id = p_sede
-           where pc.parent_id = v_pid and pc.restaurant_id = p_sede and c.stock_tracking
-        loop
-          v_usa := v_usa || jsonb_build_object(v_comp.component_id::text,
-                     coalesce((v_usa->>v_comp.component_id::text)::integer, 0) + v_comp.qty * v_cant);
-        end loop;
-      end if;
+      -- Lo que consume: portal_consumo (P1), la misma regla con la que descuenta el POS.
+      for v_comp in select c.product_id, c.cantidad from portal_consumo(p_sede, v_pid) c loop
+        v_usa := v_usa || jsonb_build_object(v_comp.product_id::text,
+                   coalesce((v_usa->>v_comp.product_id::text)::integer, 0) + v_comp.cantidad * v_cant);
+      end loop;
 
       -- Extras: de la sede, activos y asignados a ESTE producto. El precio, de la base.
       for v_extra in select value from jsonb_array_elements(coalesce(v_item->'extras', '[]'::jsonb)) loop
         v_eid := portal_uuid(v_extra->'extra_id');
         v_ecant := (v_extra->>'cantidad')::numeric::integer;
-        select e.name, d.precio as price, d.motivo, e.linked_product_id,
-               coalesce(lp.stock_tracking, false) as vinculado_con_stock
+        select e.name, d.precio as price, d.vendible
           into v_ext
           from public.extras e
           cross join lateral portal_disponibilidad(p_sede, v_pid, e.id) d
-          left join public.products lp on lp.id = e.linked_product_id and lp.restaurant_id = p_sede
          where e.id = v_eid and e.restaurant_id = p_sede;
-        if not found or (v_ext.motivo is not null and v_ext.motivo <> 'agotado') then
+        if not found or not v_ext.vendible then
           v_problema := 'extra_no_disponible';
           exit;
         end if;
         v_total_lin := v_total_lin + v_ext.price * v_ecant * v_cant;
         v_extras_out := v_extras_out || jsonb_build_object(
           'extra_id', v_eid, 'nombre', v_ext.name, 'cantidad', v_ecant, 'precio_unitario', v_ext.price);
-        if v_ext.vinculado_con_stock then
-          v_usa := v_usa || jsonb_build_object(v_ext.linked_product_id::text,
-                     coalesce((v_usa->>v_ext.linked_product_id::text)::integer, 0) + v_ecant * v_cant);
-        end if;
+        for v_comp in select c.product_id, c.cantidad from portal_consumo(p_sede, v_pid, v_eid) c loop
+          v_usa := v_usa || jsonb_build_object(v_comp.product_id::text,
+                     coalesce((v_usa->>v_comp.product_id::text)::integer, 0) + v_comp.cantidad * v_ecant * v_cant);
+        end loop;
       end loop;
     end if;
 
@@ -464,13 +456,13 @@ begin
                        from public.product_extras pe
                        join public.extras e on e.id = pe.extra_id
                        cross join lateral portal_disponibilidad(v_sede, p.id, e.id) de
-                      where pe.product_id = p.id and (de.motivo is null or de.motivo = 'agotado'))
+                      where pe.product_id = p.id and de.vendible)
                  ) order by p.name)) as j
             from public.portal_productos pp
             join public.products p on p.id = pp.product_id and p.restaurant_id = v_sede
             join public.categories c on c.id = p.category_id
             cross join lateral portal_disponibilidad(v_sede, p.id) d
-           where pp.restaurant_id = v_sede and (d.motivo is null or d.motivo = 'agotado')
+           where pp.restaurant_id = v_sede and d.vendible
            group by c.id, c.sort_order, c.name
         ) cat), '[]'::jsonb));
 end $$;

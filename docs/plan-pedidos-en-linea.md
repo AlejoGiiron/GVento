@@ -69,23 +69,28 @@ Nada de esto lo ve un cliente hasta que exista la pantalla del portal y un negoc
      (en local no se puede medir: ver DEUDAS → *"Portal público (P2)"*);
    - `-d '{"accion":"catalogo","slug":"x","total":1}'` → **400** "Clave no permitida: total.".
 5. **Quitar:** `supabase functions delete portal --project-ref <ref>` y, si se quiere, la reversa del SQL.
-6. **Logs (lo mides tú al publicar, decidido el 2026-10-16).** Cada consulta del portal hace 3
+6. **Logs (lo mides tú al publicar, decidido el 2026-10-15).** Cada consulta del portal hace 3
    peticiones: la función, el contador y la consulta a la base. Lo esperado son **3 líneas de log por
-   consulta**.
+   consulta**: una invocación en Logs → Edge Functions y dos peticiones en Logs → API.
    - **Cómo medirlo:** anota la hora, haz 10 consultas seguidas con el `curl` del paso 4 (catálogo de
-     un slug que no existe) y cuenta en el panel (Logs → Edge Functions y Logs → API) las líneas
-     nuevas de ese minuto. Después mira en Usage cuánto subió la ingesta de logs ese día.
+     un slug que no existe) y cuenta las líneas nuevas de ese minuto. En Edge Functions cuenta solo las
+     invocaciones: las líneas de arranque y apagado de la función (más en un arranque en frío) son de
+     la plataforma, no de cada consulta. Después compara en Usage la ingesta de logs del día con la
+     de un día normal.
    - **Aceptable:** hasta **3 líneas y 10 KB de log por consulta**. Con el piloto (unos 50 pedidos al
-     día y unas 10 consultas por pedido, entre catálogo y cotizaciones) son unas 45.000 líneas y
-     unos 150 MB al mes, dentro del GB del plan junto con lo demás. Es un cálculo, no una medición.
+     día y unas 10 consultas por pedido, entre catálogo y cotizaciones) serían unas 45.000 líneas y
+     unos 150 MB al mes. Es un cálculo, no una medición: si con eso la ingesta mensual se acerca al
+     límite del plan (la última medida fue 2,58 GB contra 1 GB, el 2026-09-30), se aplica lo de abajo
+     antes de abrir más negocios.
+   - **Lo que ya se hace igual** (no es un remedio): el navegador cotiza solo al cambiar la dirección o
+     el carrito en el checkout, nunca en cada clic (parte 4).
    - **Si se pasa** (más de 3 líneas por consulta, o más de 10 KB), en este orden:
-     1. que el navegador cotice solo al cambiar la dirección o el carrito en el checkout, nunca en
-        cada clic (es de la parte 4: se hace así desde el principio);
-     2. juntar el contador y la consulta en una sola llamada a la base (una función que cuente y
+     1. juntar el contador y la consulta en una sola llamada a la base (una función que cuente y
         responda): baja a 2 líneas por consulta;
-     3. guardar el catálogo en la memoria de la función 30 s por negocio: la mayoría de las visitas
-        no llegan a la base;
-     4. si aun así se pasa, el portal no se abre a más negocios hasta resolverlo.
+     2. guardar el catálogo en la memoria de la función 30 s por negocio: la mayoría de las visitas no
+        llegan a la base. Costo: "pausado" o "agotado" se ven hasta 30 s tarde en el menú; cotizar
+        igual valida contra la base, así que nadie paga algo que no se puede vender;
+     3. si aun así se pasa, el portal no se abre a más negocios hasta resolverlo.
    - **Si un log trae la IP del cliente** en los encabezados (lo que no se pudo medir en local), se
      anota en DEUDAS y se revisa con la política de datos (Ley 1581) antes del piloto.
 
