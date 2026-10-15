@@ -94,6 +94,35 @@ Nada de esto lo ve un cliente hasta que exista la pantalla del portal y un negoc
    - **Si un log trae la IP del cliente** en los encabezados (lo que no se pudo medir en local), se
      anota en DEUDAS y se revisa con la política de datos (Ley 1581) antes del piloto.
 
+## P2 · el dominio del portal (parte 3, 2026-10-15)
+
+`pedido.html` sale con el frontend (no necesita SQL ni la Edge Function para desplegarse; sin ellas
+el portal dice que el negocio no está disponible). Lo sirven `/pedir/<negocio>` en
+`g-vento.vercel.app` y en las vistas previas, y TODO `pedir.gvento.online` (ahí no se sirve el POS:
+`/m`, `/login` o `/cocina` también abren el portal).
+
+1. **Vercel:** proyecto → Settings → Domains → agregar `pedir.gvento.online`. Vercel muestra el
+   registro que espera. Funciona en Hobby; el paso a Pro es por el uso comercial, antes de abrir el
+   portal a clientes.
+2. **GoDaddy** (DNS de `gvento.online` → Agregar registro):
+
+   | campo | valor |
+   |---|---|
+   | Tipo | `CNAME` |
+   | Nombre | `pedir` |
+   | Valor | `cname.vercel-dns.com` (si el panel de Vercel muestra otro valor para este proyecto, usa ese) |
+   | TTL | 1 hora |
+
+   No toques los registros de `@` ni de `www`.
+3. **Verificar** (cuando Vercel marque el dominio como válido y emita el certificado):
+   - `nslookup pedir.gvento.online` → responde con direcciones de Vercel;
+   - `https://pedir.gvento.online/no-existe` → "Este negocio no está recibiendo pedidos en línea";
+   - `https://pedir.gvento.online/m` → el mismo mensaje del portal, NO el login del POS. Si sale el
+     login, la regla `has: host` de `vercel.json` no se aplicó (hay reportes de eso): avísame y la
+     paso a un middleware de Vercel, que también funciona en Hobby;
+   - `https://g-vento.vercel.app/pedir/no-existe` → el mismo mensaje.
+4. **Quitar:** borrar el dominio en Vercel y el registro en GoDaddy. El frontend puede quedarse.
+
 ## Lo que hace falta de tu lado
 
 - [x] Documentación de Factus Pay y respuestas a las dudas (13/10): devuelve la llave Bre-B, mínimo $1.000, estados `ready`/`paid`, vencimiento en segundos, 6 reintentos, una cuenta por negocio, retiro inmediato.

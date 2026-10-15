@@ -1,6 +1,24 @@
 {
   "rewrites": [
     {
+      "source": "/(.*)",
+      "has": [
+        {
+          "type": "host",
+          "value": "pedir.gvento.online"
+        }
+      ],
+      "destination": "/pedido.html"
+    },
+    {
+      "source": "/pedir",
+      "destination": "/pedido.html"
+    },
+    {
+      "source": "/pedir/(.*)",
+      "destination": "/pedido.html"
+    },
+    {
       "source": "/m",
       "destination": "/movil.html"
     },

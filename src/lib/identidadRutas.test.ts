@@ -1,17 +1,21 @@
 import { describe, it, expect } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { identidadDeRuta, htmlConIdentidad, IDENTIDADES, MARCADOR_IDENTIDAD } from './identidadRutas'
+import { DOCUMENTO_PORTAL, HOST_PORTAL, esDelPortal, identidadDeRuta, htmlConIdentidad, IDENTIDADES, MARCADOR_IDENTIDAD } from './identidadRutas'
 
 // 🔴 CONTRATO DE DOS LADOS (R1): la regla que usa el dev server (identidadDeRuta)
 // y las rewrites de PRODUCCIÓN (vercel.json). Si divergen, en local se prueba un
 // documento y en Vercel se sirve otro. Este test emula el orden de vercel.json
 // (primera regla que coincide) para estas rutas.
-type Rewrite = { source: string; destination: string }
+// Emula también la condición `has: host` (el dominio del portal). Una condición de otro tipo no
+// la sabe evaluar: el test falla ruidoso en vez de ignorarla.
+type Rewrite = { source: string; destination: string; has?: { type: string; value: string }[] }
 const vercel = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../vercel.json'), 'utf-8')) as { rewrites: Rewrite[] }
-const destinoVercel = (ruta: string): string => {
+const destinoVercel = (ruta: string, host = 'g-vento.vercel.app'): string => {
   const p = ruta.split('?')[0]
   for (const r of vercel.rewrites) {
+    for (const h of r.has ?? []) if (h.type !== 'host') throw new Error(`condición has de tipo ${h.type}: el test no la sabe emular`)
+    if ((r.has ?? []).some((h) => h.value !== host)) continue
     const re = new RegExp('^' + r.source.replace(/\(\.\*\)/g, '(.*)') + '$')
     if (re.test(p)) return r.destination
   }
@@ -26,6 +30,25 @@ describe('identidad por ruta = vercel.json', () => {
   })
   it('/mesas NO es /m (empieza con "/m")', () => {
     expect(identidadDeRuta('/mesas')).toBeNull()
+  })
+})
+
+describe('el portal del cliente = vercel.json (también por dominio)', () => {
+  // [ruta, host]: el documento lo decide esDelPortal (portal) o la regla de identidades (el resto).
+  const casos: [string, string][] = [
+    ['/pedir/salchimelo', 'g-vento.vercel.app'], ['/pedir', 'g-vento.vercel.app'], ['/pedir/', 'g-vento.vercel.app'],
+    ['/pedir/salchimelo', 'g-vento-git-x-equipo.vercel.app'], ['/pedidos', 'g-vento.vercel.app'], ['/pedirx', 'g-vento.vercel.app'],
+    ['/salchimelo', HOST_PORTAL], ['/', HOST_PORTAL], ['/m', HOST_PORTAL], ['/cocina', HOST_PORTAL], ['/login', HOST_PORTAL],
+    ['/m', 'g-vento.vercel.app'], ['/salchimelo', 'g-vento.vercel.app'],
+  ]
+  it.each(casos)('%s en %s → el mismo documento en dev y en Vercel', (ruta, host) => {
+    const id = identidadDeRuta(ruta)
+    const esperado = esDelPortal(ruta, host) ? `/${DOCUMENTO_PORTAL}` : id ? `/${IDENTIDADES[id].archivo}` : '/index.html'
+    expect(destinoVercel(ruta, host)).toBe(esperado)
+  })
+  it('en el dominio del portal NO se sirve el POS; fuera de él, /pedidos sigue siendo del POS', () => {
+    expect([esDelPortal('/m', HOST_PORTAL), esDelPortal('/login', 'PEDIR.gvento.online:443'), esDelPortal('/pedidos', 'g-vento.vercel.app')])
+      .toEqual([true, true, false])
   })
 })
 

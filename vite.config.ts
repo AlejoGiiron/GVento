@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 import { sentryVitePlugin } from '@sentry/vite-plugin'
 import path from 'path'
 import fs from 'node:fs'
-import { MARCADOR_IDENTIDAD, IDENTIDADES, identidadDeRuta, htmlConIdentidad } from './src/lib/identidadRutas'
+import { MARCADOR_IDENTIDAD, IDENTIDADES, identidadDeRuta, htmlConIdentidad, esDelPortal, DOCUMENTO_PORTAL } from './src/lib/identidadRutas'
 
 // La subida de source maps solo corre si hay token: el build local, y el de
 // cualquiera sin credenciales de Sentry, sigue funcionando igual.
@@ -92,6 +92,27 @@ function identidadPorRuta(): Plugin {
   }
 }
 
+// ── Portal del cliente (Pedidos en línea, P2): pedido.html es OTRA entrada del build ──────────
+// En dev/E2E, /pedir y /pedir/<negocio> (y cualquier ruta si el Host es el del portal) reciben
+// pedido.html, como en Vercel (vercel.json; la regla es esDelPortal en src/lib/identidadRutas.ts).
+function portalDelCliente(): Plugin {
+  return {
+    name: 'gvento-portal-del-cliente',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const aceptaHtml = String(req.headers.accept ?? '').includes('text/html')
+        if (req.method !== 'GET' || !aceptaHtml || !esDelPortal(req.url ?? '/', req.headers.host)) return next()
+        const html = fs.readFileSync(path.resolve(server.config.root, DOCUMENTO_PORTAL), 'utf-8')
+        server.transformIndexHtml(req.url ?? '/', html).then((h) => {
+          res.setHeader('Content-Type', 'text/html; charset=utf-8')
+          res.setHeader('Cache-Control', 'no-cache')
+          res.end(h)
+        }, next)
+      })
+    },
+  }
+}
+
 export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(APP_VERSION),
@@ -99,6 +120,7 @@ export default defineConfig({
   plugins: [
     react(),
     versionJson(),
+    portalDelCliente(),
     identidadPorRuta(),
     // ⚠️ SIEMPRE al final del array: necesita ver el bundle ya generado.
     ...(subeSourceMaps
@@ -122,6 +144,14 @@ export default defineConfig({
     // lee el código fuente desde devtools) y Sentry los usa igual, porque los
     // asocia por debug id inyectado, no por la URL.
     sourcemap: 'hidden',
+    // Dos documentos con paquetes separados: el POS (index.html; /m y /cocina salen de él) y el
+    // portal del cliente (pedido.html).
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, 'index.html'),
+        pedido: path.resolve(__dirname, DOCUMENTO_PORTAL),
+      },
+    },
   },
   resolve: {
     alias: {

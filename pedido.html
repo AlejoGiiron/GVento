@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#047857" />
+    <!-- Portal del cliente de Pedidos en línea (P2). Documento y paquete APARTE del POS: no carga
+         la app, ni la sesión, ni el service worker de Cocina. Lo sirven /pedir/<negocio> (app,
+         vistas previas, local) y todo el dominio pedir.gvento.online (vercel.json; la regla está
+         en src/lib/identidadRutas.ts → esDelPortal). -->
+    <title>Pedidos en línea</title>
+    <style>
+      html, body { margin: 0; background: #f8fafc; font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; }
+    </style>
+  </head>
+  <body>
+    <div id="portal"></div>
+    <script type="module" src="/src/portal/main.tsx"></script>
+  </body>
+</html>

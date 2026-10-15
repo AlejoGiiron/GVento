@@ -349,8 +349,13 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
 9. **Qué documento (y qué manifest) recibe cada ruta — 2 lados (rehecho 2026-10-05).**
    `identidadDeRuta` en `src/lib/identidadRutas.ts` (lo usa el plugin de `vite.config.ts` en dev
    y en el build, que genera `movil.html` y `cocina.html` desde el ÚNICO `index.html`) y las
-   `rewrites` de `vercel.json` (producción). Lo vigila `src/lib/identidadRutas.test.ts`, que emula
-   las rewrites de `vercel.json` y las compara con la regla.
+   `rewrites` de `vercel.json` (producción). Lo vigila `src/lib/identidadRutas.test.ts`, que emula las
+   rewrites de `vercel.json` y las compara con la regla.
+   Desde P2 (2026-10-16) también decide el documento del PORTAL del cliente: `esDelPortal` (todo
+   `pedir.gvento.online`, y `/pedir`, `/pedir/<negocio>` en los demás dominios) → `pedido.html`, otro
+   paquete (`src/portal/main.tsx`). En `vercel.json` la regla del dominio va PRIMERO, con
+   `has: host`; el test emula esa condición y falla ruidoso con una de otro tipo. El plugin
+   `portalDelCliente` de `vite.config.ts` hace lo mismo en dev.
    🔴 **Por qué un HTML por identidad y no JS:** Safari de iPhone toma el manifest del DOCUMENTO
    al "Agregar a inicio". Cambiar el `<link>` por JS no alcanzó: medido en un iPhone 16 Pro Max el
    2026-10-05, el ícono agregado desde `/m` abría Cocina. Por la misma razón, entrar y salir de

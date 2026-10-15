@@ -47,6 +47,22 @@ export function identidadDeRuta(ruta: string): keyof typeof IDENTIDADES | null {
   return null
 }
 
+// ── El portal del cliente (Pedidos en línea, P2) ─────────────────────────────
+// No es una identidad del index.html: es OTRO documento con OTRO paquete (pedido.html →
+// src/portal/main.tsx), para que el cliente no descargue el POS. Lo sirven todo el dominio del
+// portal y /pedir, /pedir/<negocio> en cualquier otro (app, vistas previas, local). En el dominio
+// del portal NO se sirve el POS: /m, /cocina y /login también van al portal (vercel.json pone esa
+// regla primero).
+export const HOST_PORTAL = 'pedir.gvento.online'
+export const DOCUMENTO_PORTAL = 'pedido.html'
+
+/** ¿Esta petición es del portal del cliente? */
+export function esDelPortal(ruta: string, host?: string | null): boolean {
+  if ((host ?? '').split(':')[0].toLowerCase() === HOST_PORTAL) return true
+  const p = ruta.split('?')[0].split('#')[0]
+  return p === '/pedir' || p.startsWith('/pedir/')
+}
+
 /** El HTML de una identidad a partir del index.html (con su marcador). */
 export function htmlConIdentidad(indexHtml: string, id: keyof typeof IDENTIDADES | null): string {
   if (!indexHtml.includes(MARCADOR_IDENTIDAD)) {
