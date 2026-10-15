@@ -60,8 +60,34 @@ export interface ProductoPortal {
   publicado: boolean
   /** Por la regla única del servidor (portal_disponibilidad): stock propio o insumos de la receta. */
   agotado: boolean
-  /** false = su categoría está desactivada en el POS: no sale en el portal ni se puede publicar. */
-  categoria_activa: boolean
+  /**
+   * Por qué no se puede vender, según la regla única (portal_disponibilidad): inactivo,
+   * categoria_inactiva, sin_precio, sin_publicar, agotado; null = se vende.
+   */
+  motivo: string | null
+}
+
+/**
+ * ¿Se puede marcar "En el portal"? ALLOWLIST de motivos de la regla del servidor: un motivo que no
+ * esté aquí no deja publicar (fail-closed). La única cosa que mira la pantalla por su cuenta es el
+ * precio que se está ESCRIBIENDO: "sin precio" se resuelve si el precio a domicilio escrito es > 0.
+ */
+export function sePuedePublicar(motivo: string | null, precioEscrito: number | null): boolean {
+  if (motivo === null || motivo === 'sin_publicar' || motivo === 'agotado') return true
+  return motivo === 'sin_precio' && precioEscrito !== null && precioEscrito > 0
+}
+
+/** El aviso de la fila, por el motivo de la regla. Un motivo desconocido tiene su texto genérico. */
+export function avisoProducto(motivo: string | null, precioEscrito: number | null, publicado: boolean): string {
+  if (motivo === 'categoria_inactiva') {
+    return publicado ? 'Su categoría está desactivada en el POS: no sale en el portal. Despublícalo para guardar cambios.'
+      : 'Su categoría está desactivada en el POS: no sale en el portal'
+  }
+  if (motivo === 'inactivo') return 'Inactivo en el POS: no sale en el portal'
+  if (motivo === 'sin_precio') return sePuedePublicar(motivo, precioEscrito) ? '' : 'No se publica: no tiene precio'
+  if (motivo === 'agotado') return 'Agotado hoy · no se puede pedir'
+  if (motivo === null || motivo === 'sin_publicar') return ''
+  return 'No se puede publicar en el portal'
 }
 
 export interface CambioProducto {

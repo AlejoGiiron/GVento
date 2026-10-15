@@ -404,9 +404,17 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    producto activo, de una categoría activa, con precio, publicado, y agotado por su stock, por los
    insumos de la receta o, para un extra, por el producto ligado. La usan `portal_faltantes_de`,
    `portal_productos_lista` y `guardar_portal_productos` (P1) y el catálogo y el cálculo del portal
-   (P2). La pantalla de Configuración solo mira por su cuenta "sin precio" sobre el precio que se está
-   escribiendo (un aviso; al guardar decide el servidor). Una condición nueva de disponibilidad va
-   ahí, en un archivo NUEVO (R5), nunca en uno de los que la usan.
+   (P2). La pantalla de Configuración recibe el `motivo` de la regla y decide con una ALLOWLIST
+   (`sePuedePublicar` en `src/lib/portal.ts`); lo único que mira por su cuenta es el precio a domicilio
+   que se está escribiendo, que puede resolver "sin precio". **Un motivo nuevo toca 3 lados:** la
+   función (en un archivo NUEVO, R5), su mensaje en `guardar_portal_productos` y su texto en
+   `avisoProducto`; si falta alguno, falla cerrado (no deja publicar, con un texto genérico).
+   (e) **El consumo de stock de una línea — 3 lados, sin fuente única:** cómo descuenta el POS
+   (`add_order_items_with_extras`: insumos con stock por receta, y el producto ligado al extra solo si
+   lleva stock), cuántas unidades le quedan a un producto (`portal_disponibilidad`) y la demanda de todo
+   el carrito (`portal_calcular`, P2). Hoy coinciden. Lo vigila `tests/portal-publico.spec.ts`
+   ("lo que el portal acepta es lo que el POS descuenta"), que pasa por el POS el carrito que cotizar
+   deja justo en el límite y compara el stock que queda.
    🔴 **"¿Recibe pedidos ahora?" NO es un contrato de dos lados, a propósito:** lo decide SOLO
    `portal_estado` en el servidor (horario en Bogotá, turno, pausa, faltantes). La pantalla muestra
    el motivo que devuelve; nadie lo recalcula en el navegador. El portal de P2 tiene que leer la

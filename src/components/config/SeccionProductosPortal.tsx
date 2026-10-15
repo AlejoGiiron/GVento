@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Loader2, Search } from 'lucide-react'
 import { usePortalMutations, usePortalProductos } from '@/hooks/usePortal'
-import { leerPesos, mostrarPesos, pesos, type CambioProducto, type ProductoPortal } from '@/lib/portal'
+import { avisoProducto, leerPesos, mostrarPesos, pesos, sePuedePublicar, type CambioProducto, type ProductoPortal } from '@/lib/portal'
 
 // Configuración › Productos en el portal (pantalla 5 del diseño, sin promociones: son de P6).
 // Los productos y el stock son los del POS; aquí solo se elige cuáles salen en el portal y su
@@ -77,16 +77,13 @@ export function SeccionProductosPortal() {
                 {visibles.map((p) => {
                   const f = filas[p.product_id] ?? filaDe(p)
                   const precioDom = leerPesos(f.precio)
-                  // "Sin precio" se mira sobre lo que se está ESCRIBIENDO (todavía no guardado): es solo un
-                  // aviso; al guardar decide el servidor con portal_disponibilidad. Agotado y categoría
-                  // vienen del servidor, por esa misma regla.
-                  const sinPrecio = (precioDom ?? p.precio_local) <= 0
-                  const noSePuede = sinPrecio || !p.categoria_activa
-                  const notaTexto = !p.categoria_activa ? 'Su categoría está desactivada en el POS: no sale en el portal'
-                    : sinPrecio ? 'No se publica: no tiene precio'
-                    : p.agotado ? 'Agotado hoy · no se puede pedir'
-                    : precioDom !== null && precioDom !== p.precio_local ? 'Precio distinto a domicilio' : ''
-                  const notaColor = p.agotado && !noSePuede ? '#b91c1c' : precioDom !== null && !noSePuede ? VERDE : '#64748b'
+                  // El motivo viene de la regla única del servidor (portal_disponibilidad). Lo único que
+                  // se mira aquí es el precio a domicilio que se está escribiendo (todavía no guardado),
+                  // que puede resolver "sin precio"; al guardar decide el servidor.
+                  const puede = sePuedePublicar(p.motivo, precioDom)
+                  const aviso = avisoProducto(p.motivo, precioDom, f.publicado)
+                  const notaTexto = aviso || (precioDom !== null && precioDom !== p.precio_local ? 'Precio distinto a domicilio' : '')
+                  const notaColor = p.motivo === 'agotado' ? '#b91c1c' : !aviso && precioDom !== null ? VERDE : '#64748b'
                   return (
                     <tr key={p.product_id} data-testid={`portal-producto-${p.product_id}`} style={{ borderTop: '1px solid #f1f5f9' }}>
                       <td style={{ padding: '10px 6px', fontWeight: 600 }}>
@@ -104,7 +101,7 @@ export function SeccionProductosPortal() {
                       <td style={{ padding: '10px 6px' }}>
                         <input type="checkbox" aria-label={`Publicar ${p.nombre} en el portal`}
                           data-testid={`portal-publicado-${p.product_id}`} checked={f.publicado}
-                          disabled={noSePuede && !f.publicado}
+                          disabled={!puede && !f.publicado}
                           onChange={(e) => cambiar(p.product_id, { publicado: e.target.checked })}
                           style={{ width: 22, height: 22, accentColor: VERDE }} />
                       </td>

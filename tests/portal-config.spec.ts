@@ -244,7 +244,7 @@ test.describe('Pedidos en línea · configuración (servidor)', () => {
 
   test('regla única (portal_disponibilidad): agotado por receta, categoría desactivada, y agotado no deja el portal incompleto', async () => {
     const guardar = (c: unknown) => owner.rpc('guardar_portal_productos', { p_cambios: c })
-    const lista = async () => ((await owner.rpc('portal_productos_lista')).data as { product_id: string; agotado: boolean; categoria_activa: boolean }[])
+    const lista = async () => ((await owner.rpc('portal_productos_lista')).data as { product_id: string; agotado: boolean; motivo: string | null }[])
     const cat = insertarId(`insert into public.categories (name, restaurant_id) values ('E2E Portal regla', '${SEDE}') returning id;`)
     const ids: string[] = []
     try {
@@ -254,16 +254,31 @@ test.describe('Pedidos en línea · configuración (servidor)', () => {
         values ('E2E Portal combo', 15000, '${SEDE}', '${cat}', 'composite') returning id;`); ids.unshift(combo)
       psql(`insert into public.product_components (restaurant_id, parent_id, component_id, qty) values ('${SEDE}', '${combo}', '${insumo}', 2);`)
       // 1. El combo necesita 2 insumos y hay 1: agotado en la lista (antes solo miraba el stock propio,
-      //    que un compuesto no tiene). Contraste: con 2 insumos, disponible.
-      expect((await lista()).find((p) => p.product_id === combo)?.agotado).toBe(true)
+      //    que un compuesto no tiene). El insumo (simple, con stock 1): disponible. Contraste: con 0
+      //    insumos, los dos agotados; con 2, ninguno.
+      const agot = async () => { const l = await lista(); return [combo, insumo].map((i) => l.find((p) => p.product_id === i)?.agotado) }
+      expect(await agot()).toEqual([true, false])
+      // Publicar un agotado SÍ se puede (el stock es de hoy); el motivo lo dice.
+      expect((await guardar([{ product_id: combo, publicado: true, precio_domicilio: null }])).error).toBeNull()
+      expect((await lista()).find((p) => p.product_id === combo)?.motivo).toBe('agotado')
+      expect((await guardar([{ product_id: combo, publicado: false, precio_domicilio: null }])).error).toBeNull()
+      psql(`update public.products set stock_qty = 0 where id = '${insumo}';`)
+      expect(await agot()).toEqual([true, true])
       psql(`update public.products set stock_qty = 2 where id = '${insumo}';`)
-      expect((await lista()).find((p) => p.product_id === combo)?.agotado).toBe(false)
+      expect(await agot()).toEqual([false, false])
       // 2. Categoría desactivada en el POS: la lista lo dice y no se puede publicar. Contraste: reactivada, sí.
       psql(`update public.categories set is_active = false where id = '${cat}';`)
-      expect((await lista()).find((p) => p.product_id === combo)?.categoria_activa).toBe(false)
+      expect((await lista()).find((p) => p.product_id === combo)?.motivo).toBe('categoria_inactiva')
       expect(err(await guardar([{ product_id: combo, publicado: true, precio_domicilio: null }]))).toMatch(/categoría desactivada/)
       psql(`update public.categories set is_active = true where id = '${cat}';`)
       expect((await guardar([{ product_id: combo, publicado: true, precio_domicilio: null }])).error).toBeNull()
+      expect((await lista()).find((p) => p.product_id === combo)?.motivo).toBeNull()
+      // Inactivo en el POS: no se publica (antes no había prueba de este rechazo). Contraste: activo, sí.
+      psql(`update public.products set is_active = false where id = '${insumo}';`)
+      expect(err(await guardar([{ product_id: insumo, publicado: true, precio_domicilio: null }]))).toMatch(/está inactivo en el POS/)
+      psql(`update public.products set is_active = true where id = '${insumo}';`)
+      expect((await guardar([{ product_id: insumo, publicado: true, precio_domicilio: null }])).error).toBeNull()
+      expect((await guardar([{ product_id: insumo, publicado: false, precio_domicilio: null }])).error).toBeNull()
       // 3. Con el combo como único publicado y agotado, el portal NO queda incompleto por eso (el stock es
       //    de hoy). Contraste: con su categoría desactivada, sí falta "al menos un producto".
       expect((await owner.rpc('actualizar_portal', { p_cambios: { slug: LAB_SLUG } })).error).toBeNull()
@@ -334,7 +349,7 @@ test.describe('Pedidos en línea · configuración (servidor)', () => {
     psql(`update public.products set is_active = false where id = '${PROD_A}';`)
     try {
       const est = (await owner.rpc('portal_estado')).data as { recibe: boolean; motivo: string; faltantes: string[] }
-      expect([est.recibe, est.motivo, est.faltantes]).toEqual([false, 'incompleto', ['al menos un producto publicado con precio']])
+      expect([est.recibe, est.motivo, est.faltantes]).toEqual([false, 'incompleto', ['al menos un producto publicado que se pueda vender (activo, de una categoría activa y con precio)']])
       // Con la pausa puesta, lo que falta sigue mandando (va antes en el orden).
       expect(((await owner.rpc('pausar_pedidos_online', { p_pausar: true })).data as { motivo: string }).motivo).toBe('incompleto')
     } finally {
@@ -482,6 +497,10 @@ test.describe('Pedidos en línea · la pantalla', () => {
     await expect(page.getByTestId(`portal-producto-${PROD_AJENO}`)).toHaveCount(0)
     await expect(page.getByTestId(`portal-publicado-${PROD_CERO}`)).toBeDisabled()
     await expect(page.getByTestId(`portal-producto-${PROD_CERO}`)).toContainText('No se publica')
+    // Escribir un precio a domicilio resuelve "sin precio" (lo único que la pantalla mira por su cuenta).
+    await page.getByTestId(`portal-precio-${PROD_CERO}`).fill('5000')
+    await expect(page.getByTestId(`portal-publicado-${PROD_CERO}`)).toBeEnabled()
+    await page.getByTestId(`portal-precio-${PROD_CERO}`).fill('')
     await page.getByTestId(`portal-publicado-${PROD_A}`).check()
     await page.getByTestId(`portal-precio-${PROD_B}`).fill('9999')
     await page.getByTestId(`portal-publicado-${PROD_B}`).check()

@@ -48,8 +48,10 @@
 -- NO DEDUZCAS EL ESTADO DE ESTE COMENTARIO — correlo:
 --   select to_regclass('public.portal_sedes'), to_regprocedure('public.actualizar_portal(jsonb)'),
 --          exists (select 1 from information_schema.columns where table_schema = 'public'
---                   and table_name = 'portal_sedes' and column_name = 'whatsapp');
---   -- null, null, f = no está · con valor, con valor, t = está (esta versión, con WhatsApp)
+--                   and table_name = 'portal_sedes' and column_name = 'whatsapp'),
+--          to_regprocedure('public.portal_disponibilidad(uuid,uuid,uuid)') is not null;
+--   -- null, null, f, f = no está · con valor, con valor, t, t = está, con WhatsApp y con la regla
+--   -- única · con valor pero alguna f = corrió una versión anterior de este archivo: avísame.
 -- ============================================================================
 
 begin;
@@ -316,7 +318,8 @@ revoke all on table public.portal_productos from public, anon, authenticated;
 --     inactivo, no_asignado (no está en product_extras de ese producto), agotado; null = se puede pedir.
 --     No mira el estado del producto: eso es la llamada sin p_extra.
 -- "agotado" = unidades ≤ 0. Va de último: un producto agotado está bien configurado (es de hoy).
--- Nunca sale al cliente el número de unidades: el portal solo dice agotado / no alcanza.
+-- Quien la llama NO expone `unidades` al cliente (regla para los llamadores, no algo que esta función
+-- pueda impedir): el portal solo dice agotado / no alcanza.
 create function public.portal_disponibilidad(p_sede uuid, p_producto uuid, p_extra uuid default null)
 returns table (precio numeric, unidades integer, agotado boolean, motivo text)
 language plpgsql stable security definer
@@ -419,7 +422,7 @@ begin
       from public.portal_productos pp
       cross join lateral portal_disponibilidad(p_sede, pp.product_id) d
      where pp.restaurant_id = p_sede and (d.motivo is null or d.motivo = 'agotado')) then
-    v := array_append(v, 'al menos un producto publicado con precio'::text);
+    v := array_append(v, 'al menos un producto publicado que se pueda vender (activo, de una categoría activa y con precio)'::text);
   end if;
   return v;
 end $$;
@@ -684,7 +687,7 @@ end $$;
 
 create function public.portal_productos_lista()
 returns table (product_id uuid, nombre text, categoria text, precio_local numeric,
-               precio_domicilio numeric, publicado boolean, agotado boolean, categoria_activa boolean)
+               precio_domicilio numeric, publicado boolean, agotado boolean, motivo text)
 language plpgsql stable security definer
 set search_path = public
 as $$
@@ -697,9 +700,10 @@ begin
     raise exception 'No tienes permiso para configurar los pedidos en línea';
   end if;
   return query
-    -- agotado, por la regla única (con la receta de los compuestos), no por el stock propio.
+    -- agotado y motivo, de la regla única: la pantalla no decide nada por su cuenta (salvo el precio
+    -- que se está escribiendo, ver SeccionProductosPortal.tsx).
     select p.id, p.name, c.name, p.price, pp.precio_domicilio, coalesce(pp.publicado, false),
-           d.agotado, coalesce(c.is_active, false)
+           d.agotado, d.motivo
       from public.products p
       left join public.categories c on c.id = p.category_id
       left join public.portal_productos pp on pp.product_id = p.id
@@ -776,14 +780,16 @@ begin
     -- domicilio guardado). Cualquier otro motivo, también uno que no esté aquí, rechaza (fail-closed).
     if v_publicado then
       select d.motivo into v_motivo from portal_disponibilidad(v_sede, v_id) d;
-      if v_motivo = 'inactivo' then
+      if not found then
+        raise exception '"%" no se puede publicar en el portal. No se guardó nada.', v_prod.name;
+      elsif v_motivo = 'inactivo' then
         raise exception '"%" está inactivo en el POS: no se puede publicar. No se guardó nada.', v_prod.name;
       elsif v_motivo = 'categoria_inactiva' then
         raise exception '"%" es de una categoría desactivada en el POS: no se puede publicar. No se guardó nada.', v_prod.name;
       elsif v_motivo = 'sin_precio' then
         raise exception '"%" no tiene precio: no se puede publicar. No se guardó nada.', v_prod.name;
       elsif v_motivo is not null and v_motivo <> 'agotado' then
-        raise exception '"%" no se puede publicar (%). No se guardó nada.', v_prod.name, v_motivo;
+        raise exception '"%" no se puede publicar en el portal. No se guardó nada.', v_prod.name;
       end if;
     end if;
   end loop;

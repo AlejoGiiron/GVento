@@ -11,10 +11,13 @@ select to_regclass('public.portal_sedes')                         as portal_sede
                                                                    as seed_con_permiso_nuevo,
        exists (select 1 from information_schema.columns where table_schema = 'public'
                 and table_name = 'portal_sedes' and column_name = 'whatsapp')
-                                                                   as con_whatsapp;
--- ANTES:   null · null · null · null · f · f
--- DESPUÉS: portal_sedes · portal_productos · products_id_restaurant_uniq · actualizar_portal(jsonb) · t · t
--- (portal_sedes con valor pero con_whatsapp = f: corrió una versión anterior de este archivo; avísame)
+                                                                   as con_whatsapp,
+       to_regprocedure('public.portal_disponibilidad(uuid,uuid,uuid)') is not null
+                                                                   as con_regla_unica;
+-- ANTES:   null · null · null · null · f · f · f
+-- DESPUÉS: portal_sedes · portal_productos · products_id_restaurant_uniq · actualizar_portal(jsonb) · t · t · t
+-- (portal_sedes con valor pero con_whatsapp o con_regla_unica = f: corrió una versión anterior de este
+-- archivo; avísame)
 
 -- ── Consulta 2: quién podrá configurar el portal en cada organización ──
 -- Arranca de organizations (caso #12): una organización sin roles sale igual.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
+import { avisoProducto, sePuedePublicar,
   etiquetaTramo, franjasLegibles, horaLegible, horarioAgrupado, leerPesos, mostrarPesos, mostrarWhatsapp,
   normalizarSlug, normalizarWhatsapp, problemaHorario, problemaTramos, RE_WHATSAPP, slugValido, textoEstado,
 } from './portal'
@@ -89,5 +89,22 @@ describe('estado', () => {
     expect(textoEstado({ recibe: false, motivo: 'incompleto', faltantes: ['el horario', 'la zona de cobertura'] }).detalle)
       .toBe('Falta: el horario; la zona de cobertura.')
     expect(textoEstado({ recibe: false, motivo: 'pausado', faltantes: [] }).tono).toBe('pausa')
+  })
+})
+
+describe('productos del portal: la pantalla decide con el motivo de la regla del servidor (allowlist)', () => {
+  it('se puede marcar solo con null, sin_publicar, agotado, o sin_precio resuelto por el precio escrito', () => {
+    const casos: [string | null, number | null][] = [[null, null], ['sin_publicar', null], ['agotado', null],
+      ['sin_precio', null], ['sin_precio', 5000], ['categoria_inactiva', 5000], ['inactivo', null], ['motivo_nuevo', 5000]]
+    expect(casos.map(([m, pr]) => `${m}/${pr}: ${sePuedePublicar(m, pr)}`)).toEqual([
+      'null/null: true', 'sin_publicar/null: true', 'agotado/null: true', 'sin_precio/null: false',
+      'sin_precio/5000: true', 'categoria_inactiva/5000: false', 'inactivo/null: false', 'motivo_nuevo/5000: false'])
+  })
+  it('cada motivo tiene su aviso; uno desconocido, el genérico (nunca el código crudo)', () => {
+    expect(avisoProducto('categoria_inactiva', null, true)).toMatch(/Despublícalo/)
+    expect(avisoProducto('categoria_inactiva', null, false)).not.toMatch(/Despublícalo/)
+    expect([avisoProducto('sin_precio', null, false), avisoProducto('sin_precio', 5000, false)]).toEqual(['No se publica: no tiene precio', ''])
+    expect(avisoProducto('motivo_nuevo', null, false)).toBe('No se puede publicar en el portal')
+    expect([avisoProducto(null, null, true), avisoProducto('sin_publicar', null, false)]).toEqual(['', ''])
   })
 })
