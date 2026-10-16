@@ -20,9 +20,8 @@ import { useAgregarTanda } from '@/hooks/useAgregarTanda'
 import { useMesaMutations } from '@/hooks/useMesaMutations'
 import {
   createTable, updateTable,
-  createOrder,
   updateOrderStatus, markItemsSentToKitchen,
-  pedirCuentaMesa, ocuparMesaLibre, desocuparMesa, liberarMesaSinCuenta,
+  pedirCuentaMesa, liberarMesaSinCuenta,
   getOrdenFresca,
 } from '@/lib/supabase-helpers'
 import type { SalePaymentPart } from '@/lib/supabase-helpers'
@@ -39,6 +38,7 @@ import type { ProductWithCategory, CartExtra } from '@/stores/cartStore'
 import { cartItemTotal } from '@/stores/cartStore'
 import type { TableRow, ActiveOrder, OrderItemRow } from '@/hooks/useTables'
 import { mensajeDeError } from '@/lib/errorMessage'
+import { nuevoUuid } from '@/lib/uuid'
 import { avisoYaExistia, metodoReal } from '@/lib/metodoVenta'
 import { mensajeOtroCobro, type CierreMesa } from '@/lib/cierreMesa'
 
@@ -79,6 +79,15 @@ const ZONES = ['Salón', 'Terraza', 'Barra']
 const HORA_CUENTA = new Intl.DateTimeFormat('es-CO', {
   hour: '2-digit', minute: '2-digit', timeZone: 'America/Bogota',
 })
+const DIA_CUENTA = new Intl.DateTimeFormat('es-CO', { day: 'numeric', month: 'short', timeZone: 'America/Bogota' })
+const DIA_BOGOTA = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' })   // yyyy-mm-dd
+
+/** "las 9:52 p. m." si fue hoy en Bogotá; si no, "el 14 oct a las 9:52 p. m." (R7). */
+function desdeCuando(iso: string): string {
+  const d = new Date(iso)
+  const hora = `las ${HORA_CUENTA.format(d)}`
+  return DIA_BOGOTA.format(d) === DIA_BOGOTA.format(new Date()) ? hora : `el ${DIA_CUENTA.format(d)} a ${hora}`
+}
 
 const STATUS_CONFIG: Record<TableStatus, { bg: string; border: string; fg: string; dot: string; label: string }> = {
   free:         { bg: '#f8fafc', border: '#e2e8f0', fg: '#64748b', dot: '#cbd5e1',  label: 'Libre'           },
@@ -234,43 +243,28 @@ function OpenTableModal({
   onClose: () => void
   onOpened: () => void
 }) {
-  const { profile } = useAuth()
+  const { abrirMesa } = useMesaMutations()
+  // Una clave por modal: tocar "Abrir mesa" otra vez tras un error es la MISMA apertura.
+  const [clave] = useState(nuevoUuid)
   const [submitting, setSubmitting] = useState(false)
   const [waiterName, setWaiterName] = useState('')
 
   const handleOpen = async () => {
-    if (!profile) return
     setSubmitting(true)
     try {
-      // Primero se ocupa la mesa, y solo si sigue libre. Antes se creaba la orden
-      // y DESPUÉS se ocupaba: si lo segundo no llegaba, la mesa se veía libre con
-      // una orden viva escondida, y abrirla otra vez creaba una segunda orden
-      // (medido en prod el 2026-10-10: 3 mesas así). Ahora, si falla la orden, se
-      // deshace; y si tampoco llega eso, la mesa queda ocupada SIN cuenta, que la
-      // pantalla sí deja liberar.
-      const { data: ocupada, error: statusErr } = await ocuparMesaLibre(table.id)
-      if (statusErr) throw statusErr
-      if (!ocupada?.length) {
+      // Una sola llamada: el servidor ocupa la mesa y crea la cuenta juntas, y la
+      // base no deja dos cuentas vivas en una mesa (supabase/mesas-una-cuenta.sql).
+      const r = await abrirMesa(table.id, clave, waiterName.trim() || null)
+      if (r.resultado === 'abierta') {
+        toast.success(`Mesa ${table.name} abierta`)
+      } else if (r.resultado === 'recuperada') {
+        toast.success(`${table.name} tenía una cuenta abierta desde ${desdeCuando(r.abierta_at)}: se recuperó, no se creó otra`)
+      } else if (r.resultado === 'no_libre') {
         toast.error(`${table.name} ya no está libre: otro equipo la abrió`)
-        onOpened()
-        return
+      } else {
+        // Allowlist: una respuesta que no se reconoce NO se anuncia como apertura.
+        throw new Error('respuesta inesperada del servidor; actualiza la pantalla')
       }
-
-      const { data: order, error: orderErr } = await createOrder({
-        type: 'dine_in',
-        status: 'pending',
-        table_id: table.id,
-        total: 0,
-        waiter_name: waiterName.trim() || null,
-        restaurant_id: profile.restaurant_id,
-        created_by: profile.id,
-      })
-      if (orderErr || !order) {
-        await desocuparMesa(table.id)
-        throw orderErr ?? new Error('Error al crear la orden')
-      }
-
-      toast.success(`Mesa ${table.name} abierta`)
       onOpened()
     } catch (err) {
       const msg = mensajeDeError(err, 'Error desconocido')

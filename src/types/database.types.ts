@@ -569,6 +569,7 @@ export type Database = {
           id: string
           notes: string | null
           order_number: number | null
+          open_id: string | null
           payment_status: string
           restaurant_id: string
           status: Database["public"]["Enums"]["order_status"]
@@ -601,6 +602,7 @@ export type Database = {
           id?: string
           notes?: string | null
           order_number?: number | null
+          open_id?: string | null
           payment_status?: string
           restaurant_id: string
           status?: Database["public"]["Enums"]["order_status"]
@@ -633,6 +635,7 @@ export type Database = {
           id?: string
           notes?: string | null
           order_number?: number | null
+          open_id?: string | null
           payment_status?: string
           restaurant_id?: string
           status?: Database["public"]["Enums"]["order_status"]
@@ -1486,6 +1489,10 @@ export type Database = {
       }
     }
     Functions: {
+      abrir_mesa: {
+        Args: { p_open_id: string; p_table_id: string; p_waiter_name?: string | null }
+        Returns: Json
+      }
       add_order_items_with_extras: {
         Args: { p_items: Json; p_lote?: string | null; p_order_id: string }
         Returns: undefined

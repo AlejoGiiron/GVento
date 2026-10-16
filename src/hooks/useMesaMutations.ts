@@ -8,8 +8,8 @@ import type { CierreMesa } from '@/lib/cierreMesa'
 
 // ============================================================================
 // Las escrituras de Mesas, cada una en UNA llamada al servidor
-// (supabase/mesas-servidor.sql): cobrar, quitar un ítem, cerrar sin consumo y
-// eliminar (o archivar) una mesa. Antes eran pasos sueltos desde el navegador
+// (supabase/mesas-servidor.sql y mesas-una-cuenta.sql): abrir, cobrar, quitar un
+// ítem, cerrar sin consumo y eliminar (o archivar) una mesa. Antes eran pasos sueltos desde el navegador
 // (descuento, pago, número, entregada, mesa libre), y un corte a la mitad dejaba
 // la mesa cobrada a medias (H2) o el ítem borrado sin devolver el stock (H3).
 //
@@ -36,6 +36,16 @@ export interface CobroMesa {
   fiado: { customer_id: string; customer_name: string } | null
 }
 
+/**
+ * 'abierta': se creó la cuenta (ya_existia = el reintento de la misma apertura).
+ * 'recuperada': la mesa estaba libre con una cuenta viva escondida; se ocupó con esa.
+ * 'no_libre': la mesa ya no estaba libre; no se creó nada.
+ */
+export type AperturaMesa =
+  | { resultado: 'abierta'; order_id: string; ya_existia: boolean }
+  | { resultado: 'recuperada'; order_id: string; abierta_at: string }
+  | { resultado: 'no_libre'; order_id: string | null }
+
 export interface BajaMesa {
   baja_id: string
   order_id: string
@@ -47,6 +57,23 @@ export interface BajaMesa {
 export function useMesaMutations() {
   const { user } = useAuth()
   const usuario = user?.id ?? null
+
+  // Ocupar la mesa y crear la cuenta en UNA transacción. Antes eran dos escrituras
+  // desde el navegador, y si la respuesta de la orden se perdía la pantalla
+  // desocupaba la mesa con la orden viva escondida (mesa 10 de Salchimelo, 2026-10-14).
+  // La clave (p_open_id) la pone el modal y dura lo que dura el modal abierto: el
+  // reintento de "Abrir mesa" ahí mismo es la misma apertura; abrir el modal otra
+  // vez es otra. No es global como la del cobro: una clave vieja reusada horas
+  // después apuntaría a una cuenta que ya se cobró.
+  const abrirMesa = useCallback(async (tableId: string, clave: string, mesero: string | null): Promise<AperturaMesa> => {
+    const { data, error } = await supabase.rpc('abrir_mesa', {
+      p_table_id: tableId,
+      p_open_id: clave,
+      p_waiter_name: mesero,
+    })
+    if (error) throw error
+    return data as unknown as AperturaMesa
+  }, [])
 
   const cobrar = useCallback(async (c: CobroMesa): Promise<CierreMesa> => {
     const huella = JSON.stringify({ usuario, orderId: c.orderId })
@@ -90,5 +117,5 @@ export function useMesaMutations() {
     return (data as { accion: 'eliminada' | 'archivada' }).accion
   }, [])
 
-  return { cobrar, quitarItem, cerrarSinConsumo, eliminarMesa }
+  return { abrirMesa, cobrar, quitarItem, cerrarSinConsumo, eliminarMesa }
 }

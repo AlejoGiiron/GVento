@@ -165,6 +165,9 @@ const COLUMNAS_DEL_ESQUEMA: ColumnaEsquema[] = [
   { tabla: 'order_item_bajas', columna: 'monto', ejemplo: 13000 },
   { tabla: 'order_item_bajas', columna: 'extras', ejemplo: 'Tocineta para Pedro' },
   { tabla: 'order_item_bajas', columna: 'preparado', ejemplo: true },
+
+  // ── mesas-una-cuenta.sql: la clave de "Abrir mesa"
+  { tabla: 'orders', columna: 'open_id', ejemplo: '6c7d8e9f-0a1b-4c2d-8e3f-4a5b6c7d8e9f' },
 ]
 
 const PROHIBIDAS = COLUMNAS_DEL_ESQUEMA.filter((c) => !c.permitida)

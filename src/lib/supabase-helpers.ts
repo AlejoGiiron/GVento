@@ -290,11 +290,6 @@ export const createTable = (table: TablesInsert<'tables'>) =>
 export const updateTable = (tableId: string, data: TablesUpdate<'tables'>) =>
   supabase.from('tables').update(data).eq('id', tableId).select().single()
 
-export const updateTableStatus = (
-  tableId: string,
-  status: Tables<'tables'>['status'],
-) => supabase.from('tables').update({ status }).eq('id', tableId).select().single()
-
 export const getTableActiveOrderCount = (tableId: string) =>
   supabase
     .from('orders')
@@ -314,15 +309,8 @@ export const pedirCuentaMesa = (tableId: string) =>
   supabase.from('tables').update({ status: 'waiting_bill' })
     .eq('id', tableId).eq('status', 'occupied').select('id')
 
-/** Abrir mesa, paso 1: ocuparla solo si SIGUE libre (dos equipos no la abren a la vez). */
-export const ocuparMesaLibre = (tableId: string) =>
-  supabase.from('tables').update({ status: 'occupied' })
-    .eq('id', tableId).eq('status', 'free').select('id')
-
-/** Deshace `ocuparMesaLibre` si no se pudo crear la orden. */
-export const desocuparMesa = (tableId: string) =>
-  supabase.from('tables').update({ status: 'free' })
-    .eq('id', tableId).eq('status', 'occupied').select('id')
+// Abrir mesa ya no se hace desde aquí: es abrir_mesa en el servidor (useMesaMutations),
+// que ocupa la mesa y crea la cuenta en una transacción.
 
 /**
  * Libera una mesa que quedó marcada como ocupada sin cuenta abierta (un cobro o un
@@ -399,9 +387,6 @@ export const getOrders = (restaurantId: string, status?: Tables<'orders'>['statu
 
 export const getOrderById = (orderId: string) =>
   supabase.from('orders').select(ORDER_WITH_RELATIONS).eq('id', orderId).single()
-
-export const createOrder = (order: TablesInsert<'orders'>) =>
-  supabase.from('orders').insert(order).select().single()
 
 // Relee una orden de mesa COMO ESTÁ EN LA BASE: estado, total, descuento y la suma de
 // sus líneas (con extras). La usan las guardas de src/lib/mesaFresca.ts antes de cobrar
