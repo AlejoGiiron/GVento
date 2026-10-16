@@ -21,8 +21,10 @@ import { mesaFija, liberarMesa } from './helpers/lab'
 //   3. "Pide cuenta" no pisa una mesa que otro equipo ya cobró;
 //   4. "Abrir mesa" no crea una segunda orden en una mesa que otro ya abrió;
 //   5. si falla la carga de las cuentas, NO se ofrece liberar (fail-closed);
-//   6. una mesa con MÁS DE UNA cuenta viva lo avisa (MESA 12 de G-10, 2026-10-12) y
-//      muestra siempre la misma: la más antigua (antes ganaba la última, sin orden fijo).
+//   (el 6, "una mesa con MÁS DE UNA cuenta viva lo avisa", salió el 2026-10-16: desde
+//   supabase/mesas-una-cuenta.sql la base no deja crear la segunda, así que ese caso ya no
+//   se puede preparar. El invariante lo custodia tests/mesas-una-cuenta.spec.ts; el aviso
+//   de la pantalla queda dormido, por si se corre la reversa.)
 //
 // "El otro equipo" se simula por detrás de la pantalla con psql: la base local
 // no publica Realtime (igual que producción), así que la pantalla no se entera y
@@ -88,6 +90,8 @@ test.describe.serial('Mesas pegadas', () => {
 
     await expect(card(page)).toContainText('Pide cuenta')
     await expect(card(page).getByTestId('table-sin-cuenta')).toHaveCount(0)
+    // SOLO AUSENCIA (R10): desde mesas-una-cuenta.sql la base no deja preparar dos cuentas, así que
+    // estas dos no tienen su positivo; quedan para que el aviso dormido no salga con una sola.
     await expect(card(page).getByTestId('table-varias-cuentas')).toHaveCount(0)   // UNA cuenta: sin aviso
     await card(page).click()
     // La orden viva está vacía: el panel ofrece el flujo normal ("Cerrar mesa"), no liberar.
@@ -96,34 +100,6 @@ test.describe.serial('Mesas pegadas', () => {
     await expect(page.getByTestId('table-sin-cuenta-panel')).toHaveCount(0)
     await expect(page.getByTestId('table-release')).toHaveCount(0)
     await expect(page.getByTestId('table-varias-cuentas-panel')).toHaveCount(0)
-  })
-
-  test('una mesa con DOS cuentas vivas lo avisa y muestra siempre la más antigua', async ({ page }) => {
-    // Se inserta PRIMERO la más nueva: el orden físico es el contrario al de apertura,
-    // así que sin el ORDER BY (o con "gana la última") se vería la de $2.000.
-    crearOrdenViva(2000, 0)
-    crearOrdenViva(1000, 60)
-    ponerEstado('occupied')
-    await page.goto('/mesas')
-
-    await expect(card(page).getByTestId('table-varias-cuentas')).toHaveText(/2 cuentas abiertas/)
-    await expect(card(page)).toContainText(/1\.000/)
-    await expect(card(page)).not.toContainText(/2\.000/)
-
-    await card(page).click()
-    const aviso = page.getByTestId('table-varias-cuentas-panel')
-    await expect(aviso).toContainText('Esta mesa tiene 2 cuentas abiertas')
-    const filas = aviso.getByTestId('table-cuenta-viva')
-    await expect(filas).toHaveCount(2)
-    await expect(filas.nth(0)).toContainText(/1\.000 · la que ves/)
-    await expect(filas.nth(1)).toContainText(/2\.000/)
-
-    // Estable entre cargas: la misma, otra vez.
-    await page.reload()
-    await expect(card(page).getByTestId('table-varias-cuentas')).toHaveText(/2 cuentas abiertas/)
-    await expect(card(page)).toContainText(/1\.000/)
-    await expect(card(page)).not.toContainText(/2\.000/)
-    expect(ordenesVivas()).toBe(2)   // avisar no toca nada en la base
   })
 
   test('liberar relee la base: si otro equipo abrió la mesa, no la libera', async ({ page }) => {

@@ -1474,6 +1474,54 @@ la tabla de registro. **Reabre la escritura de `anon`**: solo si la migración r
 
 ---
 
+## Hotfix — una sola cuenta viva por mesa (`fix/mesas-una-cuenta`, 2026-10-16)
+
+- **Qué pasó:** Salchimelo, mesa 10, 14 y 15/10. La mesa quedó con dos cuentas vivas. Desde ahí
+  cada "Cerrar mesa" sobre la más antigua (la que muestra el aviso) liberaba la mesa con la otra
+  escondida, y el siguiente "Abrir mesa" creaba otra: 7 cuentas en 25 horas. La MESA 12 tenía lo
+  mismo. Las dos cuentas escondidas se cancelaron el 16/10 con el paso 3 de
+  `supabase/diag/mesas-pegadas.sql`, y ese día la consulta global dio 0 mesas con dos cuentas.
+- **Origen probable (NO medido en prod):** "Abrir mesa" eran dos escrituras desde el navegador y,
+  si la respuesta de la orden se perdía, la pantalla desocupaba la mesa con la orden viva.
+- **Qué hace:** `supabase/mesas-una-cuenta.sql`: índice único parcial (a lo sumo una cuenta viva
+  por mesa), `orders.open_id` (clave de reintento) y `abrir_mesa` (ocupar la mesa y crear la cuenta
+  en una transacción; recupera una cuenta escondida en vez de crear otra). La pantalla de Mesas
+  llama `abrir_mesa`.
+- **Compatibilidad:** el frontend viejo sigue funcionando con el SQL aplicado (inserta directo y el
+  índice lo frena). El frontend NUEVO **no funciona sin el SQL**: sin `abrir_mesa` no abre mesas.
+  Por eso el orden es SQL → frontend, nunca al revés.
+
+**Sale el mismo 16/10, con los locales abiertos** (decidido ese día: el problema le pega directo al
+cliente). Lo que lo permite es `lock_timeout = 3s`: si la migración no consigue el lock de `orders`
+en 3 s, aborta sin cambiar nada y se reintenta (medido en Docker con una transacción que retenía
+`orders`: abortó a los 3 s y no creó nada).
+
+**UC.1 — Pre-flight, JUSTO ANTES:** `supabase/diag/mesas-una-cuenta-preflight.sql`, cada
+consulta por separado. Esperado: ANTES 1 = `f | f | f`; ANTES 2 = `0`. Si ANTES 2 da más de 0, la
+migración va a abortar: el detalle sale con la consulta 3 de `supabase/diag/mesas-pegadas.sql` y
+las vacías se cancelan con su paso 3. Una con consumo se mira aparte: pégame la fila.
+
+**UC.2 — Correr `supabase/mesas-una-cuenta.sql`** (trae su `begin`/`commit`). md5 del archivo
+(LF, `tr -d '\r' < f | md5sum`): **`f1255395d635c8a6373f2ba3a9e02381`**, medido sobre el archivo
+salido del checkout e igual al blob de `04fb5a4`. Si aborta con `canceling statement due to lock
+timeout`, no cambió nada: se espera un minuto y se corre otra vez. Con cualquier otro error, pégame
+el mensaje.
+
+**UC.3 — Verificación:** la consulta DESPUÉS del mismo pre-flight: las **6 filas con `ok = true`**.
+`abrir_mesa` con la normalización de Q-FUNCIONES: **`d8090434ce2495a2f334e7c7ce120a5d`**.
+
+**UC.4 — Frontend:** release a `main` con el título `release: una sola cuenta viva por mesa`.
+Verificación en producción con `demo@demo.com` (Café Aroma), desde una mesa libre: abrir la mesa
+(toast "Mesa X abierta", una sola cuenta), cerrarla sin consumo, y en dos pestañas abrir la misma
+mesa: la segunda dice "ya no está libre: otro equipo la abrió".
+
+**UC.5 — Reversa:** primero revertir el frontend (sin `abrir_mesa` la pantalla nueva no abre
+mesas) y después `mesas-una-cuenta-revertir.sql` (fuera de git, en la raíz), md5
+**`a271aa3a464ea4d0bf9fdf0a9df358c2`**. Borra `abrir_mesa`, el índice y `orders.open_id`. Sin el
+índice VUELVEN a ser posibles las mesas con dos cuentas vivas.
+
+---
+
 ## Paso 11 — Mesas, fase 2 (ESQUEMA: se completa al construirlo)
 
 | paso | qué | tipo | depende de |
@@ -1491,6 +1539,7 @@ Los martes G-10 y Salchimelo no abren: los pasos con SQL van ese día.
 | mar 13/10 (adelantado; R y `fix/cocina-avisos` ya salieron: `develop` = `c3a00c5`) | el arqueo cuenta los abonos de fiado (AA) | `feat/arqueo-abonos` | rebasada sobre `develop` (`c3a00c5`), suite completa y fast-forward; SQL antes del frontend (AA.1–AA.4) |
 | un martes después del arqueo | Paso 6, fase 2 de D | — | parte de la versión de `close_cash_shift` que deja el arqueo (`a395c0a1…`), no de la de hoy |
 | mar 13/10 (adelantado, en cadena) | Pasos 7-8 (permisos de cobro, A), después 9-10 (Mesas en el servidor) y después el 11 (anon sin escritura) | `feat/a-permisos`, `feat/mesas-servidor` y la del 11, cada una encima de la anterior | fast-forward en cadena: cada rama entra cuando la anterior ya está en `develop` |
+| vie 16/10, con los locales abiertos | una sola cuenta viva por mesa (UC) | `fix/mesas-una-cuenta` | ya en `develop` por fast-forward; SQL antes del frontend (UC.1–UC.4) |
 | al final | Realtime | `feat/realtime` | después del paquete de Mesas |
 
 ## Resumen

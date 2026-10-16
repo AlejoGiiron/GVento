@@ -365,6 +365,17 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    El SIGNO es parte del contrato: `sale` y `merma` negativos, `return` y `purchase` positivos.
    Para reconfirmar los lados: `grep -rn "'purchase'" src/ supabase/*.sql`.
 
+11. **Qué es una orden VIVA — `pending`, `preparing`, `ready` (agregado 2026-10-16).** Desde
+   `supabase/mesas-una-cuenta.sql` es un INVARIANTE de la base: el predicado del índice único
+   `orders_una_cuenta_viva_por_mesa` (a lo sumo una cuenta viva por mesa) y `abrir_mesa`. Y la
+   misma lista vive, sin nada que la sincronice, en las RPC de mesas (`supabase/mesas-servidor.sql`),
+   `src/lib/mesaFresca.ts`, `src/lib/supabase-helpers.ts`, `KitchenPage`, `useDeliveryCount`,
+   `ACTIVOS` de `tests/helpers/lab.ts` y los diagnósticos. **Un estado nuevo en `order_status` se
+   decide en todos a la vez:** si es vivo y falta en el índice, vuelven las mesas con dos cuentas
+   (una cerrada libera la mesa con la otra escondida: mesa 10 de Salchimelo, 2026-10-14). El índice
+   cambia con un archivo NUEVO (R5). Para reconfirmar los lados:
+   `grep -rn "'preparing'" src/ supabase/*.sql tests/`.
+
 → **Evidencia:** [`docs/BITACORA.md`](docs/BITACORA.md) → *"FASE 1 — estado de suscripción"*
 (el aviso a G-Centro) · el hallazgo del onboarding está en el inventario de arriba · el caso de
 `shift-reprint` está en el commit `fix(test): arqueo.spec buscaba shift-reprint en la fila`.
