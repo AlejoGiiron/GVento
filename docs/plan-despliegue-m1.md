@@ -1491,15 +1491,21 @@ la tabla de registro. **Reabre la escritura de `anon`**: solo si la migración r
   índice lo frena). El frontend NUEVO **no funciona sin el SQL**: sin `abrir_mesa` no abre mesas.
   Por eso el orden es SQL → frontend, nunca al revés.
 
-**UC.1 — Pre-flight, JUSTO ANTES** (martes, locales cerrados: crear el índice bloquea las
-escrituras de `orders` unos milisegundos): `supabase/diag/mesas-una-cuenta-preflight.sql`, cada
+**Sale el mismo 16/10, con los locales abiertos** (decidido ese día: el problema le pega directo al
+cliente). Lo que lo permite es `lock_timeout = 3s`: si la migración no consigue el lock de `orders`
+en 3 s, aborta sin cambiar nada y se reintenta (medido en Docker con una transacción que retenía
+`orders`: abortó a los 3 s y no creó nada).
+
+**UC.1 — Pre-flight, JUSTO ANTES:** `supabase/diag/mesas-una-cuenta-preflight.sql`, cada
 consulta por separado. Esperado: ANTES 1 = `f | f | f`; ANTES 2 = `0`. Si ANTES 2 da más de 0, la
 migración va a abortar: el detalle sale con la consulta 3 de `supabase/diag/mesas-pegadas.sql` y
 las vacías se cancelan con su paso 3. Una con consumo se mira aparte: pégame la fila.
 
 **UC.2 — Correr `supabase/mesas-una-cuenta.sql`** (trae su `begin`/`commit`). md5 del archivo
-(LF, `tr -d '\r' < f | md5sum`): **`96fd0984b988979019dca4b10c94a107`**, el mismo que el blob de
-`7a1c9da`. Si aborta, no cambió nada: pégame el mensaje.
+(LF, `tr -d '\r' < f | md5sum`): **`f1255395d635c8a6373f2ba3a9e02381`**, medido sobre el archivo
+salido del checkout e igual al blob de `04fb5a4`. Si aborta con `canceling statement due to lock
+timeout`, no cambió nada: se espera un minuto y se corre otra vez. Con cualquier otro error, pégame
+el mensaje.
 
 **UC.3 — Verificación:** la consulta DESPUÉS del mismo pre-flight: las **6 filas con `ok = true`**.
 `abrir_mesa` con la normalización de Q-FUNCIONES: **`d8090434ce2495a2f334e7c7ce120a5d`**.
@@ -1533,7 +1539,7 @@ Los martes G-10 y Salchimelo no abren: los pasos con SQL van ese día.
 | mar 13/10 (adelantado; R y `fix/cocina-avisos` ya salieron: `develop` = `c3a00c5`) | el arqueo cuenta los abonos de fiado (AA) | `feat/arqueo-abonos` | rebasada sobre `develop` (`c3a00c5`), suite completa y fast-forward; SQL antes del frontend (AA.1–AA.4) |
 | un martes después del arqueo | Paso 6, fase 2 de D | — | parte de la versión de `close_cash_shift` que deja el arqueo (`a395c0a1…`), no de la de hoy |
 | mar 13/10 (adelantado, en cadena) | Pasos 7-8 (permisos de cobro, A), después 9-10 (Mesas en el servidor) y después el 11 (anon sin escritura) | `feat/a-permisos`, `feat/mesas-servidor` y la del 11, cada una encima de la anterior | fast-forward en cadena: cada rama entra cuando la anterior ya está en `develop` |
-| el próximo martes (desde el 2026-10-16) | una sola cuenta viva por mesa (UC) | `fix/mesas-una-cuenta` | ya en `develop` por fast-forward; SQL antes del frontend (UC.1–UC.4) |
+| vie 16/10, con los locales abiertos | una sola cuenta viva por mesa (UC) | `fix/mesas-una-cuenta` | ya en `develop` por fast-forward; SQL antes del frontend (UC.1–UC.4) |
 | al final | Realtime | `feat/realtime` | después del paquete de Mesas |
 
 ## Resumen
