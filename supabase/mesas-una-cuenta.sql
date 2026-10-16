@@ -44,6 +44,11 @@
 -- hay, el índice no se puede crear: límpialas antes con supabase/diag/mesas-pegadas.sql, consulta
 -- 3); no existen todavía abrir_mesa, orders.open_id ni el índice; existe close_table_sale
 -- (mesas-servidor.sql: la pantalla nueva usa las dos).
+-- CON LOS LOCALES ABIERTOS: el ALTER TABLE y el CREATE INDEX necesitan un lock sobre orders. El
+-- riesgo es QUEDARSE ESPERANDO ese lock detrás de una transacción larga, con todas las ventas en
+-- fila detrás (el precedente: order-number-unique.sql). lock_timeout lo corta a los 3 s: aborta,
+-- no queda nada a medias, y se reintenta. Conseguido el lock, construir el índice tarda
+-- fracciones de segundo con el tamaño de hoy.
 -- ORDEN DE DESPLIEGUE: primero este SQL, después el frontend (que llama abrir_mesa). El frontend
 -- viejo sigue funcionando con esto aplicado: inserta directo y el índice lo frena si ya hay cuenta.
 -- RE-APLICAR: falla en la precondición (abrir_mesa ya existe) y hace rollback: no cambia nada.
@@ -57,6 +62,7 @@
 -- ============================================================================
 
 begin;
+set local lock_timeout = '3s';
 
 -- ── 0. PRECONDICIÓN (falla cerrado) ──────────────────────────────────────────
 do $$
@@ -93,8 +99,8 @@ comment on column public.orders.open_id is
   'Clave de "Abrir mesa" (abrir_mesa): un reintento con la misma clave devuelve la cuenta ya creada.';
 
 -- ── 2. El invariante: una sola cuenta viva por mesa ──────────────────────────
--- Toma un lock SHARE sobre orders mientras se construye (bloquea escrituras unos milisegundos con
--- el tamaño de hoy): aplicar con los locales cerrados.
+-- Toma un lock SHARE sobre orders mientras se construye (bloquea escrituras fracciones de segundo
+-- con el tamaño de hoy); si no lo consigue en 3 s, aborta (lock_timeout, arriba).
 create unique index orders_una_cuenta_viva_por_mesa
   on public.orders (table_id)
   where table_id is not null and status in ('pending', 'preparing', 'ready');
