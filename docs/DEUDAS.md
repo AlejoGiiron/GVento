@@ -184,6 +184,21 @@ Con varios celulares, además, dos pueden cerrar o abrir la misma mesa a la vez.
 transacción y con `for update` sobre la mesa, verifique que la orden no tenga ítems, la
 cancele y libere la mesa. No "reintentar el segundo request".
 
+### Mesas con el MISMO nombre en una sede (hallado 2026-10-16)
+
+En Salchimelo hay dos mesas activas que se llaman "mesa 10", con distinta mayúscula (salió al
+diagnosticar las dos cuentas vivas, `fix/mesas-una-cuenta`). Para el cajero son la misma mesa, y
+cualquier búsqueda por nombre (`ilike 'mesa 10'`) trae las dos. Nada lo impide: `tables` no tiene
+unique de nombre, y Configurar deja crear o renombrar una mesa con un nombre que ya existe.
+
+- **Para verlas y corregirlas:** consulta 4 y paso 4 de `supabase/diag/mesas-pegadas.sql` (por
+  `mesa_id`, con el nombre actual exacto; nunca por nombre).
+- **La salida de fondo, cuando se decida:** unique `(restaurant_id, lower(btrim(name)))` para las
+  no archivadas, en un archivo NUEVO, más el mensaje en Configurar. Su precondición es que la
+  consulta 4 dé 0 filas en producción: si no, el índice no se puede crear.
+- **No decidido:** si "Mesa 10" en Salón y "Mesa 10" en Terraza deben poder convivir (hoy la zona
+  es un texto libre).
+
 ### 🔴 `register_sale_payment` acepta cobros SIN turno abierto — medido; el cambio va sin aviso a clientes (2026-09-30)
 
 **✅ DESPLEGADO EL 2026-10-01** (lo reportó el usuario): release `main = 04273f3` a las ~11:45 y,
