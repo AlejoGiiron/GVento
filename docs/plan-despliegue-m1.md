@@ -1541,7 +1541,8 @@ mesas) y después `mesas-una-cuenta-revertir.sql` (fuera de git, en la raíz), m
 
 ## Paso 11 — Mesas, fase 2: sin escrituras directas de cobro, ítems ni mesas (`mesas-fase2.sql`)
 
-Rama `feat/mesas-fase2` (rebasada sobre `develop` el 2026-10-14). **Solo SQL, sin frontend. No se
+Rama `feat/mesas-fase2` (rebasada sobre `develop` el 2026-10-17, en `ea50bd5`: ya incluye UC, una
+sola cuenta viva por mesa). **Solo SQL, sin frontend. No se
 aplica hasta que el Paso 10 esté en TODOS los equipos. Sale el martes 20/10, antes del Paso 6.**
 
 - **Qué cierra** (solo permisos del rol `authenticated`; las políticas no se tocan):
@@ -1566,8 +1567,10 @@ aplica hasta que el Paso 10 esté en TODOS los equipos. Sale el martes 20/10, an
     por `add_order_items_with_extras`). Propuesto el 2026-10-14 para cerrar, sin aprobar todavía.
 - **Guarda 0e:** aborta si `anon` todavía escribe en `orders`, `order_items` o `tables` (P0.2 sin
   aplicar): este paso solo cierra lo de `authenticated`.
-- **Barrido R3 (2026-10-13):** con el código del Paso 10, la app no borra ítems ni mesas directo, y
-  en `orders` solo escribe esas tres columnas. Los 9 escritores de esas tablas en la base son
+- **Barrido R3 (2026-10-13, repetido el 2026-10-17 con UC):** con el código del Paso 10 y el de UC,
+  la app no borra ítems ni mesas directo, y en `orders` solo escribe esas tres columnas (UC quitó dos
+  escrituras directas más: "Abrir mesa" pasó a `abrir_mesa`, `SECURITY DEFINER`). Para repetirlo:
+  `node scripts/escrituras-directas.mjs origin/main`. Los 9 escritores de esas tablas en la base son
   `SECURITY DEFINER` (no cambian). Cuatro fixtures de la suite escribían directo con sesión
   (`order_number` en `abono-efectivo-turno` y `anular-venta`, borrar una mesa en `helpers/lab.ts`, y
   el 2026-10-14 borrar órdenes en la limpieza de `anular-venta`): pasaron a `psql`.
@@ -1618,7 +1621,7 @@ una comanda en Cocina y asignar un repartidor en Delivery.
 y DELETE de tabla en `orders` y `order_items`, DELETE en `tables`). **Reabre las escrituras directas**: solo si
 la migración rompió algo. No deshace nada de datos (no los hay) y no toca `anon`.
 
-## Calendario de releases (actualizado el 2026-10-13)
+## Calendario de releases (actualizado el 2026-10-17)
 
 Los martes G-10 y Salchimelo no abren: los pasos con SQL van ese día.
 
@@ -1658,4 +1661,5 @@ Los martes G-10 y Salchimelo no abren: los pasos con SQL van ese día.
 | 9 | SQL de Mesas en el servidor | `mesas-servidor.sql` (`4adc0197…`), con pre-flight 3, 4 y 5 justo antes | — | `mesas-servidor-revertir.sql` (`2f557c6d…`), solo antes del 10 |
 | 10 | frontend de Mesas | — | `feat/mesas-servidor` | rollback (el SQL del 9 se queda) |
 | P0.2 | anon sin escritura | `anon-sin-escritura.sql` (`26bca67d…`) | — | `anon-sin-escritura-revertir.sql` (`ed8bd914…`) |
+| UC | una sola cuenta viva por mesa (16/10) | `mesas-una-cuenta.sql` (`f1255395…`) | `fix/mesas-una-cuenta` | primero el frontend; después `mesas-una-cuenta-revertir.sql` (`a271aa3a…`) |
 | 11 | Mesas fase 2 (sin escrituras directas de cobro, ítems ni mesas) | `mesas-fase2.sql` (`2ff79981…`, lista sin llenar), pre-flight `3d645a66…` | — | `mesas-fase2-revertir.sql` (`b7101138…`) |

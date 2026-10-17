@@ -102,7 +102,7 @@ const ORDEN = [
   'arqueo-abonos.sql',                  // el esperado de tarjeta/transferencia/Nequi incluye los abonos de fiado del turno
   'permisos-cobro.sql',                 // A: cobrar por PERMISO (pos.vender / mesas.cobrar según el tipo de orden), no por el rol viejo
   'mesas-servidor.sql',                 // Paso 9: cobro de mesa, quitar ítem, cerrar sin consumo y eliminar mesa en el servidor
-  'anon-sin-escritura.sql',             // Paso 11 / P0.2: anon (sin sesión) no escribe en ninguna tabla de public
+  'anon-sin-escritura.sql',             // P0.2: anon (sin sesión) no escribe en ninguna tabla de public
   'mesas-una-cuenta.sql',               // una sola cuenta viva por mesa (índice) + abrir_mesa en una transacción
   'mesas-fase2.sql',                    // Paso 11: sin escrituras directas de cobro, ítems ni mesas (authenticated)
 ]
