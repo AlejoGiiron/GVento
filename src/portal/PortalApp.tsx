@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react'
 import { ErrorPortal, pedirCatalogo, type Catalogo } from './api'
+import { agregar, type Carrito } from './carrito'
+import { DATOS_VACIOS, leerRecordados, olvidar, recordar, type DatosCliente } from './datosCliente'
+import { MenuPantalla } from './MenuPantalla'
+import { PedidoPantalla } from './PedidoPantalla'
+import { textoSobre } from './reglasMapa'
 import { esInicioDelPortal, slugDeRuta } from './ruta'
-import { pesos, textoEstado } from './textos'
+import { useCotizacion } from './useCotizacion'
 
-// El esqueleto del portal (P2, parte 3): resuelve el negocio de la URL, pide el catálogo a la Edge
-// Function y muestra el encabezado, el estado y el menú. El carrito, la entrega y el mapa son la
-// parte 4 (pantallas 1, 2 y 2b del diseño).
+// El portal del cliente (P2): resuelve el negocio de la URL, pide el catálogo a la Edge Function y
+// muestra el menú (pantalla 1) y el pedido con la entrega (pantallas 2 y 2b). El pago es P3.
 
 const COLOR_POR_DEFECTO = '#047857'
 
@@ -30,47 +34,82 @@ export function PortalApp() {
     document.title = vista.tipo === 'listo' ? `${vista.catalogo.negocio.nombre} · Pedidos en línea` : 'Pedidos en línea'
   }, [vista])
 
-  const caja = { maxWidth: 560, margin: '0 auto', padding: '0 16px' } as const
-  if (vista.tipo !== 'listo') {
-    const texto = vista.tipo === 'cargando' ? 'Cargando el menú…'
-      : vista.tipo === 'inicio' ? 'Para pedir, abre el link que te compartió el negocio.'
-      : vista.tipo === 'sin_negocio' ? 'Este link no corresponde a ningún negocio. Revisa que esté completo.'
-      : vista.tipo === 'no_disponible' ? 'Este negocio no está recibiendo pedidos en línea por ahora.'
-      : vista.mensaje
-    return <main style={{ ...caja, paddingTop: 48 }}><p data-testid="pedido-mensaje" style={{ fontSize: 16, color: '#334155' }}>{texto}</p></main>
+  if (vista.tipo === 'listo' && slug) return <Tienda slug={slug} catalogo={vista.catalogo} />
+  const texto = vista.tipo === 'cargando' ? 'Cargando el menú…'
+    : vista.tipo === 'inicio' ? 'Para pedir, abre el link que te compartió el negocio.'
+    : vista.tipo === 'no_disponible' ? 'Este negocio no está recibiendo pedidos en línea por ahora.'
+    : vista.tipo === 'error' ? vista.mensaje
+    : 'Este link no corresponde a ningún negocio. Revisa que esté completo.'
+  return (
+    <main style={{ maxWidth: 560, margin: '0 auto', padding: '48px 16px 0' }}>
+      <p data-testid="pedido-mensaje" style={{ fontSize: 16, color: 'var(--p-texto-2)' }}>{texto}</p>
+    </main>
+  )
+}
+
+function Tienda({ slug, catalogo }: { slug: string; catalogo: Catalogo }) {
+  const [carrito, setCarrito] = useState<Carrito>([])
+  const [recordados] = useState(leerRecordados)
+  const [datos, setDatos] = useState<DatosCliente>(recordados ?? DATOS_VACIOS)
+  const [recordarDatos, setRecordarDatos] = useState(recordados !== null)
+  const [enPedido, setEnPedido] = useState(false)
+  // Cotiza solo cuando cambian el carrito o el punto (no al escribir nombre, dirección o celular).
+  const { cotizacion, cargando, error, reintentar } = useCotizacion(slug, carrito, datos.punto)
+
+  // El color del negocio, el texto que se lee encima (blanco o casi negro) y la barra del navegador.
+  useEffect(() => {
+    const color = catalogo.negocio.color ?? COLOR_POR_DEFECTO
+    document.documentElement.style.setProperty('--p-marca', color)
+    document.documentElement.style.setProperty('--p-marca-texto', textoSobre(color))
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', color)
+  }, [catalogo.negocio.color])
+
+  // "Recordar mis datos": solo en este navegador. Al desmarcarlo se borran.
+  useEffect(() => {
+    if (recordarDatos) recordar(datos)
+    else olvidar()
+  }, [recordarDatos, datos])
+
+  // El botón Atrás del celular vuelve al menú: no saca del portal con el pedido armado.
+  useEffect(() => {
+    const alVolver = () => setEnPedido(false)
+    window.addEventListener('popstate', alVolver)
+    return () => window.removeEventListener('popstate', alVolver)
+  }, [])
+
+  function verPedido() {
+    window.history.pushState({ pedido: true }, '')
+    setEnPedido(true)
+    window.scrollTo(0, 0)
   }
 
-  const { negocio, estado, entrega, categorias } = vista.catalogo
-  const color = negocio.color ?? COLOR_POR_DEFECTO
+  function volver() {
+    if ((window.history.state as { pedido?: boolean } | null)?.pedido) window.history.back()
+    else setEnPedido(false)
+  }
+
+  // El mapa (MapLibre, ~300 KB comprimido) se descarga cuando entra el primer producto, no al abrir el
+  // menú: quien solo mira no lo paga, y quien pide ya lo tiene al llegar a la entrega.
+  const hayAlgo = carrito.length > 0
+  // Si la precarga falla (sin red, deploy nuevo), no pasa nada aquí: la pantalla 2 lo vuelve a pedir y,
+  // si tampoco carga, muestra el aviso de la Barrera.
+  useEffect(() => { if (hayAlgo) import('./Mapa').catch(() => undefined) }, [hayAlgo])
+
+  // Si se vacía el pedido, se vuelve al menú.
+  useEffect(() => {
+    if (enPedido && carrito.length === 0) volver()
+  }, [enPedido, carrito.length])
+
+  if (enPedido) {
+    return (
+      <PedidoPantalla catalogo={catalogo} carrito={carrito} onCarrito={setCarrito} datos={datos} onDatos={setDatos}
+        recordarDatos={recordarDatos} onRecordar={setRecordarDatos} cotizacion={cotizacion} cargando={cargando}
+        error={error} onReintentar={reintentar} onVolver={volver} />
+    )
+  }
   return (
-    <main>
-      <header style={{ background: color, color: '#fff', padding: '20px 0' }}>
-        <div style={caja}>
-          <h1 data-testid="pedido-negocio" style={{ margin: 0, fontSize: 22 }}>{negocio.nombre}</h1>
-          <p data-testid="pedido-estado" style={{ margin: '6px 0 0', fontSize: 14 }}>{textoEstado(estado)}</p>
-          <p style={{ margin: '4px 0 0', fontSize: 13, opacity: 0.9 }}>
-            Entrega en {entrega.tiempo_min}–{entrega.tiempo_max} min
-            {entrega.envio_desde !== null && ` · envío desde ${pesos(entrega.envio_desde)}`}
-            {entrega.pedido_minimo > 0 && ` · pedido mínimo ${pesos(entrega.pedido_minimo)}`}
-          </p>
-        </div>
-      </header>
-      <div style={{ ...caja, paddingTop: 16, paddingBottom: 32 }}>
-        {categorias.map((c) => (
-          <section key={c.id} style={{ marginBottom: 20 }}>
-            <h2 style={{ fontSize: 17, color: '#0f172a', margin: '0 0 8px' }}>{c.nombre}</h2>
-            {c.productos.map((p) => (
-              <div key={p.id} data-testid={`pedido-item-${p.id}`}
-                style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '10px 0', borderTop: '1px solid #e2e8f0' }}>
-                <span style={{ color: p.agotado ? '#94a3b8' : '#0f172a' }}>
-                  {p.nombre}{p.agotado && ' · agotado'}
-                </span>
-                <span style={{ fontFamily: 'ui-monospace, monospace', color: '#0f172a' }}>{pesos(p.precio)}</span>
-              </div>
-            ))}
-          </section>
-        ))}
-      </div>
-    </main>
+    <MenuPantalla catalogo={catalogo} carrito={carrito} cotizacion={cotizacion} cargando={cargando} error={error} onReintentar={reintentar}
+      onAgregar={(p, cantidad, extras, nota) => setCarrito((c) => agregar(c, p.id, cantidad, extras, nota))}
+      onVerPedido={verPedido} />
   )
 }

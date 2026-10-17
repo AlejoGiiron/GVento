@@ -10,7 +10,17 @@
          en src/lib/identidadRutas.ts → esDelPortal). -->
     <title>Pedidos en línea</title>
     <style>
-      html, body { margin: 0; background: #f8fafc; font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; }
+      /* Colores del portal. --p-marca es el color del negocio (lo pone la app con el de su portal). */
+      :root {
+        --p-fondo: #f8fafc; --p-panel: #ffffff; --p-texto: #0f172a; --p-texto-2: #475569; --p-borde: #e2e8f0;
+        --p-suave: #f1f5f9; --p-oscuro: #0f172a; --p-marca: #047857; --p-ok: #10b981; --p-error: #b91c1c;
+        --p-error-suave: #fef2f2; --p-marca-texto: #ffffff;
+      }
+      html, body { margin: 0; background: var(--p-fondo); color: var(--p-texto); font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; }
+      * { box-sizing: border-box; }
+      button { font: inherit; }
+      button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visible { outline: 2px solid var(--p-marca); outline-offset: 2px; }
+      @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
     </style>
   </head>
   <body>

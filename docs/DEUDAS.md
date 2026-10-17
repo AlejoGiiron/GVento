@@ -1260,6 +1260,33 @@ la versión de producción, 1 con la del Paso 9.
   50 (`sin_stock` / bien) se averigua en unas 6 consultas. Es inherente a no dejar pedir de más; si
   algún negocio lo considera sensible, se cambia la regla (por ejemplo, no validar stock al cotizar).
 
+### Mapa del portal (P2 parte 4): lo que no se probó en local (anotado 2026-10-17)
+
+- **Las teselas reales no se probaron.** En local no hay `VITE_PORTAL_MAPA_URL`, así que las pruebas
+  corren con el fondo liso: se prueba que el mapa carga, que moverlo cambia el punto y que eso cotiza,
+  pero NO el `.pmtiles`, ni el CORS de R2, ni que quitar las capas de texto o de íconos (cuando faltan
+  `_GLIFOS` o `_SPRITE`) deje un estilo válido, ni que un error de teselas dispare el evento `error`
+  de MapLibre que apaga el arrastre (la regla, `mapaFijaPunto`, sí está probada con Vitest). Se
+  verifica al publicar con el paso 6 de `docs/plan-pedidos-en-linea.md` → *"P2 · el mapa del portal"*.
+- **La zona no se dibuja.** El diseño de la pantalla 2b muestra el polígono de la zona, pero el
+  catálogo no la devuelve (decisión de P2: la zona no sale al público). Hoy el cliente se entera al
+  cotizar. Pendiente de decidir: o se publica la zona (polígono o radio) en el catálogo, o 2b queda así.
+- **Sin WebGL no hay mapa.** El navegador que no lo tiene ve un aviso (`pedido-mapa-fallo`) y puede
+  poner el punto con "Usar mi ubicación actual". Sin ubicación tampoco, no hay forma de pedir: falla
+  cerrado (sin punto no se puede pagar). No está medido cuántos celulares caen ahí.
+- **Una sede "en zona" pero sin tarifa** (`portal_calcular` la marca `fuera_de_zona`, falla cerrado)
+  muestra el mismo texto de 2b, "Todavía no llegamos a esta dirección", aunque el problema es la
+  configuración del negocio.
+- **Los límites del carrito están copiados a mano** (`MAX_CANTIDAD`, `MAX_LINEAS`, `MAX_NOTA`,
+  `MAX_EXTRAS` en `src/portal/carrito.ts`) de los de `portal_calcular`. Si cambian allá y no aquí, el
+  servidor rechaza TODO el carrito con un mensaje de forma. El de 16 KB por consulta
+  (`MAX_CUERPO_BYTES` en `supabase/functions/portal/reglas.ts`) no se copió: 30 líneas con 10 adiciones
+  y notas de 140 caben (estimado, no medido).
+- **Privacidad (para la política de datos, no son defectos):** un punto recordado sale en la primera
+  cotización del menú, antes de marcar "Acepto" (la función solo registra la acción y el código, no el
+  cuerpo); las teselas se piden por rango a R2, así que Cloudflare ve la zona que mira el cliente; el
+  link de WhatsApp lleva la dirección a wa.me solo si el cliente lo toca.
+
 ### 🔴 `orders.status` con cualquier valor por la API — se cierra con P4 (decidido 2026-10-14)
 
 Después del Paso 11, `authenticated` todavía puede escribir `orders.status` directo (lo necesitan

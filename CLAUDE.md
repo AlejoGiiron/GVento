@@ -453,6 +453,13 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    consumo del carrito (`portal_consumo`, R1 #13 e) y compararlo con el stock. La pantalla del portal nunca calcula un precio. El spec compara,
    producto por producto, el precio y el agotado del catálogo con lo que devuelve cotizar, y fija las
    claves de la respuesta: nunca sale cuántas unidades quedan.
+   Las líneas de la cotización vienen en el MISMO ORDEN que los ítems: la pantalla
+   (`src/portal/PedidoPantalla.tsx`) las empareja por posición, y solo con la cotización del carrito y
+   el punto de ahora cuyas líneas coinciden, una por una, en producto y cantidad (`lineasCoinciden` en
+   `src/portal/useCotizacion.ts`; si no, "…" y no se deja pagar: falla cerrado). Lo vigila
+   `tests/portal-pantallas.spec.ts` (el total de cada línea, "…" mientras la cotización nueva no llega,
+   y una respuesta con las líneas al revés). Los límites del carrito (`MAX_*` en `src/portal/carrito.ts`)
+   copian a mano los de `portal_calcular`.
    (b) La forma de la clave del límite por IP: el CHECK `portal_limites_clave` (`acción:` + 64 hex, o
    `global:sin-ip`) contra `claveLimite` y `ACCIONES` en `reglas.ts`. Si divergen, el contador rechaza
    la clave y la función responde 503 (falla cerrada, pero esa acción cae entera). Lo vigilan

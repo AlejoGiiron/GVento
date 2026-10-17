@@ -11,7 +11,7 @@ Un portal público por negocio (`pedir.gvento.online/<negocio>`) donde el client
 | tema | decisión |
 |---|---|
 | Cliente | Sin registro. Pide como invitado; casilla "Recordar mis datos en este celular" (solo en su teléfono). El negocio lo reconoce por celular, solo internamente. |
-| Pago | Completo y por adelantado con Factus Pay (Bre-B: Nequi, Bancolombia, Daviplata y demás bancos). El cliente copia la llave Bre-B en la app de su banco, o usa el QR desde otro celular. Monto exacto, mínimo $1.000. Cada negocio con su propia cuenta Factus Pay (confirmado). Costo: $800 + IVA por recaudo y $800 + IVA por retiro; el retiro llega al instante. |
+| Pago | Completo y por adelantado con Factus Pay (Bre-B: Nequi, Bancolombia, Daviplata y demás bancos). El cliente copia la llave Bre-B en la app de su banco, o usa el QR desde otro celular. Monto exacto. Mínimo: la documentación dice $1.000, pero el sandbox rechaza menos de $10.000 ("The amount field must be at least 10000.", medido el 2026-10-17): confirmarlo con Factus para producción. Cada negocio con su propia cuenta Factus Pay (confirmado). Costo: $800 + IVA por recaudo y $800 + IVA por retiro; el retiro llega al instante. |
 | Aceptación | Pagado = entra directo a "En preparación". Si no se entrega, el negocio le devuelve la plata a su cliente. |
 | Envío | Tarifa fija o por distancia (rangos de km en línea recta). |
 | Zona | Zona de cobertura dibujada en el mapa (o radio). Fuera de zona no deja pagar. Lo valida el servidor. |
@@ -26,7 +26,7 @@ Un portal público por negocio (`pedir.gvento.online/<negocio>`) donde el client
 
 1. **El portal es la primera parte pública de G-Vento.** Antes de abrirlo, el rol público (`anon`) no puede escribir en ninguna tabla. Hoy puede en 29.
 2. **El precio, el envío, la zona y las promociones los calcula el servidor.** El navegador solo dice qué quiere el cliente.
-3. **Un pedido solo existe para el negocio cuando el pago está confirmado** por un webhook firmado. Antes de eso no descuenta stock ni suena en Domicilios.
+3. **Un pedido solo existe para el negocio cuando el pago está confirmado.** El aviso de Factus NO viene firmado (solo trae una llave en la URL): el pago se confirma consultando el recaudo a la API de Factus (estado `paid` y monto exacto), nunca por el aviso solo. Antes de eso no descuenta stock ni suena en Domicilios.
 4. **Todo es idempotente:** crear el pedido, confirmar el pago y cada cambio de estado se pueden repetir sin duplicar nada (lo que aprendimos con los reenvíos de Chromium).
 5. **Las credenciales de Factus Pay de cada negocio** se guardan en el servidor (Vault) y nunca llegan al navegador. Al conectar, el dueño escribe su correo y contraseña de Factus Pay una sola vez: el servidor obtiene el token (no vence, pero cada nueva autenticación revoca el anterior) y descarta la contraseña. Si el token deja de servir, la configuración muestra "Reconectar". G-Vento le da al negocio una URL y una llave de aviso para pegar en su panel de Factus Pay.
 
@@ -82,8 +82,10 @@ Nada de esto lo ve un cliente hasta que exista la pantalla del portal y un negoc
      50 pedidos al día y unas 10 consultas por pedido, entre catálogo y cotizaciones) serían unas
      45.000 líneas y unos 150 MB al mes: es un cálculo, no una medición. Ojo: la ingesta de todo el
      proyecto ya pasó el GB del plan (2,58 GB el 2026-09-30), así que el portal suma sobre eso.
-   - **Requisito de la parte 4** (todavía no existe): el navegador cotizará solo al cambiar la
-     dirección o el carrito en el checkout, nunca en cada clic.
+   - **El navegador cotiza solo al cambiar el carrito o el punto de entrega** (parte 4, 2026-10-17):
+     escribir el nombre, la dirección o el celular no cotiza, y varios toques seguidos son una sola
+     consulta (espera de 500 ms). Abrir el menú tampoco cotiza. Lo vigila
+     `tests/portal-pantallas.spec.ts`, que cuenta las consultas `cotizar`.
    - **Si se pasa** (más de 3 líneas o 10 KB por consulta, o más de 300 MB al mes), en este orden:
      1. juntar el contador y la consulta en una sola llamada a la base (una función que cuente y
         responda): baja a 2 líneas por consulta;
@@ -137,10 +139,66 @@ ahí no se sirve el POS (`/m`, `/login` o `/cocina` abren el portal, y `/`, `/in
    - `https://g-vento.vercel.app/pedir/no-existe` → el mismo mensaje.
 4. **Quitar:** borrar el dominio en Vercel y el registro en GoDaddy. El frontend puede quedarse.
 
+## P2 · el mapa del portal (parte 4, 2026-10-17)
+
+El mapa de la pantalla 2 es MapLibre con las teselas de Protomaps: un solo archivo `.pmtiles` con
+Cali, servido desde Cloudflare R2. Sin las variables de abajo, o si las teselas fallan, el mapa es un
+**fondo gris liso** y moverlo **NO fija el punto** (`mapaFijaPunto` en `src/portal/reglasMapa.ts`,
+falla cerrado: un punto puesto a ciegas mandaría al domiciliario a un lugar que nadie eligió). El
+cliente solo puede usar "Usar mi ubicación actual". En `pnpm dev` y en las pruebas el mapa liso sí
+mueve el punto, para poder probar el arrastre. 🔴 **Las tres variables tienen que estar ANTES de abrir
+el portal a clientes.** Para publicar el frontend no hacen falta.
+
+1. **Las teselas de Cali.** Con el CLI de Protomaps (`pmtiles`,
+   https://github.com/protomaps/go-pmtiles/releases):
+   `pmtiles extract https://build.protomaps.com/<AAAAMMDD>.pmtiles cali.pmtiles --bbox=-76.62,3.25,-76.40,3.58 --maxzoom=15`
+   (`<AAAAMMDD>`: el build más reciente de https://maps.protomaps.com/builds/). La caja cubre Cali,
+   Jamundí y Yumbo. El tamaño del archivo no está medido: anótalo al generarlo.
+2. **Las fuentes de las etiquetas**, del repositorio https://github.com/protomaps/basemaps-assets,
+   carpeta `fonts/`: `Noto Sans Regular`, `Noto Sans Medium`, `Noto Sans Italic` y la de
+   `Noto Sans Devanagari…` (son las que nombra el estilo de `@protomaps/basemaps` 5.7.2; buscado con
+   `grep -oh "Noto Sans[A-Za-z ]*" node_modules/@protomaps/basemaps/dist/*.js | sort -u`).
+3. **Los íconos**, del mismo repositorio: `sprites/v4/light.json`, `light.png`, `light@2x.json` y
+   `light@2x.png`.
+4. **El bucket de R2** (público, por ejemplo `gvento-mapa`), con esta estructura:
+   `cali.pmtiles` · `fonts/<fuente>/<rango>.pbf` · `sprites/v4/light*`. En Settings → CORS policy:
+   ```json
+   [{ "AllowedOrigins": ["https://pedir.gvento.online", "https://g-vento.vercel.app"],
+      "AllowedMethods": ["GET", "HEAD"], "AllowedHeaders": ["range", "if-match"],
+      "ExposeHeaders": ["etag"], "MaxAgeSeconds": 3600 }]
+   ```
+   Las vistas previas de Vercel no están en la lista: ahí el mapa sale sin calles y moverlo no fija el
+   punto (solo "Usar mi ubicación actual").
+5. **Las variables en Vercel** (Production). Son de BUILD: después de ponerlas hay que volver a
+   desplegar.
+
+   | variable | valor | si falta |
+   |---|---|---|
+   | `VITE_PORTAL_MAPA_URL` | `https://<dominio del bucket>/cali.pmtiles` | fondo liso, sin calles |
+   | `VITE_PORTAL_MAPA_GLIFOS` | `https://<dominio del bucket>/fonts/{fontstack}/{range}.pbf` (con las llaves, tal cual) | calles sin nombres |
+   | `VITE_PORTAL_MAPA_SPRITE` | `https://<dominio del bucket>/sprites/v4/light` (sin extensión) | sin íconos de lugares |
+
+6. **Verificar:** `/pedir/<negocio>` → agregar un producto → "Ver mi pedido": tienen que verse calles
+   con nombres. En DevTools → Red, las peticiones a `cali.pmtiles` responden **206**. Un error de CORS
+   en la consola = revisar la política del paso 4.
+7. **Quitar:** borrar las tres variables y volver a desplegar (el mapa vuelve al fondo liso y deja de
+   fijar el punto: los clientes solo pueden usar su ubicación).
+
+**Peso** (medido el 2026-10-17 con `pnpm build`, que lista cada paquete: `assets/pedido-*.js`
+25,49 kB; `assets/Mapa-*.js` 1.114,54 kB, 300,32 kB comprimido): el mapa es un paquete aparte que se
+pide cuando entra el primer producto al carrito, no al abrir el menú. Lo que vigila
+`tests/portal-pantallas.spec.ts` es esa carga diferida (en `pnpm dev`), no el peso. Si el paquete no
+carga (por ejemplo, una pestaña abierta antes de un deploy: Hobby no guarda versiones viejas), la
+pantalla 2 muestra "No pudimos cargar el mapa" y el pedido sigue ahí.
+
+**La zona NO se dibuja** en el mapa: el catálogo no la devuelve (decisión de P2). La pantalla 2b
+("Todavía no llegamos a esta dirección") sale con la respuesta de cotizar. Dibujarla es una decisión
+pendiente: ver DEUDAS → *"Mapa del portal (P2 parte 4)"*.
+
 ## Lo que hace falta de tu lado
 
 - [x] Documentación de Factus Pay y respuestas a las dudas (13/10): devuelve la llave Bre-B, mínimo $1.000, estados `ready`/`paid`, vencimiento en segundos, 6 reintentos, una cuenta por negocio, retiro inmediato.
-- [ ] Acceso al sandbox de Factus Pay (se enviaron los datos de registro).
+- [x] Acceso al sandbox de Factus Pay (explorado el 2026-10-17: autenticar, crear, consultar, listar y el simulador; el aviso de pago no se probó porque necesita una URL pública).
 - [ ] Pedir la URL base de producción de Factus Pay.
 - [ ] Hablar con Salchimelo: que abra su cuenta de Factus Pay, la ubicación exacta del local, la zona, las tarifas, los productos a publicar y quiénes son sus domiciliarios.
 - [ ] Definir si "Pedidos en línea" se cobra aparte (adicional al plan) o va incluido en el plan Profesional.
