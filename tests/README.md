@@ -48,6 +48,15 @@ crearse el contenedor) y `playwright.config.ts` (para firmar). **No es** el
 secreto de la nube. Si falta, la suite **aborta** — antes esos casos de
 `suscripcion-estado.spec.ts` hacían skip en silencio.
 
+### Las reversas (fuera de git) y `E2E_SIN_REVERSAS`
+
+Las reversas de las migraciones viven en la RAÍZ de la carpeta principal
+(`C:\Users\Alejandro\Documents\Proyectos\gvento`), fuera de git. Algunas pruebas comparan sus md5
+con los del pre-flight (`portal-config.spec.ts` y `portal-publico.spec.ts`), leyéndolas como
+`../gvento/<nombre>-revertir.sql` desde un worktree hermano. Si la reversa no está, la prueba
+**falla** (no se salta en silencio). En otro clon o en otra máquina, `E2E_SIN_REVERSAS=1` permite
+correr sin ellas a propósito.
+
 ## ⚠️ Los tests mutan el estado del laboratorio
 
 - `closeShiftIfOpen` **cierra el turno de caja activo** (declarando 0).
