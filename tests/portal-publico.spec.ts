@@ -194,6 +194,8 @@ test.describe('Pedidos en línea · portal público (servidor)', () => {
       .toEqual(['E2E P2 Pan extra', 'E2E P2 Queso'])
     expect(Object.keys(prods['E2E P2 Perro'].extras[0]).sort()).toEqual(CLAVES_EXTRA)
     expect(JSON.stringify(c)).not.toContain('E2E P2 Ajeno')
+    // Independiente de las listas de claves: el catálogo tampoco dice cuánto queda (solo agotado sí o no).
+    expect(JSON.stringify(c)).not.toMatch(/unidades|stock_qty|"stock"|disponibles/)
     expect(c.entrega.envio_desde).toBe(2000)
     expect(c.negocio.whatsapp).toBe('573155550101')
   })

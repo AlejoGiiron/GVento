@@ -448,9 +448,9 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    (`Record<keyof Tipo, true>`: si el tipo cambia y la lista no, `tsc` no compila), y
    `tests/portal-publico.spec.ts` compara esas listas con lo que devuelve el SQL.
    🔴 El precio y "se puede pedir" de un producto y de un extra salen de `portal_disponibilidad` (P1,
-   #13 d), que usan el catálogo y `portal_calcular`; cotizar (P2), crear el pedido (P3) y las
+   R1 #13 d), que usan el catálogo y `portal_calcular`; cotizar (P2), crear el pedido (P3) y las
    promociones (P6) pasan por `portal_calcular`. Lo único propio de `portal_calcular` es SUMAR el
-   consumo del carrito (`portal_consumo`, #13 e) y compararlo con el stock. La pantalla del portal nunca calcula un precio. El spec compara,
+   consumo del carrito (`portal_consumo`, R1 #13 e) y compararlo con el stock. La pantalla del portal nunca calcula un precio. El spec compara,
    producto por producto, el precio y el agotado del catálogo con lo que devuelve cotizar, y fija las
    claves de la respuesta: nunca sale cuántas unidades quedan.
    (b) La forma de la clave del límite por IP: el CHECK `portal_limites_clave` (`acción:` + 64 hex, o
