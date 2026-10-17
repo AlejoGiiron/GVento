@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { DOCUMENTO_PORTAL, HOST_PORTAL, esDelPortal, identidadDeRuta, htmlConIdentidad, IDENTIDADES, MARCADOR_IDENTIDAD } from './identidadRutas'
+import { DOCUMENTO_PORTAL, HOST_PORTAL, RUTA_INICIO_PORTAL, esDelPortal, identidadDeRuta, htmlConIdentidad, IDENTIDADES, MARCADOR_IDENTIDAD } from './identidadRutas'
+import { DOMINIO_PORTAL, RE_SLUG } from './portal'
+import { ORIGENES_POR_DEFECTO } from '../../supabase/functions/portal/reglas'
 
 // 🔴 CONTRATO DE DOS LADOS (R1): la regla que usa el dev server (identidadDeRuta)
 // y las rewrites de PRODUCCIÓN (vercel.json). Si divergen, en local se prueba un
@@ -47,14 +49,22 @@ describe('el portal del cliente = vercel.json (también por dominio)', () => {
     const esperado = esDelPortal(ruta, host) ? `/${DOCUMENTO_PORTAL}` : id ? `/${IDENTIDADES[id].archivo}` : '/index.html'
     expect(destinoVercel(ruta, host)).toBe(esperado)
   })
-  it('en el dominio del portal, los ARCHIVOS del POS se redirigen a / (Vercel sirve archivos antes que rewrites)', () => {
-    const documentos = ['index.html', ...Object.values(IDENTIDADES).map((i) => i.archivo)]
-    const redirigidos = (vercel.redirects ?? [])
-      .filter((r) => r.destination === '/' && (r.has ?? []).some((h) => h.type === 'host' && h.value === HOST_PORTAL))
-      .map((r) => r.source.replace(/^\//, ''))
-    expect(documentos.filter((d) => !redirigidos.includes(d))).toEqual([])
+  it('en el dominio del portal, las RUTAS que el disco resuelve a un documento del POS se redirigen al inicio del portal', () => {
+    // Por la clase, no por los archivos: `/` también es un documento del POS (el disco la resuelve a
+    // /index.html antes que las rewrites).
+    const rutasDelPos = ['/', '/index.html', ...Object.values(IDENTIDADES).map((i) => `/${i.archivo}`)]
+    const redirigidas = (vercel.redirects ?? [])
+      .filter((r) => r.destination === RUTA_INICIO_PORTAL && (r.has ?? []).some((h) => h.type === 'host' && h.value === HOST_PORTAL))
+      .map((r) => r.source)
+    expect(rutasDelPos.filter((d) => !redirigidas.includes(d))).toEqual([])
+    // El destino: no es un documento, cae en la rewrite del portal y no puede ser un negocio.
+    expect([rutasDelPos.includes(RUTA_INICIO_PORTAL), destinoVercel(RUTA_INICIO_PORTAL, HOST_PORTAL), RE_SLUG.test(RUTA_INICIO_PORTAL.slice(1))])
+      .toEqual([false, `/${DOCUMENTO_PORTAL}`, false])
     // Contraste: fuera del dominio del portal no se redirige nada (los redirects llevan su has).
     expect((vercel.redirects ?? []).filter((r) => !(r.has ?? []).length)).toEqual([])
+  })
+  it('el dominio del portal es UNO: el link de Configuración, vercel.json y los orígenes de la función', () => {
+    expect([DOMINIO_PORTAL, (ORIGENES_POR_DEFECTO as readonly string[]).includes(`https://${HOST_PORTAL}`)]).toEqual([HOST_PORTAL, true])
   })
   it('en el dominio del portal NO se sirve el POS; fuera de él, /pedidos sigue siendo del POS', () => {
     expect([esDelPortal('/m', HOST_PORTAL), esDelPortal('/login', 'PEDIR.gvento.online:443'), esDelPortal('/pedidos', 'g-vento.vercel.app')])

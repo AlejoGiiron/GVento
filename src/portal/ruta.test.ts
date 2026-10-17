@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { slugDeRuta } from './ruta'
+import { esInicioDelPortal, slugDeRuta } from './ruta'
 
 describe('portal · el negocio de la URL', () => {
+  it('el inicio del dominio del portal (a donde se redirige /): no es un negocio y se reconoce', () => {
+    const h = 'pedir.gvento.online'
+    expect([slugDeRuta('/_inicio', h), esInicioDelPortal('/_inicio'), esInicioDelPortal('/_inicio?x=1'), esInicioDelPortal('/inicio')])
+      .toEqual([null, true, true, false])
+  })
   it('en el dominio del portal: /<negocio>', () => {
     const h = 'pedir.gvento.online'
     expect([slugDeRuta('/salchimelo', h), slugDeRuta('/Salchimelo?x=1', h), slugDeRuta('/', h),

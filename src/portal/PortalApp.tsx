@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ErrorPortal, pedirCatalogo, type Catalogo } from './api'
-import { slugDeRuta } from './ruta'
+import { esInicioDelPortal, slugDeRuta } from './ruta'
 import { pesos, textoEstado } from './textos'
 
 // El esqueleto del portal (P2, parte 3): resuelve el negocio de la URL, pide el catálogo a la Edge
@@ -9,7 +9,7 @@ import { pesos, textoEstado } from './textos'
 
 const COLOR_POR_DEFECTO = '#047857'
 
-type Vista = { tipo: 'cargando' } | { tipo: 'sin_negocio' } | { tipo: 'no_disponible' }
+type Vista = { tipo: 'cargando' } | { tipo: 'inicio' } | { tipo: 'sin_negocio' } | { tipo: 'no_disponible' }
   | { tipo: 'error'; mensaje: string } | { tipo: 'listo'; catalogo: Catalogo }
 
 export function PortalApp() {
@@ -17,7 +17,7 @@ export function PortalApp() {
   const slug = slugDeRuta(window.location.pathname, window.location.host)
 
   useEffect(() => {
-    if (!slug) { setVista({ tipo: 'sin_negocio' }); return }
+    if (!slug) { setVista({ tipo: esInicioDelPortal(window.location.pathname) ? 'inicio' : 'sin_negocio' }); return }
     let vivo = true
     pedirCatalogo(slug).then(
       (c) => { if (vivo) setVista(c.disponible ? { tipo: 'listo', catalogo: c } : { tipo: 'no_disponible' }) },
@@ -33,6 +33,7 @@ export function PortalApp() {
   const caja = { maxWidth: 560, margin: '0 auto', padding: '0 16px' } as const
   if (vista.tipo !== 'listo') {
     const texto = vista.tipo === 'cargando' ? 'Cargando el menú…'
+      : vista.tipo === 'inicio' ? 'Para pedir, abre el link que te compartió el negocio.'
       : vista.tipo === 'sin_negocio' ? 'Este link no corresponde a ningún negocio. Revisa que esté completo.'
       : vista.tipo === 'no_disponible' ? 'Este negocio no está recibiendo pedidos en línea por ahora.'
       : vista.mensaje

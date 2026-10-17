@@ -84,7 +84,7 @@ export function validarCuerpo(texto: string): Cuerpo {
   if (typeof b !== 'object' || b === null || Array.isArray(b)) return { ok: false, error: 'El cuerpo tiene que ser un objeto.' }
   const o = b as Record<string, unknown>
   const accion = o.accion
-  if (typeof accion !== 'string' || !Object.hasOwn(ACCIONES, accion)) return { ok: false, error: 'Acción desconocida.' }
+  if (typeof accion !== 'string' || !Object.prototype.hasOwnProperty.call(ACCIONES, accion)) return { ok: false, error: 'Acción desconocida.' }
   const a = accion as Accion
   const permitidas: readonly string[] = ACCIONES[a].claves
   const ajenas = Object.keys(o).filter((k) => !permitidas.includes(k))

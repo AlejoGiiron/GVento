@@ -55,6 +55,13 @@ export function identidadDeRuta(ruta: string): keyof typeof IDENTIDADES | null {
 // regla primero).
 export const HOST_PORTAL = 'pedir.gvento.online'
 export const DOCUMENTO_PORTAL = 'pedido.html'
+/**
+ * A dónde se redirige, en el dominio del portal, la raíz `/` y los archivos del POS (`/index.html`,
+ * `/movil.html`, `/cocina.html`): Vercel sirve un archivo (y `/` es `/index.html`) ANTES de mirar
+ * las rewrites, así que sin el redirect esas rutas abrirían el POS. No es un archivo y no puede ser un
+ * negocio (el guion bajo no cabe en RE_SLUG), así que cae en la rewrite del portal.
+ */
+export const RUTA_INICIO_PORTAL = '/_inicio'
 
 /** ¿Esta petición es del portal del cliente? */
 export function esDelPortal(ruta: string, host?: string | null): boolean {

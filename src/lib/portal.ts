@@ -1,3 +1,5 @@
+import { HOST_PORTAL } from './identidadRutas'
+
 // Pedidos en línea (P1): la forma de la configuración del portal y lo que se puede escribir.
 // Módulo PURO (sin Supabase): lo importan el hook, la pantalla y los specs.
 // La base es supabase/portal-config.sql; lo que se valida acá es para avisar antes de guardar,
@@ -130,7 +132,8 @@ void _todasLasClaves
 // ── Link ──
 
 /** El dominio del portal (P0.3). */
-export const DOMINIO_PORTAL = 'pedir.gvento.online'
+// El dominio del portal sale de identidadRutas.ts (una sola constante: R1 #9).
+export const DOMINIO_PORTAL = HOST_PORTAL
 
 /** El mismo formato que el CHECK portal_sedes_slug_formato: 3 a 40, a-z 0-9 y guiones internos. */
 export const RE_SLUG = /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/

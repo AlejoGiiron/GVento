@@ -4,6 +4,10 @@ import { ownerCreds } from './helpers/auth'
 import { cliente, psql, psqlResultado } from './helpers/db-local'
 import { otraCreds } from './helpers/storage'
 import { claveLimite } from '../supabase/functions/portal/reglas'
+import {
+  CLAVES_CATALOGO, CLAVES_CATEGORIA, CLAVES_COTIZACION, CLAVES_ENTREGA, CLAVES_ESTADO, CLAVES_EXTRA, CLAVES_LINEA,
+  CLAVES_NEGOCIO, CLAVES_PRODUCTO,
+} from '../src/portal/claves'
 
 // ============================================================================
 // Pedidos en línea, P2 (supabase/portal-publico.sql + supabase/functions/portal):
@@ -14,10 +18,10 @@ import { claveLimite } from '../supabase/functions/portal/reglas'
 //     otra sede, inactivo); stock de todo el carrito (simples, recetas y productos vinculados);
 //     zona, envío por tramos, mínimo y horario en hora de Bogotá (R7).
 //   · Catálogo y cotización usan la MISMA regla de precio y de agotado (se comparan producto por
-//     producto: R1 #13 a).
+//     producto: R1 #14 a).
 //   · La Edge Function: allowlist de acciones y claves, origen, tamaño, el error propio PT400 (los
 //     demás salen genéricos), contador caído → 503, y el límite por IP (429) con la IP guardada
-//     solo como el hash que calcula reglas.ts (R1 #13 b).
+//     solo como el hash que calcula reglas.ts (R1 #14 b).
 // ============================================================================
 
 const SLUG = 'e2e-p2-lab'
@@ -173,21 +177,22 @@ test.describe('Pedidos en línea · portal público (servidor)', () => {
 
   test('catálogo: ALLOWLIST de campos (claves exactas) y solo lo publicado, activo, con precio y de la sede', () => {
     const c = catalogo()
-    expect(Object.keys(c).sort()).toEqual(['categorias', 'disponible', 'entrega', 'estado', 'negocio'])
-    expect(Object.keys(c.negocio).sort()).toEqual(['color', 'direccion', 'lat', 'lng', 'logo_url', 'nombre', 'whatsapp'])
-    expect(Object.keys(c.estado).sort()).toEqual(['abre_en', 'motivo', 'recibe'])
-    expect(Object.keys(c.entrega).sort()).toEqual(['envio_desde', 'envio_tipo', 'pedido_minimo', 'tiempo_max', 'tiempo_min'])
+    // Las claves exactas, las mismas que los tipos del navegador (src/portal/claves.ts, R1 #14 a).
+    expect(Object.keys(c).sort()).toEqual(CLAVES_CATALOGO)
+    expect(Object.keys(c.negocio).sort()).toEqual(CLAVES_NEGOCIO)
+    expect(Object.keys(c.estado).sort()).toEqual(CLAVES_ESTADO)
+    expect(Object.keys(c.entrega).sort()).toEqual(CLAVES_ENTREGA)
     const cats = c.categorias.filter((x: { nombre: string }) => x.nombre.startsWith('E2E P2 '))
     expect(cats.map((x: { nombre: string }) => x.nombre), 'en el orden de la categoría').toEqual(['E2E P2 Comidas', 'E2E P2 Bebidas'])
-    expect(Object.keys(cats[0]).sort()).toEqual(['id', 'nombre', 'productos'])
+    expect(Object.keys(cats[0]).sort()).toEqual(CLAVES_CATEGORIA)
     const prods = Object.fromEntries(cats.flatMap((x: { productos: { nombre: string }[] }) => x.productos).map((p: { nombre: string }) => [p.nombre, p]))
     expect(Object.keys(prods).sort(), 'ni el oculto, ni el inactivo, ni el de $0, ni el insumo sin publicar')
       .toEqual(['E2E P2 Combo', 'E2E P2 Gaseosa', 'E2E P2 Perro'])
-    expect(Object.keys(prods['E2E P2 Perro']).sort()).toEqual(['agotado', 'descripcion', 'extras', 'id', 'imagen_url', 'nombre', 'precio'])
+    expect(Object.keys(prods['E2E P2 Perro']).sort()).toEqual(CLAVES_PRODUCTO)
     expect([prods['E2E P2 Perro'].precio, prods['E2E P2 Gaseosa'].precio], 'precio a domicilio o el del local').toEqual([12000, 3000])
     expect(prods['E2E P2 Perro'].extras.map((e: { nombre: string }) => e.nombre), 'ni el inactivo ni el de otra sede')
       .toEqual(['E2E P2 Pan extra', 'E2E P2 Queso'])
-    expect(Object.keys(prods['E2E P2 Perro'].extras[0]).sort()).toEqual(['agotado', 'id', 'nombre', 'precio'])
+    expect(Object.keys(prods['E2E P2 Perro'].extras[0]).sort()).toEqual(CLAVES_EXTRA)
     expect(JSON.stringify(c)).not.toContain('E2E P2 Ajeno')
     expect(c.entrega.envio_desde).toBe(2000)
     expect(c.negocio.whatsapp).toBe('573155550101')
@@ -222,7 +227,7 @@ test.describe('Pedidos en línea · portal público (servidor)', () => {
       .toEqual([true, true])
   })
 
-  test('catálogo y cotizar, producto por producto: el mismo precio y el mismo agotado (R1 #13 a)', () => {
+  test('catálogo y cotizar, producto por producto: el mismo precio y el mismo agotado (R1 #14 a)', () => {
     // Por cada producto y cada extra del catálogo: si no está agotado, cotizar 1 cobra EXACTAMENTE el
     // precio del catálogo; si está agotado, cotizar 1 da sin_stock. Devuelve las diferencias.
     const comparar = () => {
@@ -316,13 +321,12 @@ test.describe('Pedidos en línea · portal público (servidor)', () => {
     // Nunca sale CUÁNTO queda: la respuesta tiene estas claves y ninguna más, y "sin_stock" solo dice
     // que no alcanza para esa cantidad (decisión del 2026-10-15).
     const q = cotizar([linea(id.gaseosa, 4, []), linea(id.combo, 3)])
-    expect(Object.keys(q).sort()).toEqual(['disponible', 'distancia_m', 'en_zona', 'envio', 'estado', 'falta_para_minimo',
-      'lineas', 'motivos', 'pedido_minimo', 'puede_pedir', 'subtotal', 'total'])
-    expect(q.lineas.map((l) => Object.keys(l).sort().join(','))).toEqual(Array(2).fill('cantidad,extras,nombre,precio_unitario,problema,product_id,total'))
+    expect(Object.keys(q).sort()).toEqual(CLAVES_COTIZACION)
+    expect(q.lineas.map((l) => Object.keys(l).sort())).toEqual([CLAVES_LINEA, CLAVES_LINEA])
     expect(JSON.stringify(q)).not.toMatch(/unidades|stock_qty|"stock"|disponibles/)
   })
 
-  test('lo que el portal acepta es lo que el POS descuenta (R1 #12 e): el carrito justo en el límite deja el stock en 0', () => {
+  test('lo que el portal acepta es lo que el POS descuenta (R1 #13 e): el carrito justo en el límite deja el stock en 0', () => {
     // 2 combos (4 panes) + 1 perro con 1 pan extra (1 pan) = 5 panes de 5; 3 gaseosas de 3.
     const carrito = [linea(id.combo, 2), linea(id.perro, 1, [{ extra_id: id.panExtra, cantidad: 1 }]), linea(id.gaseosa, 3)]
     const q = cotizar(carrito)
@@ -429,12 +433,16 @@ test.describe('el pre-flight de portal-publico.sql', () => {
     const f4 = psql(c4).split(/\r?\n/).filter(Boolean)
     expect([f2.length, f4.length]).toEqual([6, 9])
     expect([...f2.filter((f) => !f.endsWith('|t')), ...f4.filter((f) => !f.endsWith('|t|t'))]).toEqual([])
+    // La reversa vive FUERA de git: si no está, falla (E2E_SIN_REVERSAS=1 lo permite a propósito).
     const rev = '../gvento/portal-publico-revertir.sql'
+    if (!existsSync(rev)) expect(process.env.E2E_SIN_REVERSAS, `falta ${rev}`).toBe('1')
     if (existsSync(rev)) {
-      const md5 = (txt: string) => new Set([...txt.matchAll(/'([a-z_]+\([^']*\))',\s*'([0-9a-f]{32})'/g)].map((m) => `${m[1].replace('timestamp with time zone', 'timestamptz')}=${m[2]}`))
-      const enRev = md5(readFileSync(rev, 'utf-8'))
-      const faltan = [...md5(c2), ...md5(c4)].filter((x) => !enRev.has(x))
-      expect([md5(c2).size + md5(c4).size, faltan], 'la reversa (fuera de git) exige los mismos md5').toEqual([15, []])
+      const md5 = (txt: string) => [...new Set([...txt.matchAll(/'([a-z_]+\([^']*\))',\s*'([0-9a-f]{32})'/g)]
+        .map((m) => `${m[1].replace('timestamp with time zone', 'timestamptz')}=${m[2]}`))].sort()
+      // POR IGUALDAD: un md5 viejo en cualquiera de las copias de la reversa sale como sobrante.
+      expect(md5(readFileSync(rev, 'utf-8')), 'la reversa (fuera de git) exige exactamente los mismos md5')
+        .toEqual([...new Set([...md5(c2), ...md5(c4)])].sort())
+      expect(md5(c2).length + md5(c4).length).toBe(15)
     }
   })
 })
@@ -539,7 +547,7 @@ test.describe('Pedidos en línea · Edge Function portal', () => {
     expect(r.status).toBe(429)
     expect(Number(r.headers.get('retry-after'))).toBeGreaterThan(0)
     expect((await r.json()).error).toMatch(/Demasiadas consultas/)
-    // La consulta sumó en la fila de ESE hash: la función usó la misma regla y la misma sal (R1 #13 b).
+    // La consulta sumó en la fila de ESE hash: la función usó la misma regla y la misma sal (R1 #14 b).
     expect(Number(psql(`select coalesce(max(cuenta), 0) from public.portal_limites where clave in ('${k1}', '${k2}');`))).toBe(61)
     // Contraste: otra IP, sin cuenta previa, pasa y queda contada en SU hash.
     const otra = `198.51.100.${(Date.now() % 200) + 20}`

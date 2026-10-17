@@ -49,9 +49,9 @@
 --   · La forma de la clave del límite: el CHECK portal_limites_clave y claveLimite() / ACCIONES en
 --     supabase/functions/portal/reglas.ts.
 --   · El precio y "se puede vender": los decide portal_disponibilidad (portal-config.sql, P1), la
---     ÚNICA regla (R1 #12 d), por su columna vendible; la usan el catálogo y portal_calcular (el spec
+--     ÚNICA regla (R1 #13 d), por su columna vendible; la usan el catálogo y portal_calcular (el spec
 --     compara los dos, producto por producto). Qué stock consume cada unidad lo dice portal_consumo
---     (P1, R1 #12 e); aquí solo se SUMA el carrito (puede pedir varias veces el mismo insumo) y se
+--     (P1, R1 #13 e); aquí solo se SUMA el carrito (puede pedir varias veces el mismo insumo) y se
 --     compara contra el stock: con cantidad 1 coincide con el "agotado" de la regla, para un producto
 --     solo. Si un extra consume el mismo stock que su producto (el producto ligado es el mismo o un
 --     insumo de su receta), el carrito suma los dos y puede dar sin_stock aunque el catálogo muestre
@@ -66,9 +66,9 @@
 -- NO DEDUZCAS EL ESTADO DE ESTE COMENTARIO — correlo:
 --   select to_regclass('public.portal_limites'),
 --          to_regprocedure('public.portal_calcular(uuid,jsonb,numeric,numeric,timestamptz)');
---   -- null, null = no está · con valor, con valor = está. Para saber si es EXACTAMENTE esta versión:
---   -- la consulta 4 del pre-flight (md5 de las 9 funciones). · una con valor y la otra null = estado
+--   -- null, null = no está · con valor, con valor = está · una con valor y la otra null = estado
 --   -- parcial (no debería poder pasar: todo va en una transacción): no apliques ni reviertas, avísame.
+--   -- Para saber si es EXACTAMENTE esta versión: la consulta 4 del pre-flight (md5 de las 9 funciones).
 -- ============================================================================
 
 begin;

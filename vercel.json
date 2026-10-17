@@ -1,6 +1,17 @@
 {
   "redirects": [
     {
+      "source": "/",
+      "has": [
+        {
+          "type": "host",
+          "value": "pedir.gvento.online"
+        }
+      ],
+      "destination": "/_inicio",
+      "permanent": false
+    },
+    {
       "source": "/index.html",
       "has": [
         {
@@ -8,7 +19,7 @@
           "value": "pedir.gvento.online"
         }
       ],
-      "destination": "/",
+      "destination": "/_inicio",
       "permanent": false
     },
     {
@@ -19,7 +30,7 @@
           "value": "pedir.gvento.online"
         }
       ],
-      "destination": "/",
+      "destination": "/_inicio",
       "permanent": false
     },
     {
@@ -30,7 +41,7 @@
           "value": "pedir.gvento.online"
         }
       ],
-      "destination": "/",
+      "destination": "/_inicio",
       "permanent": false
     }
   ],

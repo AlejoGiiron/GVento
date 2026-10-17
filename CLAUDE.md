@@ -355,13 +355,15 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    `pedir.gvento.online`, y `/pedir`, `/pedir/<negocio>` en los demás dominios) → `pedido.html`, otro
    paquete (`src/portal/main.tsx`). En `vercel.json` la regla del dominio va PRIMERO, con
    `has: host`; el test emula esa condición y falla ruidoso con una de otro tipo. El plugin
-   `portalDelCliente` de `vite.config.ts` hace lo mismo en dev y en `vite preview`. En ese dominio los
-   ARCHIVOS del POS (`/index.html`, `/movil.html`, `/cocina.html`) se redirigen a `/` con `redirects`
-   (Vercel sirve los archivos antes que las rewrites); el test exige un redirect por cada documento.
+   `portalDelCliente` de `vite.config.ts` hace lo mismo en dev y en `vite preview`. En ese dominio las
+   RUTAS que el disco resuelve a un documento del POS (`/`, `/index.html`, `/movil.html`,
+   `/cocina.html`) se redirigen con `redirects` a `RUTA_INICIO_PORTAL` (`/_inicio`): Vercel sirve un
+   archivo antes que las rewrites. El test exige un redirect por cada una. NO MEDIDO hasta que exista
+   el dominio: el plan lo verifica con `curl` (paso 3 de "el dominio del portal").
    Más lados del portal: la forma de la URL también la lee `slugDeRuta` (`src/portal/ruta.ts`), y el
-   dominio vive en 4 lugares (`HOST_PORTAL`, el `has` de `vercel.json`, `ORIGENES_POR_DEFECTO` en
-   `supabase/functions/portal/reglas.ts` y el secreto `PORTAL_ORIGENES`). Si cambian en un solo lado,
-   falla ruidoso ("Este link no corresponde…" o 403), pero falla.
+   dominio es `HOST_PORTAL`, del que sale `DOMINIO_PORTAL` (el link de Configuración); lo repiten el
+   `has` de `vercel.json`, `ORIGENES_POR_DEFECTO` en `supabase/functions/portal/reglas.ts` (el test
+   lo compara) y el secreto `PORTAL_ORIGENES` (ese no lo ve ninguna prueba: se configura al publicar).
    🔴 **Por qué un HTML por identidad y no JS:** Safari de iPhone toma el manifest del DOCUMENTO
    al "Agregar a inicio". Cambiar el `<link>` por JS no alcanzó: medido en un iPhone 16 Pro Max el
    2026-10-05, el ícono agregado desde `/m` abría Cocina. Por la misma razón, entrar y salir de
@@ -438,16 +440,17 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    el motivo que devuelve; nadie lo recalcula en el navegador. El portal de P2 tiene que leer la
    misma función, no copiarla.
 
-13. **El portal público — 2 contratos (agregado 2026-10-15, P2).**
+14. **El portal público — 2 contratos (agregado 2026-10-15, P2).**
    (a) La forma del carrito y de la cotización: `portal_calcular` (`supabase/portal-publico.sql`,
    allowlist de claves por línea y por extra), las claves por acción de `ACCIONES` en
    `supabase/functions/portal/reglas.ts` (la función pasa `items` sin tocarlos) y los tipos del
-   navegador en `src/portal/api.ts`. Lo vigila `tests/portal-publico.spec.ts`, que fija las claves
-   exactas de la respuesta; nada ata `api.ts` al SQL salvo esas pruebas (`tsc` no mira el SQL).
+   navegador en `src/portal/api.ts`. Las claves de esos tipos están en `src/portal/claves.ts`
+   (`Record<keyof Tipo, true>`: si el tipo cambia y la lista no, `tsc` no compila), y
+   `tests/portal-publico.spec.ts` compara esas listas con lo que devuelve el SQL.
    🔴 El precio y "se puede pedir" de un producto y de un extra salen de `portal_disponibilidad` (P1,
-   #12 d), que usan el catálogo y `portal_calcular`; cotizar (P2), crear el pedido (P3) y las
+   #13 d), que usan el catálogo y `portal_calcular`; cotizar (P2), crear el pedido (P3) y las
    promociones (P6) pasan por `portal_calcular`. Lo único propio de `portal_calcular` es SUMAR el
-   consumo del carrito (`portal_consumo`, #12 e) y compararlo con el stock. La pantalla del portal nunca calcula un precio. El spec compara,
+   consumo del carrito (`portal_consumo`, #13 e) y compararlo con el stock. La pantalla del portal nunca calcula un precio. El spec compara,
    producto por producto, el precio y el agotado del catálogo con lo que devuelve cotizar, y fija las
    claves de la respuesta: nunca sale cuántas unidades quedan.
    (b) La forma de la clave del límite por IP: el CHECK `portal_limites_clave` (`acción:` + 64 hex, o

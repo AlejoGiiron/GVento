@@ -1,11 +1,14 @@
 import { RE_SLUG } from '@/lib/portal'
-import { HOST_PORTAL } from '@/lib/identidadRutas'
+import { HOST_PORTAL, RUTA_INICIO_PORTAL } from '@/lib/identidadRutas'
+
+/** ¿Es la raíz del dominio del portal (a donde vercel.json redirige `/` y los archivos del POS)? */
+export const esInicioDelPortal = (pathname: string) => pathname.split('?')[0].split('#')[0] === RUTA_INICIO_PORTAL
 
 /**
  * El negocio de la URL del portal. Dos formas, las mismas que reescribe vercel.json:
  *   · en el dominio del portal (pedir.gvento.online): /<negocio>;
  *   · en la app, las vistas previas y el servidor local: /pedir/<negocio>.
- * El formato es el del link (RE_SLUG, R1 #12 b). null = la URL no trae un negocio válido.
+ * El formato es el del link (RE_SLUG, R1 #13 b). null = la URL no trae un negocio válido.
  */
 export function slugDeRuta(pathname: string, host: string): string | null {
   const enDominio = host.split(':')[0].toLowerCase() === HOST_PORTAL

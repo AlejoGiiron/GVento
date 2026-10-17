@@ -100,13 +100,14 @@ Nada de esto lo ve un cliente hasta que exista la pantalla del portal y un negoc
 puede cargar nada y dice "No hay conexión…" o "No pudimos atender tu consulta…": por eso la
 verificación del paso 3 va DESPUÉS de publicar el servidor de P2 (partes 1 y 2). Lo sirven
 `/pedir/<negocio>` en `g-vento.vercel.app` y en las vistas previas, y TODO `pedir.gvento.online`:
-ahí no se sirve el POS (`/m`, `/login` o `/cocina` abren el portal, y `/index.html`, `/movil.html` y
-`/cocina.html` se redirigen a `/`).
+ahí no se sirve el POS (`/m`, `/login` o `/cocina` abren el portal, y `/`, `/index.html`,
+`/movil.html` y `/cocina.html` se redirigen a `/_inicio`, que también es el portal).
 
 0. **Antes:** `nslookup -type=NS gvento.online` → tienen que salir los servidores de GoDaddy
    (`…domaincontrol.com`); si son otros, el registro va donde digan esos. `nslookup -type=CAA
    gvento.online` → si sale algún registro CAA, tiene que permitir `letsencrypt.org` (el certificado de
-   Vercel); si no sale nada, no hay restricción.
+   Vercel); si no sale nada, no hay restricción. (En Windows, si `nslookup` no entiende `CAA`:
+   `Resolve-DnsName gvento.online -Type CAA` en PowerShell.)
 1. **Vercel:** proyecto → Settings → Domains → agregar `pedir.gvento.online`. Vercel muestra el
    registro que espera. Agregar el dominio funciona en Hobby; el paso a Pro antes de abrir el portal a
    clientes es decisión tuya (el uso comercial).
@@ -123,12 +124,16 @@ ahí no se sirve el POS (`/m`, `/login` o `/cocina` abren el portal, y `/index.h
 3. **Verificar** (cuando Vercel marque el dominio como válido y emita el certificado):
    - `nslookup pedir.gvento.online` → responde con direcciones de Vercel;
    - `https://pedir.gvento.online/no-existe` → "Este negocio no está recibiendo pedidos en línea";
-   - `https://pedir.gvento.online/m` → el mismo mensaje del portal, NO el login del POS. Si sale el
+   - `https://pedir.gvento.online/` (en el navegador) → "Para pedir, abre el link que te compartió el
+     negocio", NO el login del POS;
+   - `https://pedir.gvento.online/m` → "Este link no corresponde a ningún negocio" (es el portal), NO
+     el login del POS. Si sale el
      login, la regla `has: host` de `vercel.json` no se aplicó (hay un reporte en el foro de Vercel:
      https://community.vercel.com/t/vercel-json-the-has-condition-on-host-doesnt-seem-to-work/9863):
      avísame y la paso a un middleware de Vercel, que también funciona en Hobby;
-   - `curl -sI https://pedir.gvento.online/index.html` → un 307 con `location: /` (lo mismo con
-     `/movil.html` y `/cocina.html`): en ese dominio los archivos del POS no se sirven;
+   - `curl -sI https://pedir.gvento.online/` → un 307 con `location: /_inicio` (lo mismo con
+     `/index.html`, `/movil.html` y `/cocina.html`): en ese dominio el POS no se sirve. Si `/` NO
+     redirige y abre el login, la regla no alcanzó: avísame (la salida es un middleware de Vercel);
    - `https://g-vento.vercel.app/pedir/no-existe` → el mismo mensaje.
 4. **Quitar:** borrar el dominio en Vercel y el registro en GoDaddy. El frontend puede quedarse.
 

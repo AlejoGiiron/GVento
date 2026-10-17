@@ -3,7 +3,7 @@
 // fetch simple (solo content-type: el preflight de la función no permite más encabezados). Sin
 // supabase-js y sin sesión: el cliente del portal no tiene cuenta.
 //
-// 🔴 CONTRATO R1 #13 a: estos tipos son el lado del navegador de la forma de portal_catalogo y
+// 🔴 CONTRATO R1 #14 a: estos tipos son el lado del navegador de la forma de portal_catalogo y
 // portal_cotizar (supabase/portal-publico.sql). Si cambia una clave allá, cambia aquí en la misma
 // pasada. El precio nunca se calcula aquí: se muestra el que manda el servidor.
 // ============================================================================
