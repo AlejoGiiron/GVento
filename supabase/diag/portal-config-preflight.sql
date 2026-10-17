@@ -81,7 +81,7 @@ select f.firma, md5(regexp_replace(regexp_replace(pg_get_functiondef(to_regproce
     ('actualizar_portal(jsonb)',                           '9d79a6ae85394e501d067a1902397fd9'),
     ('geo_distancia_m(numeric,numeric,numeric,numeric)',   'a44665562016bdfdc22097466577f6b4'),
     ('geo_en_poligono(numeric,numeric,jsonb)',             'c462b6ef6ac36622da383d063f511a8c'),
-    ('guardar_portal_productos(jsonb)',                    '3c36b2502e7021347b96beda7000b0a1'),
+    ('guardar_portal_productos(jsonb)',                    '40752c837c0fff0a9a8ef2a56970a80d'),
     ('pausar_pedidos_online(boolean)',                     'b49854e3158ff8010df07d580da7fe5a'),
     ('portal_config()',                                    'd29aa45ad9694123397dcd569ef83dae'),
     ('portal_consumo(uuid,uuid,uuid)',                     'e75f6b0bfb744c0219f024724e60cf3c'),
@@ -92,7 +92,7 @@ select f.firma, md5(regexp_replace(regexp_replace(pg_get_functiondef(to_regproce
     ('portal_horario_valido(jsonb)',                       '68fe9c08c32513707c0c567eaf45cbf7'),
     ('portal_mensaje_restriccion(text)',                   '342339e61f82bb48eea139fe1e22a470'),
     ('portal_poligono_valido(jsonb)',                      'd1cc825e1025523aea23099b788e4994'),
-    ('portal_productos_lista()',                           '1d0928a3c91d9165cb78bf9b7854597d'),
+    ('portal_productos_lista()',                           '8322c5650740e0fa9d4c1d1bf3dc918e'),
     ('portal_slug_disponible(text)',                       '6ac364a79a218e05b0d3ca8bffd6fc6b'),
     ('portal_tramos_validos(jsonb)',                       '31285d61c13186d008ae6906390810ba')) f(firma, esperado);
 -- DESPUÉS: 17 filas con como_este_archivo = t. Una f o vacía: lo aplicado no es este archivo (o

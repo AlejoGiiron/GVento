@@ -385,7 +385,7 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    nueva a otra columna compila y falla en prod con 42501. Antes de agregar una:
    `node scripts/escrituras-directas.mjs`, y si de verdad hace falta, un SQL NUEVO con el grant.
 
-12. **Configuración del portal de Pedidos en línea — contratos (a) a (e) (agregado 2026-10-13, P1).**
+13. **Configuración del portal de Pedidos en línea — contratos (a) a (e) (agregado 2026-10-13, P1).**
    (a) Las claves de `actualizar_portal` (`c_claves` en `supabase/portal-config.sql`) y
    `CLAVES_PORTAL` en `src/lib/portal.ts`, atada por el compilador al tipo `PortalCambios`; lo vigila
    `tests/portal-config.spec.ts` ("contrato R1"), que escribe cada clave por la RPC. Una clave nueva =
@@ -410,8 +410,10 @@ consulta antes de tocar cualquiera de ellos. *Al 2026-08-26; para reconfirmarla,
    la lista de motivos. Lo único que la pantalla mira por su cuenta es el precio a domicilio que se
    está escribiendo, que puede resolver "sin precio". **Un motivo nuevo toca 3 lados:** la función (en
    un archivo NUEVO, R5, con `vendible`/`publicable` ahí mismo), su mensaje en
-   `guardar_portal_productos` y su texto en `avisoProducto`; si falta alguno de los dos últimos, falla
-   cerrado (no deja publicar, con un texto genérico).
+   `guardar_portal_productos` y su texto en `avisoProducto`. Si le falta el mensaje o el texto, la
+   pantalla y el servidor siguen a `publicable`: un motivo que no se puede publicar falla cerrado (no
+   deja, con un texto genérico); uno que sí se puede no muestra aviso (guardar lo acepta si queda
+   `vendible`; si no, su red lo rechaza).
    (e) **El consumo de stock de una unidad — 2 lados:** `portal_consumo` (`portal-config.sql`: el
    stock propio si es simple, los insumos de la receta si es compuesto, el producto ligado al extra;
    siempre solo los que llevan stock), que usan `portal_disponibilidad` (unidades y agotado) y, en P2,

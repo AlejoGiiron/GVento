@@ -1,4 +1,4 @@
-// Casos del formato del link del portal (R1 #12 b). Los usan los DOS lados del contrato:
+// Casos del formato del link del portal (R1 #13 b). Los usan los DOS lados del contrato:
 //   · src/lib/portal.test.ts → slugValido (lo que la pantalla deja guardar);
 //   · tests/portal-config.spec.ts → portal_slug_disponible (el CHECK y el regex del servidor).
 // Los dos tienen que dar `valido` en cada caso. Van ya normalizados (minúsculas y sin espacios
@@ -21,7 +21,7 @@ export const CASOS_SLUG: readonly { slug: string; valido: boolean }[] = [
   { slug: 'a.b', valido: false },
 ]
 
-// Casos del formato del WhatsApp del local (R1 #12 c), ya normalizados (57 + 10 dígitos o algo que
+// Casos del formato del WhatsApp del local (R1 #13 c), ya normalizados (57 + 10 dígitos o algo que
 // no lo es): src/lib/portal.test.ts los pasa por RE_WHATSAPP y tests/portal-config.spec.ts por
 // actualizar_portal (el CHECK portal_sedes_whatsapp). Los dos tienen que dar `valido`.
 export const CASOS_WHATSAPP: readonly { numero: string; valido: boolean }[] = [

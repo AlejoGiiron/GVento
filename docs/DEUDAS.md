@@ -148,7 +148,7 @@ con origen externo. No construir — solo no bloquear.
   (P2) se decide aparte.
 - **El horario:** la base acepta hasta 3 franjas por día; el editor de P1 maneja UNA (lo aprobado).
   Si una sede trae más (por SQL), el editor las muestra y deja quitarlas, pero no agrega. **El portal
-  (P2) tiene que leerlas de `portal_estado`, no recalcularlas** (R1 #12).
+  (P2) tiene que leerlas de `portal_estado`, no recalcularlas** (R1 #13).
 - **Pausar sin `pedidos_online.gestionar`:** el servidor ya deja pausar con `delivery.gestionar`
   (decisión 2 de P1), pero en P1 el único botón está en Configuración › Pedidos en línea, que pide
   `pedidos_online.gestionar`. El cajero no lo ve hasta P4, cuando el botón pasa a Domicilios

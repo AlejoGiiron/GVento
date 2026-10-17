@@ -168,7 +168,7 @@ test.describe('Pedidos en línea · configuración (servidor)', () => {
     expect((await owner.rpc('portal_slug_disponible', { p_slug: LAB_SLUG })).data, 'el propio cuenta como disponible').toBe(true)
     expect((await owner.rpc('portal_slug_disponible', { p_slug: 'e2e-libre-123' })).data).toBe(true)
     expect((await owner.rpc('portal_slug_disponible', { p_slug: 'X' })).data).toBe(false)
-    // R1 #12 (b): el servidor contesta lo mismo que slugValido en los casos compartidos
+    // R1 #13 (b): el servidor contesta lo mismo que slugValido en los casos compartidos
     // (src/lib/portal.test.ts corre el lado del navegador con la misma lista).
     const servidor: string[] = []
     for (const c of CASOS_SLUG) servidor.push(`${c.slug}: ${(await owner.rpc('portal_slug_disponible', { p_slug: c.slug })).data}`)
@@ -205,7 +205,7 @@ test.describe('Pedidos en línea · configuración (servidor)', () => {
         from public.portal_sedes where restaurant_id = '${SEDE}';`)).toBe('---{}----')
   })
 
-  test('WhatsApp: el servidor acepta exactamente lo mismo que la pantalla (CASOS_WHATSAPP, R1 #12 c)', async () => {
+  test('WhatsApp: el servidor acepta exactamente lo mismo que la pantalla (CASOS_WHATSAPP, R1 #13 c)', async () => {
     expect((await owner.rpc('actualizar_portal', { p_cambios: { slug: LAB_SLUG } })).error).toBeNull()
     const servidor: string[] = []
     for (const c of CASOS_WHATSAPP) {
@@ -258,9 +258,13 @@ test.describe('Pedidos en línea · configuración (servidor)', () => {
       //    insumos, los dos agotados; con 2, ninguno.
       const agot = async () => { const l = await lista(); return [combo, insumo].map((i) => l.find((p) => p.product_id === i)?.agotado) }
       expect(await agot()).toEqual([true, false])
+      // Agotado y sin publicar: se puede marcar "En el portal" (publicable), aunque hoy no se venda.
+      const fa = (await lista()).find((p) => p.product_id === combo)
+      expect([fa?.motivo, fa?.publicable]).toEqual(['sin_publicar', true])
       // Publicar un agotado SÍ se puede (el stock es de hoy); el motivo lo dice.
       expect((await guardar([{ product_id: combo, publicado: true, precio_domicilio: null }])).error).toBeNull()
-      expect((await lista()).find((p) => p.product_id === combo)?.motivo).toBe('agotado')
+      const fp = (await lista()).find((p) => p.product_id === combo)
+      expect([fp?.motivo, fp?.publicable], 'publicado y agotado: sigue siendo publicable').toEqual(['agotado', true])
       expect((await guardar([{ product_id: combo, publicado: false, precio_domicilio: null }])).error).toBeNull()
       psql(`update public.products set stock_qty = 0 where id = '${insumo}';`)
       expect(await agot()).toEqual([true, true])
@@ -403,7 +407,10 @@ test.describe('el pre-flight de portal-config.sql', () => {
     const filas = psql(c6).split(/\r?\n/).filter(Boolean)
     expect(filas.length).toBe(17)
     expect(filas.filter((f) => !f.endsWith('|t'))).toEqual([])
+    // La reversa vive FUERA de git, en la carpeta principal. Si no está, la prueba falla (no se salta
+    // en silencio); E2E_SIN_REVERSAS=1 lo permite a propósito (otro clon, otra máquina).
     const rev = '../gvento/portal-config-revertir.sql'
+    if (!existsSync(rev)) expect(process.env.E2E_SIN_REVERSAS, `falta ${rev}`).toBe('1')
     if (existsSync(rev)) {
       const md5 = (txt: string) => [...txt.matchAll(/'([a-z_]+\([^']*\))',\s*'([0-9a-f]{32})'/g)].map((m) => `${m[1]}=${m[2]}`).sort()
       expect(md5(c6).length, 'la consulta 6 trae sus 17 pares').toBe(17)

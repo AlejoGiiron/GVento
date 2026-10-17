@@ -81,7 +81,7 @@ export function SeccionProductosPortal() {
                   // se mira aquí es el precio a domicilio que se está escribiendo (todavía no guardado),
                   // que puede resolver "sin precio"; al guardar decide el servidor.
                   const puede = sePuedePublicar(p.publicable, p.motivo, precioDom)
-                  const aviso = avisoProducto(p.motivo, precioDom, f.publicado, p.agotado)
+                  const aviso = avisoProducto(p.motivo, precioDom, f.publicado, p.agotado, p.publicable)
                   const notaTexto = aviso || (precioDom !== null && precioDom !== p.precio_local ? 'Precio distinto a domicilio' : '')
                   const notaColor = p.agotado && puede ? '#b91c1c' : !aviso && precioDom !== null ? VERDE : '#64748b'
                   return (

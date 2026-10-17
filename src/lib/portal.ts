@@ -75,23 +75,29 @@ export interface ProductoPortal {
  * a domicilio escrito es > 0.
  */
 export function sePuedePublicar(publicable: boolean, motivo: string | null, precioEscrito: number | null): boolean {
-  return publicable || (motivo === 'sin_precio' && precioEscrito !== null && precioEscrito > 0)
+  return publicable || (motivo === 'sin_precio' && precioEscritoResuelve(precioEscrito))
+}
+
+/** El precio a domicilio que se está escribiendo resuelve "sin precio" (un solo lugar para la regla). */
+export function precioEscritoResuelve(precioEscrito: number | null): boolean {
+  return precioEscrito !== null && precioEscrito > 0
 }
 
 /**
  * El aviso de la fila, por el motivo de la regla. Un motivo desconocido tiene su texto genérico.
  * `agotado` es la columna de la regla: un producto sin publicar también avisa que hoy está agotado.
  */
-export function avisoProducto(motivo: string | null, precioEscrito: number | null, publicado: boolean, agotado = false): string {
+export function avisoProducto(motivo: string | null, precioEscrito: number | null, publicado: boolean, agotado = false, publicable = false): string {
   if (motivo === 'categoria_inactiva') {
     return publicado ? 'Su categoría está desactivada en el POS: no sale en el portal. Despublícalo para guardar cambios.'
       : 'Su categoría está desactivada en el POS: no sale en el portal'
   }
   if (motivo === 'inactivo') return 'Inactivo en el POS: no sale en el portal'
-  if (motivo === 'sin_precio') return precioEscrito !== null && precioEscrito > 0 ? '' : 'No se publica: no tiene precio'
+  if (motivo === 'sin_precio') return precioEscritoResuelve(precioEscrito) ? '' : 'No se publica: no tiene precio'
   if (motivo === 'agotado') return 'Agotado hoy · no se puede pedir'
   if (motivo === null || motivo === 'sin_publicar') return agotado ? 'Agotado hoy · no se puede pedir' : ''
-  return 'No se puede publicar en el portal'
+  // Un motivo que la pantalla no conoce: el texto sigue a lo que decide el servidor.
+  return publicable ? (agotado ? 'Agotado hoy · no se puede pedir' : '') : 'No se puede publicar en el portal'
 }
 
 export interface CambioProducto {
@@ -254,7 +260,7 @@ export const RE_COLOR = /^#[0-9a-f]{6}$/
 // ── WhatsApp del local ──
 
 /**
- * El mismo formato que el CHECK portal_sedes_whatsapp (R1 #12 c, casos en CASOS_WHATSAPP):
+ * El mismo formato que el CHECK portal_sedes_whatsapp (R1 #13 c, casos en CASOS_WHATSAPP):
  * 57 + celular (3 + 9 dígitos) o fijo (60 + indicativo de 1 a 8 + 7 dígitos).
  */
 export const RE_WHATSAPP = /^57(3\d{9}|60[1-8]\d{7})$/

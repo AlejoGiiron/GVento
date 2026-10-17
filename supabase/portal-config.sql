@@ -312,7 +312,7 @@ revoke all on table public.portal_productos from public, anon, authenticated;
 -- Devuelve (product_id, cantidad) de cada producto CON stock que se descuenta: el propio si es simple
 -- y lleva stock; los insumos con stock de la receta si es compuesto (cantidad = la de la receta); el
 -- producto ligado al extra si lleva stock. Es la misma regla con la que descuenta el POS
--- (add_order_items_with_extras, R1 #12 e). Sin filas = no consume stock (sin límite).
+-- (add_order_items_with_extras, R1 #13 e). Sin filas = no consume stock (sin límite).
 -- La usan portal_disponibilidad (cuántas unidades quedan) y portal_calcular (la demanda del carrito, P2).
 create function public.portal_consumo(p_sede uuid, p_producto uuid, p_extra uuid default null)
 returns table (product_id uuid, cantidad integer)
@@ -336,7 +336,7 @@ as $$
    where p_extra is not null and ex.id = p_extra and ex.restaurant_id = p_sede
 $$;
 
--- 🔴 LA REGLA ÚNICA de "se puede vender en el portal" (R1 #12 d). La usan portal_faltantes_de,
+-- 🔴 LA REGLA ÚNICA de "se puede vender en el portal" (R1 #13 d). La usan portal_faltantes_de,
 -- portal_productos_lista y guardar_portal_productos (P1), y el catálogo y el cálculo del portal (P2).
 --   · p_extra null → el PRODUCTO: precio = el de domicilio o el del local. motivo, en este orden:
 --     no_existe (no es de la sede), inactivo, categoria_inactiva, sin_precio, sin_publicar, agotado.
@@ -725,8 +725,8 @@ begin
     raise exception 'No tienes permiso para configurar los pedidos en línea';
   end if;
   return query
-    -- agotado y motivo, de la regla única: la pantalla no decide nada por su cuenta (salvo el precio
-    -- que se está escribiendo, ver SeccionProductosPortal.tsx).
+    -- agotado, motivo y publicable, de la regla única: la pantalla no decide nada por su cuenta (salvo
+    -- el precio que se está escribiendo, ver SeccionProductosPortal.tsx).
     select p.id, p.name, c.name, p.price, pp.precio_domicilio, coalesce(pp.publicado, false),
            d.agotado, d.motivo, d.publicable
       from public.products p
@@ -754,7 +754,7 @@ declare
   v_activo    boolean;
   v_faltantes text[];
   v_motivo    text;
-  v_publicable boolean;
+  v_vendible  boolean;
 begin
   if auth.uid() is null then raise exception 'No hay sesión'; end if;
   if v_sede is null then raise exception 'No tienes una sede activa'; end if;
@@ -805,7 +805,7 @@ begin
     -- Publicar exige que la regla única lo deje vender, salvo por el stock de hoy (ya con el precio a
     -- domicilio guardado). Cualquier otro motivo, también uno que no esté aquí, rechaza (fail-closed).
     if v_publicado then
-      select d.motivo, d.publicable into v_motivo, v_publicable from portal_disponibilidad(v_sede, v_id) d;
+      select d.motivo, d.vendible into v_motivo, v_vendible from portal_disponibilidad(v_sede, v_id) d;
       if not found then
         raise exception '"%" no se puede publicar en el portal. No se guardó nada.', v_prod.name;
       elsif v_motivo = 'inactivo' then
@@ -814,9 +814,10 @@ begin
         raise exception '"%" es de una categoría desactivada en el POS: no se puede publicar. No se guardó nada.', v_prod.name;
       elsif v_motivo = 'sin_precio' then
         raise exception '"%" no tiene precio: no se puede publicar. No se guardó nada.', v_prod.name;
-      -- Red para un motivo NUEVO sin mensaje propio: hoy ninguna entrada llega aquí (los que no se
-      -- pueden publicar caen en las ramas de arriba), así que su mutante sobrevive a propósito.
-      elsif not v_publicable then
+      -- Red para un motivo NUEVO sin mensaje propio: ya guardado como publicado, tiene que quedar
+      -- VENDIBLE (`is not true`: un null también rechaza). Hoy ninguna entrada llega aquí (los que no
+      -- se pueden publicar caen en las ramas de arriba), así que su mutante sobrevive a propósito.
+      elsif v_vendible is not true then
         raise exception '"%" no se puede publicar en el portal. No se guardó nada.', v_prod.name;
       end if;
     end if;

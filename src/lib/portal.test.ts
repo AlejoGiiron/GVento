@@ -105,6 +105,9 @@ describe('productos del portal: la pantalla decide con el motivo de la regla del
     expect(avisoProducto('categoria_inactiva', null, false)).not.toMatch(/Despublícalo/)
     expect([avisoProducto('sin_precio', null, false), avisoProducto('sin_precio', 5000, false)]).toEqual(['No se publica: no tiene precio', ''])
     expect(avisoProducto('motivo_nuevo', null, false)).toBe('No se puede publicar en el portal')
+    // Contraste: un motivo nuevo que el servidor SÍ deja publicar no dice que no se puede.
+    expect([avisoProducto('motivo_nuevo', null, false, false, true), avisoProducto('motivo_nuevo', null, false, true, true)])
+      .toEqual(['', 'Agotado hoy · no se puede pedir'])
     expect([avisoProducto(null, null, true), avisoProducto('sin_publicar', null, false)]).toEqual(['', ''])
     // Sin publicar pero agotado hoy: también avisa (la regla pone sin_publicar antes que agotado).
     expect([avisoProducto('sin_publicar', null, false, true), avisoProducto(null, null, true, true)])
